@@ -421,6 +421,26 @@ export function signIn() {
   }, 500);
 }
 
+/* ─── IMS library sign-in (Sidekick-style popup) ─── */
+
+/**
+ * Sign in using the IMS library's built-in popup flow.
+ * adobeIMS.signIn() opens a popup → Adobe-hosted callback → postMessage token back.
+ * No redirect URI registration needed for the host app's domain.
+ */
+export function imsSignIn() {
+  if (window.adobeIMS) {
+    try {
+      window.adobeIMS.signIn();
+      return;
+    } catch (err) {
+      console.warn('[IMS] adobeIMS.signIn() failed, trying legacy popup:', err);
+    }
+  }
+  // Fallback: legacy popup if IMS library not loaded yet
+  signIn();
+}
+
 /* ─── Sign out ─── */
 
 export function signOut() {
@@ -487,6 +507,19 @@ export async function loadIms() {
             resolve({ anonymous: true });
           }
         }
+      },
+      onAccessToken(token) {
+        console.log('[IMS] onAccessToken — token received via popup');
+        if (token?.token) {
+          localStorage.setItem('ew-ims-token', token.token);
+          localStorage.setItem('ew-ims', 'true');
+          window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
+        }
+      },
+      onAccessTokenHasExpired() {
+        console.log('[IMS] Token expired');
+        localStorage.removeItem('ew-ims-token');
+        window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: false } }));
       },
       onError: (err) => {
         clearTimeout(timeout);

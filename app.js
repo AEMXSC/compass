@@ -9,7 +9,7 @@
  * 5. Speed of iteration (update system prompts same day, not next quarter)
  */
 
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, startPkceLogin, handlePkceCallback } from './ims.js?v=25';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, imsSignIn } from './ims.js?v=26';
 import * as ai from './ai.js?v=24';
 import { TOOL_AGENT_MAP } from './ai.js?v=24';
 import * as da from './da-client.js?v=24';
@@ -3587,8 +3587,8 @@ if (authBtn) {
       signOut();
       updateAuthUI();
     } else {
-      // OAuth PKCE flow — redirects to Adobe IMS login
-      startPkceLogin();
+      // IMS library popup (Sidekick-style) — no redirect needed
+      imsSignIn();
     }
   });
 }
@@ -3669,10 +3669,12 @@ if (resizeHandle && panels) {
 // Home card click → switch to editor + trigger flow
 document.querySelectorAll('.home-card').forEach((card) => {
   card.addEventListener('click', () => {
-    const flow = card.dataset.flow;
+    const prompt = card.dataset.prompt;
     switchView('editor');
-    const fn = FLOWS[flow];
-    if (fn) setTimeout(() => fn(), 300);
+    if (prompt && chatInput) {
+      chatInput.value = prompt;
+      chatInput.focus();
+    }
   });
 });
 
@@ -4613,12 +4615,6 @@ Body Text (excerpt): ${bodyText}`;
 
 /* ── Init ── */
 async function init() {
-  // Handle OAuth PKCE callback (?code= in URL) — must happen before any other auth logic
-  const wasCallback = await handlePkceCallback();
-  if (wasCallback) {
-    console.log('[EW] PKCE callback handled — signed in');
-  }
-
   // Configure DA client from dynamic org config
   da.configure({ org: AEM_ORG.orgId, repo: AEM_ORG.repo, branch: AEM_ORG.branch });
 
