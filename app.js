@@ -593,12 +593,25 @@ if (relayOpenDA) {
   });
 }
 
-// Listen for auth changes (from relay postMessage)
-window.addEventListener('ew-auth-change', (e) => {
-  updateAuthUI();
+// Listen for auth changes (from PKCE callback, relay, IMS library)
+window.addEventListener('ew-auth-change', async (e) => {
   if (e.detail?.signedIn) {
+    // Reset MCP state so it re-initializes with fresh IMS token
     da.resetMcpState?.();
+
+    // Fetch user profile if not already cached
+    if (!getProfile()) {
+      await fetchUserProfile();
+    }
+
+    // Pre-warm DA MCP session so first edit is fast
+    try {
+      console.log('[Auth] Signed in — warming DA MCP session...');
+      const available = await da.isAuthenticated();
+      console.log('[Auth] DA MCP ready:', available);
+    } catch { /* ignore — will retry on first tool call */ }
   }
+  updateAuthUI();
 });
 
 /* ── Brand Governance Admin ── */
