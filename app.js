@@ -9,10 +9,10 @@
  * 5. Speed of iteration (update system prompts same day, not next quarter)
  */
 
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, startPkceLogin, handlePkceCallback } from './ims.js?v=27';
-import * as ai from './ai.js?v=24';
-import { TOOL_AGENT_MAP } from './ai.js?v=24';
-import * as da from './da-client.js?v=24';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, startPkceLogin, handlePkceCallback } from './ims.js?v=29';
+import * as ai from './ai.js?v=29';
+import { TOOL_AGENT_MAP } from './ai.js?v=29';
+import * as da from './da-client.js?v=29';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
 import { detectSiteMention } from './known-sites.js';
@@ -1536,35 +1536,27 @@ async function handleRealChat(text, file) {
     try {
       const result = JSON.parse(resultStr);
 
-      // Local write mode (AEMCoder pattern) — content saved, refresh from aem.page
+      // GitHub write — content committed, refresh from aem.page after CDN propagation
       if (result._action === 'local_write' && result._preview_path) {
         const path = result._preview_path;
         setTimeout(() => {
           navigateToPage(path);
-          showToast(`Page ${path} saved — preview refreshed`, 'success');
-        }, 1500);
+          showToast(`Page ${path} saved via GitHub — preview refreshed`, 'success');
+        }, 2500);
       }
 
-      // Ephemeral preview fallback — render HTML directly in iframe
-      // Module scripts can't load cross-origin in srcdoc, so refresh from aem.page instead
-      if (result._action === 'local_preview' && result._preview_path) {
-        const path = result._preview_path;
-        setTimeout(() => {
-          navigateToPage(path);
-          showToast(`Preview: ${path}`, 'success');
-        }, 1500);
-      }
-
-      // DA write mode — refresh from aem.page CDN
+      // DA MCP write — content saved to DA, refresh after admin preview propagates
       if (result._action === 'refresh_preview' && result._preview_path) {
         const path = result._preview_path;
+        showToast(`Page ${path} saved — refreshing preview...`, 'success');
         setTimeout(() => {
           navigateToPage(path);
-          showToast(result.status === 'written'
-            ? `Page ${path} saved to DA & preview refreshed`
-            : `Preview refreshed for ${path}`,
-          result.status === 'error' ? 'error' : 'success');
-        }, 1500);
+        }, 3500);
+      }
+
+      // Auth required — no write happened, tell the user clearly
+      if (result._action === 'auth_required') {
+        showToast('Sign in with Adobe to enable content editing', 'error');
       }
       if (result.status === 'published' && result.live_url) {
         showToast(`Published to ${result.live_url}`, 'success');

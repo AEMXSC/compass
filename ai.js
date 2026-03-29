@@ -1057,6 +1057,38 @@ async function executeTool(name, input) {
       }
       if (!pageUrl) return JSON.stringify({ error: 'Provide url, or site_id + path.' });
 
+      // Derive page path from URL (e.g. /index, /about)
+      let pagePath = input.path;
+      if (!pagePath) {
+        try {
+          const u = new URL(pageUrl);
+          pagePath = u.pathname.replace(/\/$/, '') || '/index';
+        } catch { pagePath = '/index'; }
+      }
+
+      // ── DA MCP read (primary when signed in) ── same as Claude.ai pattern
+      if (isSignedIn()) {
+        try {
+          const org = da.getOrg();
+          const repo = da.getRepo();
+          const daPath = pagePath.replace(/\.html$/, '');
+          console.log(`[get_page_content] Reading via DA MCP: ${org}/${repo}${daPath}`);
+          const result = await da.getPage(`${daPath}.html`);
+          const html = typeof result === 'string' ? result : JSON.stringify(result);
+          const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
+          return JSON.stringify({
+            url: pageUrl,
+            source: 'DA MCP',
+            content_length: html.length,
+            html: content,
+            hint: 'Content read via DA MCP. Use edit_page_content to make changes.',
+          }, null, 2);
+        } catch (daErr) {
+          console.warn('[get_page_content] DA MCP read failed, falling back to fetch:', daErr.message);
+        }
+      }
+
+      // ── .plain.html fetch fallback ──
       const plainUrl = pageUrl.endsWith('.plain.html') ? pageUrl : pageUrl.replace(/\/?$/, '.plain.html');
       try {
         const resp = await fetch(plainUrl);
@@ -1066,10 +1098,11 @@ async function executeTool(name, input) {
           const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
           return JSON.stringify({
             url: pageUrl,
+            source: 'aem.page',
             etag,
             content_length: html.length,
             html: content,
-            hint: 'Use the etag value when calling patch_aem_page_content to avoid conflicts.',
+            hint: 'Use edit_page_content to make changes.',
           }, null, 2);
         }
         return JSON.stringify({ error: `HTTP ${resp.status} fetching ${plainUrl}` });
@@ -1169,15 +1202,52 @@ async function executeTool(name, input) {
       const previewUrl = `${baseUrl}${pagePath}`;
       const daUrl = `https://da.live/edit#/${org}/${repo}${pagePath}`;
 
-      // ── GitHub write (AEMCoder pattern) ──
+      // ── DA MCP write (primary — native path for DA-backed sites) ──
+      // Uses the DA MCP server at mcp.adobeaemcloud.com/adobe/mcp/da
+      // Requires IMS Bearer token (user must be signed in).
+      if (isSignedIn()) {
+        try {
+          console.log('[edit_page_content] Writing via DA MCP...');
+          await da.updatePage(htmlPath, input.html);
+          console.log('[edit_page_content] DA MCP write succeeded');
+
+          let previewStatus = 'skipped';
+          if (input.trigger_preview !== false) {
+            try {
+              const previewResp = await da.previewPage(pagePath);
+              previewStatus = previewResp.ok ? 'success' : `pending (${previewResp.status})`;
+              console.log('[edit_page_content] Preview trigger:', previewStatus);
+            } catch (previewErr) {
+              previewStatus = `pending: ${previewErr.message}`;
+            }
+          }
+
+          return JSON.stringify({
+            status: 'written',
+            page_path: pagePath,
+            content_length: input.html.length,
+            da_source: `${da.getBasePath()}${htmlPath}`,
+            preview_url: previewUrl,
+            da_edit_url: daUrl,
+            preview_status: previewStatus,
+            source: 'DA MCP',
+            message: `Page ${pagePath} saved via DA MCP. Preview refreshing.`,
+            _action: 'refresh_preview',
+            _preview_path: pagePath,
+          }, null, 2);
+        } catch (daErr) {
+          console.warn('[edit_page_content] DA MCP write failed:', daErr.message);
+          // Fall through to GitHub
+        }
+      }
+
+      // ── GitHub write fallback (AEMCoder pattern) ──
       // Write directly to DA's backing GitHub repo via GitHub Contents API.
-      // The GitHub PAT is the only credential needed — no IMS, no DA auth.
       if (hasGitHubToken()) {
         try {
           const result = await ghWriteContent(org, repo, pagePath, input.html, null, branch);
           console.log('[edit_page_content] GitHub write:', result.commitSha);
 
-          // Try to trigger AEM preview (may fail for DA sites — that's OK)
           let previewStatus = 'skipped';
           if (input.trigger_preview !== false) {
             try {
@@ -1197,62 +1267,30 @@ async function executeTool(name, input) {
             preview_url: previewUrl,
             da_edit_url: daUrl,
             preview_status: previewStatus,
+            source: 'GitHub API',
             message: `Content committed to ${org}/${repo}${htmlPath}. Preview updating.`,
             _action: 'local_write',
             _preview_path: pagePath,
-            _preview_html: input.html,
-            _preview_base: baseUrl,
           }, null, 2);
         } catch (ghErr) {
           console.warn('[edit_page_content] GitHub write failed:', ghErr.message);
-          // Fall through to DA or srcdoc fallback
         }
       }
 
-      // ── DA write fallback (if signed in) ──
-      if (isSignedIn()) {
-        try {
-          await da.updatePage(htmlPath, input.html);
-          let previewStatus = 'skipped';
-          if (input.trigger_preview !== false) {
-            try {
-              const previewResp = await da.previewPage(pagePath);
-              previewStatus = previewResp.ok ? 'success' : `failed (${previewResp.status})`;
-            } catch (previewErr) {
-              previewStatus = `failed: ${previewErr.message}`;
-            }
-          }
-          return JSON.stringify({
-            status: 'written',
-            page_path: pagePath,
-            content_length: input.html.length,
-            da_source: `${da.getBasePath()}${htmlPath}`,
-            preview_url: previewUrl,
-            da_edit_url: daUrl,
-            preview_status: previewStatus,
-            message: `Page written to DA. Preview ${previewStatus}.`,
-            _action: 'refresh_preview',
-            _preview_path: pagePath,
-          }, null, 2);
-        } catch (daErr) {
-          console.warn('[edit_page_content] DA write also failed:', daErr.message);
-        }
-      }
-
-      // ── srcdoc fallback (last resort — ephemeral preview) ──
+      // ── No auth — return clear error (never fake success) ──
+      const hints = [];
+      if (!isSignedIn()) hints.push('Click "Sign In" to authenticate with Adobe IMS — this enables DA MCP writes');
+      if (!hasGitHubToken()) hints.push('Or add a GitHub Personal Access Token in Settings');
+      console.error('[edit_page_content] No auth available — cannot write content');
       return JSON.stringify({
-        status: 'local_preview',
+        status: 'error',
+        error: 'Authentication required to edit content.',
         page_path: pagePath,
-        content_length: input.html.length,
-        html: input.html,
-        base_url: baseUrl,
         preview_url: previewUrl,
         da_edit_url: daUrl,
-        message: `Content rendered in preview for ${pagePath}. Add a GitHub token in Settings for persistent writes.`,
-        _action: 'local_preview',
-        _preview_path: pagePath,
-        _preview_html: input.html,
-        _preview_base: baseUrl,
+        how_to_fix: hints,
+        message: `Cannot save changes to ${pagePath} — no authentication. ${hints.join('. ')}.`,
+        _action: 'auth_required',
       }, null, 2);
     }
 
