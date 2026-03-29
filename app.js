@@ -9,10 +9,10 @@
  * 5. Speed of iteration (update system prompts same day, not next quarter)
  */
 
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, fetchUserProfile } from './ims.js?v=31';
-import * as ai from './ai.js?v=31';
-import { TOOL_AGENT_MAP } from './ai.js?v=31';
-import * as da from './da-client.js?v=31';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js?v=32';
+import * as ai from './ai.js?v=32';
+import { TOOL_AGENT_MAP } from './ai.js?v=32';
+import * as da from './da-client.js?v=32';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
 import { detectSiteMention } from './known-sites.js';
@@ -4653,6 +4653,10 @@ Body Text (excerpt): ${bodyText}`;
 
 /* ── Init ── */
 async function init() {
+  // Handle PKCE callback (?code= in URL) — must run before IMS library init
+  const wasCallback = await handlePkceCallback();
+  if (wasCallback) console.log('[EW] PKCE callback handled — signed in');
+
   // Configure DA client from dynamic org config
   da.configure({ org: AEM_ORG.orgId, repo: AEM_ORG.repo, branch: AEM_ORG.branch });
 

@@ -1,12 +1,8 @@
 /*
- * IMS Authentication Module — simplified
+ * IMS Authentication Module
  *
- * Uses the Adobe IMS library directly, like AEMCoder.
- *
- * Sign-in:  window.adobeIMS.signIn()  — handles PKCE, redirect, token exchange
- * Sign-out: window.adobeIMS.signOut()
- * Token:    window.adobeIMS.getAccessToken()
- * Profile:  window.adobeIMS.getProfile()
+ * PKCE OAuth sign-in (this client only supports authorization_code grant).
+ * IMS library loaded for session management + token validation.
  *
  * Fallback: Manual token paste in Settings, bookmarklet relay.
  */
@@ -17,6 +13,9 @@ const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
 const IMS_ENV = 'prod';
 const IMS_TIMEOUT = 8000;
 
+const IMS_AUTH_URL = 'https://ims-na1.adobelogin.com/ims/authorize/v2';
+const IMS_TOKEN_URL = 'https://ims-na1.adobelogin.com/ims/token/v3';
+const PKCE_PENDING_KEY = 'ew-pkce-pending';
 const PROFILE_STORAGE_KEY = 'ew-ims-profile';
 
 let imsReady = null;
@@ -34,18 +33,50 @@ function loadScript(src) {
   });
 }
 
+/* ─── PKCE helpers ─── */
+
+function base64urlEncode(bytes) {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function generateCodeVerifier() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return base64urlEncode(array);
+}
+
+async function generateCodeChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return base64urlEncode(new Uint8Array(digest));
+}
+
+function generateState() {
+  const array = new Uint8Array(16);
+  crypto.getRandomValues(array);
+  return base64urlEncode(array);
+}
+
+function getRedirectUri() {
+  return window.location.origin + window.location.pathname;
+}
+
 /* ─── Token access ─── */
 
 export function getToken() {
-  // 1. IMS library token (primary — set by signIn flow)
+  // 1. Our PKCE / manual / relay token
+  const stored = localStorage.getItem('ew-ims-token');
+  if (stored) return stored;
+  // 2. IMS library token (if it ever picks up a session)
   if (window.adobeIMS) {
     try {
       const t = window.adobeIMS.getAccessToken();
       if (t?.token) return t.token;
     } catch { /* ignore */ }
   }
-  // 2. Manual/relay token (fallback for Settings paste, bookmarklet)
-  return localStorage.getItem('ew-ims-token') || null;
+  return null;
 }
 
 export function getProfile() {
@@ -59,15 +90,104 @@ export function getProfile() {
 
 export function isSignedIn() { return !!getToken(); }
 
-/* ─── Sign in / out ─── */
+/* ─── Sign in (PKCE redirect) ─── */
 
-export function signIn() {
-  if (window.adobeIMS) {
-    window.adobeIMS.signIn();
-  } else {
-    console.error('[IMS] Library not loaded — cannot sign in');
+export async function signIn() {
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+  const state = generateState();
+
+  sessionStorage.setItem(PKCE_PENDING_KEY, JSON.stringify({ codeVerifier, state }));
+
+  const params = new URLSearchParams({
+    client_id: IMS_CLIENT_ID,
+    scope: IMS_SCOPE,
+    response_type: 'code',
+    redirect_uri: getRedirectUri(),
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    state,
+    locale: 'en_US',
+  });
+
+  window.location.assign(`${IMS_AUTH_URL}?${params}`);
+}
+
+/* ─── PKCE callback (exchange ?code= for token) ─── */
+
+export async function handlePkceCallback() {
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get('code');
+  if (!code) return false;
+
+  const pendingRaw = sessionStorage.getItem(PKCE_PENDING_KEY);
+  if (!pendingRaw) {
+    console.warn('[IMS] PKCE callback but no pending verifier');
+    cleanCallbackUrl();
+    return false;
+  }
+
+  const { codeVerifier, state: expectedState } = JSON.parse(pendingRaw);
+  const state = url.searchParams.get('state');
+
+  if (state !== expectedState) {
+    console.error('[IMS] PKCE state mismatch — possible CSRF');
+    sessionStorage.removeItem(PKCE_PENDING_KEY);
+    cleanCallbackUrl();
+    return false;
+  }
+
+  try {
+    const resp = await fetch(IMS_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: IMS_CLIENT_ID,
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: getRedirectUri(),
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      console.error(`[IMS] Token exchange failed (${resp.status}):`, errText);
+      sessionStorage.removeItem(PKCE_PENDING_KEY);
+      cleanCallbackUrl();
+      return false;
+    }
+
+    const data = await resp.json();
+    localStorage.setItem('ew-ims-token', data.access_token);
+    localStorage.setItem('ew-ims', 'true');
+    sessionStorage.removeItem(PKCE_PENDING_KEY);
+    cleanCallbackUrl();
+
+    // Fetch profile immediately
+    await fetchUserProfile();
+
+    console.log('[IMS] PKCE login successful');
+    window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
+    return true;
+  } catch (err) {
+    console.error('[IMS] PKCE token exchange error:', err);
+    sessionStorage.removeItem(PKCE_PENDING_KEY);
+    cleanCallbackUrl();
+    return false;
   }
 }
+
+function cleanCallbackUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('code');
+  url.searchParams.delete('state');
+  url.searchParams.delete('error');
+  const clean = url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : '') + url.hash;
+  history.replaceState(null, '', clean);
+}
+
+/* ─── Sign out ─── */
 
 export function signOut() {
   localStorage.removeItem('ew-ims-token');
@@ -83,31 +203,10 @@ export function signOut() {
 /* ─── Profile ─── */
 
 export async function fetchUserProfile() {
-  // Try IMS library first
-  if (window.adobeIMS) {
-    try {
-      const imsProfile = await window.adobeIMS.getProfile();
-      if (imsProfile) {
-        profile = {
-          displayName: imsProfile.displayName || imsProfile.name || '',
-          email: imsProfile.email || '',
-          firstName: imsProfile.first_name || '',
-          lastName: imsProfile.last_name || '',
-          userId: imsProfile.userId || '',
-        };
-        localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-        console.log('[IMS] Profile loaded:', profile.displayName, profile.email);
-        return profile;
-      }
-    } catch (err) {
-      console.warn('[IMS] Profile fetch via library failed:', err.message);
-    }
-  }
-
-  // Fallback: direct API call (for manual/relay tokens)
   const token = getToken();
   if (!token) return null;
 
+  // Return cached
   const cached = localStorage.getItem(PROFILE_STORAGE_KEY);
   if (cached) {
     try { profile = JSON.parse(cached); return profile; } catch { /* ignore */ }
@@ -127,6 +226,7 @@ export async function fetchUserProfile() {
       userId: data.userId || '',
     };
     localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    console.log('[IMS] Profile loaded:', profile.displayName, profile.email);
     return profile;
   } catch {
     return null;
@@ -179,14 +279,6 @@ export function relaySignIn() {
 export async function loadIms() {
   if (imsReady) return imsReady;
 
-  // Clean up error params from failed OAuth redirects (breaks redirect loops)
-  const url = new URL(window.location.href);
-  if (url.searchParams.has('error')) {
-    console.warn('[IMS] OAuth error in URL:', url.searchParams.get('error'));
-    url.searchParams.delete('error');
-    history.replaceState(null, '', url.pathname + (url.search || '') + (url.hash || ''));
-  }
-
   // Check for token in URL hash (from bookmarklet that opens EW directly)
   const hash = window.location.hash;
   if (hash.includes('access_token=')) {
@@ -209,51 +301,26 @@ export async function loadIms() {
       client_id: IMS_CLIENT_ID,
       scope: IMS_SCOPE,
       locale: 'en_US',
-      response_type: 'code',
       autoValidateToken: true,
       environment: IMS_ENV,
       useLocalStorage: true,
       onReady: async () => {
         clearTimeout(timeout);
         console.log('[IMS] onReady fired');
-        let accessToken = null;
-        try { accessToken = window.adobeIMS.getAccessToken(); } catch { /* ignore */ }
 
-        if (accessToken?.token) {
-          console.log('[IMS] Token available from IMS library');
+        // Check if we have a token (from PKCE callback or manual)
+        if (isSignedIn()) {
           localStorage.setItem('ew-ims', 'true');
-
-          // Fetch profile via IMS library
-          try {
-            const imsProfile = await window.adobeIMS.getProfile();
-            if (imsProfile) {
-              profile = {
-                displayName: imsProfile.displayName || imsProfile.name || '',
-                email: imsProfile.email || '',
-                firstName: imsProfile.first_name || '',
-                lastName: imsProfile.last_name || '',
-                userId: imsProfile.userId || '',
-              };
-              localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-            }
-          } catch { /* profile fetch optional */ }
-
           window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
-          resolve({ anonymous: false, profile });
+          resolve({ anonymous: false });
         } else {
-          // No IMS library token — check manual/relay token
-          const manual = localStorage.getItem('ew-ims-token');
-          if (manual) {
-            localStorage.setItem('ew-ims', 'true');
-            resolve({ anonymous: false });
-          } else {
-            resolve({ anonymous: true });
-          }
+          resolve({ anonymous: true });
         }
       },
       onAccessToken(token) {
         console.log('[IMS] onAccessToken — token received');
         if (token?.token) {
+          localStorage.setItem('ew-ims-token', token.token);
           localStorage.setItem('ew-ims', 'true');
           window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
         }
