@@ -3751,10 +3751,54 @@ const designSelection = document.getElementById('designSelection');
 const designSelectionLabel = document.getElementById('designSelectionLabel');
 const designSelectionClear = document.getElementById('designSelectionClear');
 
-function enableDesignMode() {
+async function enableDesignMode() {
   designModeActive = true;
   if (designOverlay) designOverlay.style.display = 'block';
-  // Inject click handler into iframe
+
+  // Check if iframe is cross-origin — if so, re-render as srcdoc for DOM access
+  let isCrossOrigin = false;
+  try {
+    const doc = previewFrame?.contentDocument || previewFrame?.contentWindow?.document;
+    if (!doc || !doc.body) isCrossOrigin = true;
+  } catch { isCrossOrigin = true; }
+
+  if (isCrossOrigin && previewFrame) {
+    const path = activeResourcePath || '/';
+    const base = AEM_ORG.previewOrigin;
+    showToast('Loading page for design mode...', 'info');
+
+    // Fetch page HTML via .plain.html (bypasses CORS when same-origin fetch works)
+    await ensurePageContext();
+    const html = cachedPageHTML;
+    if (html) {
+      // Save original src so we can restore on exit
+      if (!previewFrame.dataset.designSavedSrc) {
+        previewFrame.dataset.designSavedSrc = previewFrame.src;
+      }
+      previewFrame.srcdoc = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="${base}/">
+  <link rel="stylesheet" href="${base}/styles/styles.css">
+  <script src="${base}/scripts/aem.js" type="module"><\/script>
+  <script src="${base}/scripts/scripts.js" type="module"><\/script>
+</head>
+<body>
+  <header></header>
+  <main>${html}</main>
+  <footer></footer>
+</body>
+</html>`;
+      // Wait for srcdoc to render before injecting handlers
+      previewFrame.addEventListener('load', () => injectDesignModeHandler(), { once: true });
+      return;
+    }
+    showToast('Could not load page content for design mode', 'warn');
+  }
+
+  // Same-origin — inject directly
   injectDesignModeHandler();
 }
 
@@ -3771,6 +3815,13 @@ function disableDesignMode() {
       });
     }
   } catch { /* cross-origin */ }
+
+  // Restore original iframe src if we switched to srcdoc for design mode
+  if (previewFrame?.dataset.designSavedSrc) {
+    previewFrame.removeAttribute('srcdoc');
+    previewFrame.src = previewFrame.dataset.designSavedSrc;
+    delete previewFrame.dataset.designSavedSrc;
+  }
 }
 
 function injectDesignModeHandler() {
