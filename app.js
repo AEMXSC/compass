@@ -4159,6 +4159,19 @@ function switchProfile(profileId) {
   if (customerNameEl) customerNameEl.textContent = AEM_ORG.name;
   if (customerMetaEl) customerMetaEl.innerHTML = `&bull; ${AEM_ORG.tier} &bull; ${AEM_ORG.env}`;
 
+  // Update customer logo in header
+  const profile = getActiveProfile();
+  const logoEl = document.getElementById('customerLogo');
+  if (logoEl) {
+    if (profile.logoUrl) {
+      logoEl.src = profile.logoUrl;
+      logoEl.alt = profile.name;
+      logoEl.style.display = '';
+    } else {
+      logoEl.style.display = 'none';
+    }
+  }
+
   // Update active state in org selector
   document.querySelectorAll('.org-option').forEach((opt) => {
     opt.classList.toggle('active', opt.dataset.profile === profileId);
@@ -4489,6 +4502,15 @@ async function init() {
 
   // NO auto sign-in. User clicks "Sign In" button when ready.
   // This prevents any redirect to da.live.
+
+  // Set customer logo on load
+  const initProfile = getActiveProfile();
+  const initLogo = document.getElementById('customerLogo');
+  if (initLogo && initProfile.logoUrl) {
+    initLogo.src = initProfile.logoUrl;
+    initLogo.alt = initProfile.name;
+    initLogo.style.display = '';
+  }
 
   // Auto-connect default site in background (stays on Home view)
   connectSite();

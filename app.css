@@ -269,6 +269,15 @@ textarea:focus-visible,
   letter-spacing: -0.01em;
 }
 
+.customer-logo {
+  height: 20px;
+  width: auto;
+  margin-left: 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  object-fit: contain;
+}
+
 .header-right {
   display: flex;
   align-items: center;

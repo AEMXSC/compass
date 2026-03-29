@@ -17,6 +17,7 @@ export const PROFILES = {
   'aem-xsc': {
     id: 'aem-xsc',
     name: 'XSC Team Site',
+    logoUrl: '',
     orgId: 'AEMXSC',
     repo: 'xscteamsite',
     branch: 'main',
@@ -178,6 +179,7 @@ export const PROFILES = {
   'ralph-lauren': {
     id: 'ralph-lauren',
     name: 'Ralph Lauren Corporation',
+    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Ralph_Lauren_Logo.svg/200px-Ralph_Lauren_Logo.svg.png',
     orgId: 'ralphlauren',
     repo: 'corporate-site',
     branch: 'main',
@@ -351,6 +353,7 @@ Moving the corporate site from hand-coded to AEM Sites + EDS means:
   'princess-cruises': {
     id: 'princess-cruises',
     name: 'Princess Cruises',
+    logoUrl: 'https://upload.wikimedia.org/wikipedia/en/thumb/1/1e/Princess_Cruises_Logo.svg/200px-Princess_Cruises_Logo.svg.png',
     orgId: 'princess',
     repo: 'princess-eds',
     branch: 'main',
