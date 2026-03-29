@@ -1582,8 +1582,14 @@ async function handleRealChat(text, file) {
       if (result._action === 'refresh_preview' && result._preview_path) {
         const path = result._preview_path;
         showToast(`Page ${path} saved — refreshing preview...`, 'success');
+        // Force iframe reload even if same URL — bust cache with timestamp
         setTimeout(() => {
-          navigateToPage(path);
+          if (previewFrame) {
+            const url = AEM_ORG.previewOrigin + path;
+            previewFrame.src = 'about:blank';
+            setTimeout(() => { previewFrame.src = url; }, 200);
+          }
+          activeResourcePath = path;
         }, 3500);
       }
 
