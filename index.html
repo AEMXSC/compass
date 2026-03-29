@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Compass</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23e34850'><path d='M12 2L2 7l10 5 10-5-10-5z'/><path d='M2 17l10 5 10-5'/><path d='M2 12l10 5 10-5'/></svg>">
-  <link rel="stylesheet" href="app.css?v=24">
+  <link rel="stylesheet" href="app.css?v=25">
 </head>
 <body>
   <div class="workspace">
@@ -107,6 +107,17 @@
         <label class="settings-label" style="margin-top:16px">MCP Connectors</label>
         <div id="settingsConnectors" class="settings-connectors"></div>
         <div class="settings-hint">Registered connectors from Admin Console</div>
+
+        <!-- Workfront Webhook -->
+        <div class="settings-divider"></div>
+        <label class="settings-label">Workfront Integration</label>
+        <div class="settings-hint" style="margin-bottom:8px">Connect an N8N or webhook endpoint to create real Workfront approval tasks. Leave empty for simulated demo mode.</div>
+        <label class="settings-label-sm" for="workfrontWebhookInput">Webhook URL</label>
+        <div class="settings-token-row">
+          <input type="url" id="workfrontWebhookInput" class="settings-input" placeholder="https://n8n.example.com/webhook/...">
+          <button class="settings-token-btn" id="workfrontWebhookBtn" title="Set webhook">Set</button>
+        </div>
+        <div class="settings-token-status" id="workfrontWebhookStatus"></div>
 
         <!-- Brand Governance -->
         <div class="settings-divider"></div>
@@ -331,6 +342,17 @@
               <div class="home-card-body">
                 <div class="home-card-title">Speed up production<span class="home-card-menu">&#8943;</span></div>
                 <div class="home-card-desc">Pipeline check, asset search, image renditions, content variants, and optimization — all in one flow.</div>
+                <div class="home-card-status"><span class="home-card-dot"></span>Ready</div>
+              </div>
+            </div>
+
+            <div class="home-card" data-flow="demo-enterprise">
+              <div class="home-card-thumb" style="background:linear-gradient(135deg, #2a1a00 0%, #8b4513 40%, #ff8c00 100%)">
+                <div class="home-card-thumb-icon">&#128203;</div>
+              </div>
+              <div class="home-card-body">
+                <div class="home-card-title">Enterprise workflow<span class="home-card-menu">&#8943;</span></div>
+                <div class="home-card-desc">Document intake, AI compliance fix, governance gate, and Workfront approval — 3 days to 10 minutes.</div>
                 <div class="home-card-status"><span class="home-card-dot"></span>Ready</div>
               </div>
             </div>

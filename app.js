@@ -423,6 +423,62 @@ if (imsTokenHelp) {
   });
 }
 
+/* ── Workfront Webhook config ── */
+const wfWebhookBtn = document.getElementById('workfrontWebhookBtn');
+const wfWebhookInput = document.getElementById('workfrontWebhookInput');
+const wfWebhookStatus = document.getElementById('workfrontWebhookStatus');
+
+if (wfWebhookBtn && wfWebhookInput) {
+  // Populate from localStorage on load
+  const savedUrl = localStorage.getItem('ew-workfront-webhook') || '';
+  if (savedUrl) {
+    wfWebhookInput.value = savedUrl;
+    wfWebhookStatus.textContent = 'Webhook configured — tasks will be created via webhook.';
+    wfWebhookStatus.className = 'settings-token-status success';
+  }
+
+  wfWebhookBtn.addEventListener('click', async () => {
+    const url = wfWebhookInput.value.trim();
+
+    // Allow clearing the webhook
+    if (!url) {
+      localStorage.removeItem('ew-workfront-webhook');
+      wfWebhookStatus.textContent = 'Webhook cleared — using simulated mode.';
+      wfWebhookStatus.className = 'settings-token-status';
+      return;
+    }
+
+    // Basic URL validation
+    try {
+      const parsed = new URL(url);
+      if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('bad protocol');
+    } catch {
+      wfWebhookStatus.textContent = 'Invalid URL. Enter a valid https:// webhook endpoint.';
+      wfWebhookStatus.className = 'settings-token-status error';
+      return;
+    }
+
+    // Test the webhook with a ping
+    wfWebhookStatus.textContent = 'Testing webhook...';
+    wfWebhookStatus.className = 'settings-token-status';
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'ping', timestamp: new Date().toISOString() }),
+      });
+      localStorage.setItem('ew-workfront-webhook', url);
+      wfWebhookStatus.textContent = `Webhook set (${resp.status}). Workfront tasks will route here.`;
+      wfWebhookStatus.className = 'settings-token-status success';
+    } catch (err) {
+      // Store anyway — CORS might block the test but webhook could still work server-to-server
+      localStorage.setItem('ew-workfront-webhook', url);
+      wfWebhookStatus.textContent = 'Webhook saved (test failed — CORS may block browser test). Try creating a task.';
+      wfWebhookStatus.className = 'settings-token-status success';
+    }
+  });
+}
+
 /* ── Relay Sign-In Modal ── */
 const relayModal = document.getElementById('relayModal');
 const relayModalClose = document.getElementById('relayModalClose');
@@ -3260,6 +3316,47 @@ async function runDemoSpeedProduction() {
 Present each step with results so the audience sees the full production pipeline from asset to delivery.`);
 }
 
+/* ── Enterprise Workflow Demo: Doc → AI Edit → Governance → Workfront Approval ── */
+async function runDemoEnterpriseWorkflow() {
+  if (!ai.hasApiKey()) { requireApiKey(); return; }
+  addMessage('user', 'Demo: Enterprise compliance workflow — document to approval');
+  await handleRealChat(`Run a complete enterprise content compliance workflow demo. This is the T-Mobile / regulated-industry use case: a marketing document is submitted, AI reviews and fixes it, then routes it for Workfront approval.
+
+Execute these steps in sequence, using the REAL tools:
+
+**Step 1 — Document Intake** (extract_brief_content):
+Simulate receiving a marketing document that has compliance issues. Extract the structured content using extract_brief_content. The document is a product page update that:
+- Contains outdated disclaimer language
+- Has pricing claims without required footnotes
+- Uses non-inclusive language in two places
+- Is missing required accessibility alt text
+
+**Step 2 — AI Content Fix** (edit_page_content):
+Based on the issues found, show exactly what the AI would fix:
+- Update the disclaimer to current legal language
+- Add required pricing footnotes
+- Fix non-inclusive language
+- Add proper alt text for all images
+Present a clear before/after showing each fix.
+
+**Step 3 — Governance Gate** (run_governance_check):
+Run governance check on the corrected content. Call run_governance_check to get a compliance score. Show the scorecard with specific pass/fail items.
+
+**Step 4 — Workfront Approval Routing** (create_workfront_task):
+Create a Workfront approval task using create_workfront_task with:
+- title: "Content Compliance Review — Product Page Update"
+- description: Include the governance findings summary, what the AI fixed, and what needs human review
+- priority: "high"
+- assignee: First person in the approval chain
+
+**Step 5 — Summary**:
+End with a clear timeline comparison:
+- **Before**: SME submits doc → Content author manually reviews → Legal reviews → Brand reviews → Published (3-5 business days)
+- **After**: Doc submitted → AI fixes compliance in seconds → Governance gate auto-scored → Workfront task created → Approval routed (10 minutes to approval stage)
+
+This is the "what used to take 3 days now happens in 10 minutes" moment. Show every tool call so the audience sees real API responses.`);
+}
+
 const FLOWS = {
   brief: runBrief,
   governance: runGovernance,
@@ -3284,6 +3381,8 @@ const FLOWS = {
   'demo-modernize': runDemoModernizeAI,
   'demo-compliance': runDemoBrandCompliance,
   'demo-production': runDemoSpeedProduction,
+  /* Enterprise Workflow demo */
+  'demo-enterprise': runDemoEnterpriseWorkflow,
 };
 
 /* ── User Input ── */
@@ -3328,6 +3427,8 @@ function matchSpecializedFlow(text) {
   if (lower.includes('demo modernize') || lower.includes('ai-native') || lower.includes('ai discovery demo')) return runDemoModernizeAI;
   if (lower.includes('demo compliance') || lower.includes('demo brand') || lower.includes('compliance demo')) return runDemoBrandCompliance;
   if (lower.includes('demo production') || lower.includes('demo speed') || lower.includes('production demo')) return runDemoSpeedProduction;
+  if (lower.includes('demo enterprise') || lower.includes('enterprise workflow') || lower.includes('doc to approval')
+      || lower.includes('document to approval') || lower.includes('compliance workflow') || lower.includes('3 days')) return runDemoEnterpriseWorkflow;
   return null;
 }
 

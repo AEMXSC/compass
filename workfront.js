@@ -158,9 +158,59 @@ function generateAnswer(question) {
   return `I searched across your Workfront projects, tasks, and approvals. Based on current data:\n\n- **Active projects**: 8 (6 on track, 2 at risk)\n- **Your pending tasks**: 4 (2 due this week)\n- **Team velocity**: 94% of planned story points delivered last sprint\n\nWould you like me to dig deeper into any of these areas?`;
 }
 
+/* ── Webhook Config ── */
+const WF_WEBHOOK_KEY = 'ew-workfront-webhook';
+
+export function getWebhookUrl() {
+  return localStorage.getItem(WF_WEBHOOK_KEY) || '';
+}
+
+export function setWebhookUrl(url) {
+  if (url) {
+    localStorage.setItem(WF_WEBHOOK_KEY, url.trim());
+  } else {
+    localStorage.removeItem(WF_WEBHOOK_KEY);
+  }
+}
+
+export function hasWebhook() {
+  return !!getWebhookUrl();
+}
+
+/**
+ * Create a Workfront task via webhook (N8N, Zapier, etc.).
+ * POSTs the task payload; expects JSON response with at least { id, status }.
+ */
+export async function createTaskViaWebhook(payload) {
+  const url = getWebhookUrl();
+  if (!url) throw new Error('Workfront webhook URL not configured');
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'create_task',
+      ...payload,
+      timestamp: new Date().toISOString(),
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`Workfront webhook error ${resp.status}: ${errText.slice(0, 300)}`);
+  }
+
+  return resp.json();
+}
+
 /* ── Create Task (used by governance fix routing) ── */
 export async function createTask({ projectId, name, assignee, priority, description }) {
-  // In production: POST /attask/api/v17.0/task
+  // If webhook is configured, use it
+  if (hasWebhook()) {
+    return createTaskViaWebhook({ projectId, name, assignee, priority, description });
+  }
+
+  // Fallback: simulated response
   return {
     id: `TSK-${Math.floor(Math.random() * 9000 + 1000)}`,
     projectId: projectId || 'PRJ-2847',

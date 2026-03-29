@@ -18,6 +18,7 @@ import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
 import { contentUpdaterMcp, developmentMcp, cjaMcp, acrobatMcp, marketingMcp } from './mcp-client.js';
+import { hasWebhook, createTaskViaWebhook } from './workfront.js';
 import { getSiteType } from './site-detect.js';
 import { buildPlaybookPrompt } from './xsc-playbook.js';
 import { buildKnowledgePrompt } from './aem-knowledge.js';
@@ -365,7 +366,7 @@ const AEM_TOOLS = [
 
   {
     name: 'create_workfront_task',
-    description: 'Workfront WOA — Create a review/approval task in Workfront. Attaches preview URL and governance report. Assigns to approval chain from customer profile.',
+    description: 'Workfront WOA — Create a review/approval task in Workfront. Attaches preview URL and governance report. Assigns to approval chain from customer profile. Routes to webhook when configured, otherwise runs in demo mode.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1525,11 +1526,39 @@ async function executeTool(name, input) {
     /* ─── Workfront WOA ─── */
 
     case 'create_workfront_task': {
-      const taskId = `WF-${Date.now().toString(36).toUpperCase()}`;
       const chain = profile.approvalChain || [];
       const assignee = input.assignee || chain[0]?.role || 'Content Reviewer';
       const sla = chain.find((c) => c.role === assignee)?.sla || '24h';
 
+      // If webhook is configured (N8N / Zapier / custom), POST to it
+      if (hasWebhook()) {
+        try {
+          const result = await createTaskViaWebhook({
+            title: input.title,
+            description: input.description,
+            preview_url: input.preview_url || '',
+            priority: input.priority || 'normal',
+            assignee,
+            sla,
+            project: `${profile.name} — Content Operations`,
+            approval_chain: chain.map((c) => c.role),
+          });
+          return JSON.stringify({
+            ...result,
+            _source: 'connected',
+            source: 'Workfront WOA — via webhook integration',
+          }, null, 2);
+        } catch (err) {
+          return JSON.stringify({
+            error: true,
+            message: `Workfront webhook failed: ${err.message}`,
+            _source: 'error',
+          }, null, 2);
+        }
+      }
+
+      // Fallback: simulated response (no webhook configured)
+      const taskId = `WF-${Date.now().toString(36).toUpperCase()}`;
       return JSON.stringify({
         status: 'created',
         task_id: taskId,
@@ -1542,7 +1571,7 @@ async function executeTool(name, input) {
         approval_chain: chain.map((c) => c.role),
         message: `Workfront task ${taskId} created: "${input.title}" — assigned to ${assignee} (SLA: ${sla})`,
         _source: 'simulated',
-        _note: 'Workfront MCP not yet available. Wire WOA API when endpoint is published.',
+        _note: 'Configure a Workfront webhook URL in Settings to create real tasks.',
       }, null, 2);
     }
 
@@ -2740,7 +2769,7 @@ These tools write to the real Document Authoring API. The user must be signed in
 - **analyze_journey_conflicts** — Analyze a journey for scheduling conflicts, audience overlaps, and resource contention with other live journeys.
 
 ### Workfront WOA (workflow)
-- **create_workfront_task** — Create review/approval tasks in Workfront. Assigns to approval chain from customer profile.
+- **create_workfront_task** — Create review/approval tasks in Workfront. When a webhook URL is configured in Settings, tasks are sent to a real N8N/Workfront endpoint. Assigns to approval chain from customer profile.
 
 ### Experience Production Agent (content creation & transformation)
 - **extract_brief_content** — Extract structured content from an uploaded brief (PDF/Word).
