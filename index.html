@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Compass</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23e34850'><path d='M12 2L2 7l10 5 10-5-10-5z'/><path d='M2 17l10 5 10-5'/><path d='M2 12l10 5 10-5'/></svg>">
-  <link rel="stylesheet" href="app.css?v=28">
+  <link rel="stylesheet" href="app.css?v=30">
 </head>
 <body>
   <div class="workspace">
@@ -65,7 +65,20 @@
           <button id="settingsBtn" class="header-icon-btn" title="Settings">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
           </button>
-          <button id="authBtn" class="auth-btn" title="Sign in with Adobe">Sign In</button>
+          <div id="authContainer" class="auth-container">
+            <button id="authBtn" class="auth-btn" title="Sign in with Adobe">Sign In</button>
+            <div id="userMenu" class="user-menu">
+              <div class="user-menu-profile">
+                <div class="user-avatar" id="userAvatar"></div>
+                <div class="user-info">
+                  <div class="user-name" id="userName"></div>
+                  <div class="user-email" id="userEmail"></div>
+                </div>
+              </div>
+              <div class="user-menu-divider"></div>
+              <button class="user-menu-signout" id="userSignOutBtn">Sign out</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -594,6 +607,6 @@
   <!-- Mammoth.js for DOCX text extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
 
-  <script src="app.js?v=29" type="module"></script>
+  <script src="app.js?v=30" type="module"></script>
 </body>
 </html>

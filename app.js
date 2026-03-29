@@ -9,7 +9,7 @@
  * 5. Speed of iteration (update system prompts same day, not next quarter)
  */
 
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, startPkceLogin, handlePkceCallback } from './ims.js?v=29';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, startPkceLogin, handlePkceCallback, fetchUserProfile } from './ims.js?v=30';
 import * as ai from './ai.js?v=29';
 import { TOOL_AGENT_MAP } from './ai.js?v=29';
 import * as da from './da-client.js?v=29';
@@ -196,15 +196,35 @@ function updateAuthUI() {
   const signedIn = isSignedIn();
   const hasKey = ai.hasApiKey();
 
+  const userMenu = document.getElementById('userMenu');
+  const userAvatar = document.getElementById('userAvatar');
+  const userName = document.getElementById('userName');
+  const userEmail = document.getElementById('userEmail');
+
   if (authBtn) {
     if (signedIn && profile?.displayName) {
-      authBtn.textContent = profile.displayName.split(' ')[0];
-      authBtn.classList.add('signed-in');
+      // Show avatar button, hide "Sign In" text
+      const initials = (profile.firstName?.[0] || profile.displayName[0] || '').toUpperCase();
+      authBtn.textContent = '';
+      authBtn.classList.add('signed-in', 'avatar-mode');
       authBtn.title = `Signed in as ${profile.email || profile.displayName}`;
+      authBtn.innerHTML = `<span class="auth-avatar">${initials}</span>`;
+      // Populate dropdown
+      if (userAvatar) userAvatar.textContent = initials;
+      if (userName) userName.textContent = profile.displayName;
+      if (userEmail) userEmail.textContent = profile.email || '';
+    } else if (signedIn) {
+      // Signed in but no profile yet — show generic
+      authBtn.textContent = '';
+      authBtn.classList.add('signed-in', 'avatar-mode');
+      authBtn.title = 'Signed in';
+      authBtn.innerHTML = '<span class="auth-avatar">●</span>';
     } else {
       authBtn.textContent = 'Sign In';
-      authBtn.classList.remove('signed-in');
+      authBtn.classList.remove('signed-in', 'avatar-mode');
+      authBtn.innerHTML = '';
       authBtn.title = 'Sign in with Adobe';
+      if (userMenu) userMenu.classList.remove('visible');
     }
   }
 
@@ -3574,14 +3594,29 @@ if (attachBtn) {
 if (authBtn) {
   authBtn.addEventListener('click', () => {
     if (isSignedIn()) {
-      signOut();
-      updateAuthUI();
+      // Toggle user menu dropdown
+      const menu = document.getElementById('userMenu');
+      if (menu) menu.classList.toggle('visible');
     } else {
-      // OAuth PKCE flow — redirects to Adobe IMS, comes back with ?code=
       startPkceLogin();
     }
   });
 }
+// Sign out from the user menu dropdown
+document.getElementById('userSignOutBtn')?.addEventListener('click', () => {
+  const menu = document.getElementById('userMenu');
+  if (menu) menu.classList.remove('visible');
+  signOut();
+  updateAuthUI();
+});
+// Close user menu when clicking outside
+document.addEventListener('click', (e) => {
+  const container = document.getElementById('authContainer');
+  const menu = document.getElementById('userMenu');
+  if (menu?.classList.contains('visible') && container && !container.contains(e.target)) {
+    menu.classList.remove('visible');
+  }
+});
 
 if (settingsBtn) {
   settingsBtn.addEventListener('click', toggleSettings);
@@ -4634,6 +4669,11 @@ async function init() {
     await loadIms();
   } catch (err) {
     console.warn('IMS init:', err.message);
+  }
+
+  // Load user profile (from cache or IMS API) — needed for auth UI
+  if (isSignedIn()) {
+    await fetchUserProfile();
   }
 
   updateAuthUI();

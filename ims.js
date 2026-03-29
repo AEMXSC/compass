@@ -29,6 +29,9 @@ const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh 5 min before expiry
 let imsReady = null;
 let profile = null;
 
+const IMS_PROFILE_URL = 'https://ims-na1.adobelogin.com/ims/profile/v1';
+const PROFILE_STORAGE_KEY = 'ew-ims-profile';
+
 /* ─── Helpers ─── */
 
 function loadScript(src) {
@@ -89,6 +92,48 @@ function clearPkceTokens() {
   localStorage.removeItem('ew-ims');
   localStorage.removeItem(PKCE_REFRESH_KEY);
   localStorage.removeItem(PKCE_EXPIRES_KEY);
+}
+
+/**
+ * Fetch user profile from IMS and cache it.
+ * Called after PKCE login and on page load when token exists.
+ */
+export async function fetchUserProfile() {
+  const token = localStorage.getItem('ew-ims-token');
+  if (!token) return null;
+
+  // Return cached profile if available
+  const cached = localStorage.getItem(PROFILE_STORAGE_KEY);
+  if (cached) {
+    try {
+      profile = JSON.parse(cached);
+      return profile;
+    } catch { /* ignore bad cache */ }
+  }
+
+  try {
+    const resp = await fetch(IMS_PROFILE_URL, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) {
+      console.warn(`[IMS] Profile fetch failed (${resp.status})`);
+      return null;
+    }
+    const data = await resp.json();
+    profile = {
+      displayName: data.displayName || data.name || data.first_name || '',
+      email: data.email || data.emailAddress || data.userId || '',
+      firstName: data.first_name || '',
+      lastName: data.last_name || '',
+      userId: data.userId || '',
+    };
+    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    console.log('[IMS] Profile loaded:', profile.displayName, profile.email);
+    return profile;
+  } catch (err) {
+    console.warn('[IMS] Profile fetch error:', err.message);
+    return null;
+  }
 }
 
 function isTokenExpiringSoon() {
@@ -188,6 +233,9 @@ export async function handlePkceCallback() {
     sessionStorage.removeItem(PKCE_PENDING_KEY);
     cleanCallbackUrl();
 
+    // Fetch user profile immediately after login
+    await fetchUserProfile();
+
     console.log('[IMS] PKCE login successful');
     window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
     return true;
@@ -266,7 +314,15 @@ export function getToken() {
   }
 }
 
-export function getProfile() { return profile; }
+export function getProfile() {
+  if (profile) return profile;
+  // Try loading from localStorage cache
+  const cached = localStorage.getItem(PROFILE_STORAGE_KEY);
+  if (cached) {
+    try { profile = JSON.parse(cached); } catch { /* ignore */ }
+  }
+  return profile;
+}
 export function isSignedIn() { return !!getToken(); }
 
 /* ─── Bookmarklet ─── */
@@ -514,6 +570,7 @@ export function imsSignIn() {
 
 export function signOut() {
   clearPkceTokens(); // wipes ew-ims-token, ew-ims, refresh, expires
+  localStorage.removeItem(PROFILE_STORAGE_KEY);
   profile = null;
   if (window.adobeIMS) {
     try { window.adobeIMS.signOut(); } catch { /* ignore */ }
