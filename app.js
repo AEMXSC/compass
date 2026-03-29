@@ -1,5 +1,5 @@
 /*
- * Experience Workspace — v4 (Phase 3: Customer-Specific Intelligence)
+ * Compass — v4 (Phase 3: Customer-Specific Intelligence)
  *
  * Five ways this is better than native Adobe agents:
  * 1. Customer-specific system prompts (brand voice, segments, approval chains, legal SLAs)

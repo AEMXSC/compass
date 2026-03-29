@@ -84,7 +84,7 @@ export async function writeContent(org, repo, path, html, sha = null, branch = '
   }
 
   const body = {
-    message: `Update ${htmlPath} via Experience Workspace`,
+    message: `Update ${htmlPath} via Compass`,
     content: btoa(unescape(encodeURIComponent(html))),
     branch,
   };
