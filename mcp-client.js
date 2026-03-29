@@ -24,12 +24,12 @@ const MCP_PROTOCOL_VERSION = '2024-11-05';
 
 /**
  * Create an MCP client for a specific endpoint path.
- * @param {string} endpointPath — e.g. '/adobe/mcp/content'
+ * @param {string} endpointPath — e.g. '/adobe/mcp/content' or full URL 'https://...'
  * @param {string} label — human-readable name for console logs
  * @returns MCP client object with initSession, callTool, getToolSchemas, resetSession, isAvailable
  */
 export function createMcpClient(endpointPath, label = 'MCP') {
-  const endpoint = `${MCP_BASE}${endpointPath}`;
+  const endpoint = endpointPath.startsWith('https://') ? endpointPath : `${MCP_BASE}${endpointPath}`;
   let sessionId = null;
   let requestId = 0;
   let toolSchemas = null;
@@ -217,3 +217,15 @@ export const discoveryMcp = createMcpClient('/adobe/mcp/discovery', 'AEM-Discove
 
 /** Pipeline troubleshooting tools. Uses AI credits. */
 export const developmentMcp = createMcpClient('/adobe/mcp/development', 'AEM-Dev');
+
+/** CJA — Customer Journey Analytics data insights. */
+export const cjaMcp = createMcpClient('/adobe/mcp/cja', 'CJA');
+
+/** Acrobat MCP — PDF services (extract, convert, etc.). */
+export const acrobatMcp = createMcpClient('/adobe/mcp/acrobat', 'Acrobat');
+
+/** Marketing Agent — AJO journeys, Target decisioning, audience activation. */
+export const marketingMcp = createMcpClient('/adobe/mcp/marketing-agent', 'Marketing-Agent');
+
+/** Spacecat / AEM Sites Optimizer — site audits, SEO, CWV, broken backlinks. */
+export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');

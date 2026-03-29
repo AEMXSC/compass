@@ -52,6 +52,42 @@ export async function searchPages(host, query, options = {}) {
 }
 
 /**
+ * Check asset expiry / DRM status.
+ */
+export async function checkAssetExpiry(host, options = {}) {
+  return callTool('check_asset_expiry', {
+    host,
+    days_until_expiry: options.days || 30,
+    folder: options.folder,
+    include_expired: options.includeExpired !== false,
+  });
+}
+
+/**
+ * Audit content for staleness.
+ */
+export async function auditContent(host, options = {}) {
+  return callTool('audit_content', {
+    host,
+    content_type: options.contentType || 'all',
+    stale_days: options.staleDays || 90,
+    status_filter: options.statusFilter || 'published',
+  });
+}
+
+/**
+ * Add assets to a DAM collection.
+ */
+export async function addToCollection(host, collectionName, assetPaths, options = {}) {
+  return callTool('add_to_collection', {
+    host,
+    collection_name: collectionName,
+    asset_paths: assetPaths,
+    create_if_missing: options.createIfMissing !== false,
+  });
+}
+
+/**
  * Discover available discovery tools at runtime.
  */
 export async function discoverTools() {

@@ -852,6 +852,61 @@ const TOOL_RENDERERS = {
       </div>`;
   },
 
+  /* ─ LLM Optimizer: Citation Readability Score Card ─ */
+  check_citation_readability(result) {
+    if (result.error) return null;
+    const score = result.score ?? 0;
+    const grade = result.grade || 'N/A';
+    const estimated = result.agent_words && !result.human_words;
+    const scoreColor = score >= 90 ? '#34d399' : score >= 75 ? '#fbbf24' : score >= 50 ? '#f97316' : '#ef4444';
+    const circumference = 2 * Math.PI * 42;
+    const dashLen = (score / 100) * circumference;
+
+    const statsHTML = [
+      `<div class="llmo-stat"><span class="llmo-stat-val">${(result.agent_words || 0).toLocaleString()}</span><span class="llmo-stat-lbl">Agent words</span></div>`,
+      result.human_words ? `<div class="llmo-stat"><span class="llmo-stat-val">${result.human_words.toLocaleString()}</span><span class="llmo-stat-lbl">Human words</span></div>` : '',
+      result.missing_content?.length ? `<div class="llmo-stat"><span class="llmo-stat-val" style="color:#f87171">${result.missing_content.length}</span><span class="llmo-stat-lbl">Missing</span></div>` : '',
+    ].filter(Boolean).join('');
+
+    const pageType = result.is_eds
+      ? '<span class="llmo-badge llmo-badge-eds">AEM Edge Delivery</span>'
+      : '<span class="llmo-badge llmo-badge-std">Standard Page</span>';
+
+    // Use the report ID from the executor to link to stored report HTML
+    const reportId = result._report_id || '';
+
+    return `
+      <div class="result-card llmo-card">
+        <div class="result-card-header">
+          <span class="result-card-icon">
+            <svg width="16" height="16" viewBox="0 0 30 26" fill="none"><path d="M11.5 0H0V26L11.5 0Z" fill="#EB1000"/><path d="M18.5 0H30V26L18.5 0Z" fill="#EB1000"/><path d="M15 9.5L21.5 26H17L14.5 19H10L15 9.5Z" fill="#EB1000"/></svg>
+          </span>
+          <span class="result-card-title">AI Visibility Report</span>
+          ${pageType}
+        </div>
+        <div class="llmo-body">
+          <div class="llmo-gauge">
+            <svg viewBox="0 0 100 100" class="llmo-ring-svg">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="var(--border)" stroke-width="6"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="${scoreColor}" stroke-width="6"
+                stroke-dasharray="${dashLen.toFixed(1)} ${(circumference - dashLen).toFixed(1)}" stroke-linecap="round"
+                transform="rotate(-90 50 50)" style="filter:drop-shadow(0 0 6px ${scoreColor}60)"/>
+            </svg>
+            <div class="llmo-gauge-score" style="color:${scoreColor}">${score}</div>
+            <div class="llmo-gauge-pct" style="color:${scoreColor}">%${estimated ? ' est.' : ''}</div>
+            <div class="llmo-gauge-grade" style="background:${scoreColor}20;color:${scoreColor}">Grade ${grade}</div>
+          </div>
+          <div class="llmo-stats">${statsHTML}</div>
+        </div>
+        <div class="llmo-actions">
+          <button class="llmo-detail-btn" onclick="window.__showLLMOReport && window.__showLLMOReport('${reportId}')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            View Full Report
+          </button>
+        </div>
+      </div>`;
+  },
+
   /* ─ Development Agent: Pipeline Status Badges ─ */
   get_pipeline_status(result) {
     const pipelines = result.pipelines;
@@ -887,6 +942,88 @@ const TOOL_RENDERERS = {
           ${health ? `<span class="pipe-health ${healthCls}">${health.status} · ${health.uptime} uptime</span>` : ''}
         </div>
         <div class="pipe-list">${pipeRows}</div>
+      </div>`;
+  },
+
+  /* ─ Sites Optimizer: Audit Scorecard ─ */
+  get_site_audit(result) {
+    const lh = result.lighthouse;
+    if (!lh) return null;
+    const cwv = result.core_web_vitals;
+    const backlinks = result.broken_backlinks;
+
+    const gaugeHTML = (label, value) => {
+      const color = value >= 90 ? '#34d399' : value >= 50 ? '#fbbf24' : '#ef4444';
+      const circ = 2 * Math.PI * 28;
+      const dash = (value / 100) * circ;
+      return `
+        <div class="so-gauge">
+          <svg viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="28" fill="none" stroke="var(--border)" stroke-width="4"/>
+            <circle cx="32" cy="32" r="28" fill="none" stroke="${color}" stroke-width="4"
+              stroke-dasharray="${dash.toFixed(1)} ${(circ - dash).toFixed(1)}" stroke-linecap="round"
+              transform="rotate(-90 32 32)" style="filter:drop-shadow(0 0 4px ${color}40)"/>
+          </svg>
+          <span class="so-gauge-val" style="color:${color}">${value}</span>
+          <span class="so-gauge-lbl">${label}</span>
+        </div>`;
+    };
+
+    const gaugesHTML = [
+      gaugeHTML('Perf', lh.performance),
+      gaugeHTML('A11y', lh.accessibility),
+      gaugeHTML('BP', lh.best_practices),
+      gaugeHTML('SEO', lh.seo),
+    ].join('');
+
+    const cwvHTML = cwv ? Object.entries(cwv).map(([k, v]) => {
+      const cls = v.rating === 'good' ? 'pass' : v.rating === 'needs-improvement' ? 'warn' : 'fail';
+      return `<div class="so-cwv ${cls}"><span class="so-cwv-name">${k.toUpperCase()}</span><span class="so-cwv-val">${v.value}</span></div>`;
+    }).join('') : '';
+
+    const blHTML = backlinks ? `<div class="so-backlinks"><span class="so-bl-count">${backlinks.total}</span> broken backlinks (${backlinks.high_authority || 0} high-authority)</div>` : '';
+
+    return `
+      <div class="result-card so-card">
+        <div class="result-card-header">
+          <span class="result-card-icon">📊</span>
+          <span class="result-card-title">Site Audit — ${result.site_url || 'Site'}</span>
+        </div>
+        <div class="so-gauges">${gaugesHTML}</div>
+        ${cwvHTML ? `<div class="so-cwv-row">${cwvHTML}</div>` : ''}
+        ${blHTML}
+        ${result.summary ? `<div class="so-summary">${result.summary}</div>` : ''}
+      </div>`;
+  },
+
+  /* ─ Sites Optimizer: Opportunities List ─ */
+  get_site_opportunities(result) {
+    const opps = result.opportunities;
+    if (!opps?.length) return null;
+    const summary = result.summary || {};
+
+    const oppRows = opps.slice(0, 8).map((o) => {
+      const prCls = o.priority === 'high' ? 'fail' : o.priority === 'medium' ? 'warn' : 'pass';
+      const impactBar = Math.round((o.impact || 5) * 10);
+      return `
+        <div class="so-opp-row">
+          <span class="so-opp-priority ${prCls}">${o.priority}</span>
+          <div class="so-opp-info">
+            <div class="so-opp-title">${o.title}</div>
+            <div class="so-opp-meta">${o.category} · ${o.pages_affected || 0} page(s) · impact ${o.impact}/10</div>
+          </div>
+          <div class="so-opp-bar"><div class="so-opp-fill ${prCls}" style="width:${impactBar}%"></div></div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="result-card so-card">
+        <div class="result-card-header">
+          <span class="result-card-icon">💡</span>
+          <span class="result-card-title">${opps.length} Optimization Opportunities</span>
+          <span class="so-opp-summary">${summary.high_priority || 0} high · ${summary.medium_priority || 0} med · ${summary.low_priority || 0} low</span>
+        </div>
+        <div class="so-opp-list">${oppRows}</div>
       </div>`;
   },
 
@@ -3032,6 +3169,97 @@ function requireApiKey() {
   addMessage('assistant', md('**API key required.** Open ⚙ Settings and enter your Claude API key to use this feature.'));
 }
 
+function runLLMO() {
+  if (!ai.hasApiKey()) { requireApiKey(); return; }
+  const pageUrl = previewFrame?.src;
+  const hasPage = pageUrl && pageUrl !== 'about:blank';
+  if (hasPage) {
+    const prompt = 'Check the AI citation readability of the currently loaded page. Use the check_citation_readability tool and give me the full report with score, grade, and recommendations.';
+    addMessage('user', prompt);
+    handleRealChat(prompt);
+  } else {
+    addMessage('assistant', md('**AI Visibility Check** — Enter any URL to see how visible it is to AI agents like ChatGPT, Perplexity, and Claude.\n\nPaste a customer site URL below and I\'ll analyze it. For example:\n- `https://www.example.com` — check a customer\'s current site\n- Or load an EDS page in the preview and click this button again to compare.'));
+  }
+}
+
+/* ── PMM "Find Your Path" Quick Action Flows ── */
+function runFindContent() {
+  if (!ai.hasApiKey()) { requireApiKey(); return; }
+  addMessage('user', 'Find content in my DAM');
+  handleRealChat('I need to find content fast. Search my DAM for the most relevant assets — images, documents, and content fragments. Use the search_dam_assets and search_fragments tools. Show me what\'s available and help me find exactly what I need for my next campaign.');
+}
+
+function runImageVariants() {
+  if (!ai.hasApiKey()) { requireApiKey(); return; }
+  addMessage('user', 'Generate channel-ready image variants');
+  handleRealChat('I need channel-ready image variants for my campaign. Use the Dynamic Media tools (transform_image, create_image_renditions) to generate optimized crops and renditions for web, social, and email channels. Show me what delivery URLs are available with my current DM + OpenAPI setup.');
+}
+
+function runFixPipeline() {
+  if (!ai.hasApiKey()) { requireApiKey(); return; }
+  addMessage('user', 'My pipeline needs help');
+  handleRealChat('Check my AEM pipeline status. Use the get_pipeline_status tool to diagnose any issues — failed builds, slow deploys, or configuration problems. Give me a clear status report and actionable fixes.');
+}
+
+function runBrandCompliance() {
+  if (!ai.hasApiKey()) { requireApiKey(); return; }
+  const pageUrl = previewFrame?.src;
+  const hasPage = pageUrl && pageUrl !== 'about:blank';
+  if (hasPage) {
+    addMessage('user', 'Check this page for brand compliance');
+    handleRealChat('Run a brand governance check on the currently loaded page. Use the run_governance_check tool to evaluate brand voice, visual identity, accessibility, and legal compliance. Flag any violations and tell me exactly what to fix.');
+  } else {
+    addMessage('assistant', md('**Brand Compliance** — Load a page in the preview first, or paste a URL below to check it against your brand policies.\n\nI\'ll use the governance MCP to scan for:\n- Brand voice consistency\n- Visual identity compliance\n- Accessibility standards\n- Legal and regulatory rules'));
+  }
+}
+
+function runUpdateContent() {
+  if (!ai.hasApiKey()) { requireApiKey(); return; }
+  addMessage('user', 'Help me update content quickly');
+  handleRealChat('I need to update content fast. Show me what pages I have, identify any stale or expiring content using audit_content and check_asset_expiry tools, then help me update them. Use create_content_variant if I need fresh copy variations for different audiences.');
+}
+
+/* ── PMM Use-Case Demo Flows (3 choreographed sequences) ── */
+async function runDemoModernizeAI() {
+  if (!ai.hasApiKey()) { requireApiKey(); return; }
+  addMessage('user', 'Demo: Modernize for AI-native discovery');
+  await handleRealChat(`Run a complete AI-native discovery modernization demo. Execute these steps in sequence:
+
+1. First, check the AI citation readability of our site using check_citation_readability. Show the score.
+2. Then audit our content freshness with audit_content — how much is stale?
+3. Search our DAM for hero assets using search_dam_assets to show content availability.
+4. Finally, generate a brief action plan: what to update for better AI visibility, which stale pages to refresh, and which assets to feature.
+
+Present each step clearly with the tool results so the audience can see the full AI-native content lifecycle.`);
+}
+
+async function runDemoBrandCompliance() {
+  if (!ai.hasApiKey()) { requireApiKey(); return; }
+  addMessage('user', 'Demo: Automate brand compliance');
+  await handleRealChat(`Run a complete automated brand compliance demo. Execute these steps in sequence:
+
+1. First, run a governance check on the current page using run_governance_check. Show the scorecard.
+2. Search for content fragments using search_fragments to show how content is managed centrally.
+3. Check for expiring assets with check_asset_expiry — any DRM issues approaching?
+4. Generate a compliance summary: what passed, what needs attention, and recommended next steps.
+
+Present each tool result clearly so the audience sees the full brand governance pipeline in action.`);
+}
+
+async function runDemoSpeedProduction() {
+  if (!ai.hasApiKey()) { requireApiKey(); return; }
+  addMessage('user', 'Demo: Speed up content production');
+  await handleRealChat(`Run a complete content production acceleration demo. Execute these steps in sequence:
+
+1. Check pipeline health with get_pipeline_status — are we clear to publish?
+2. Search for available assets using search_dam_assets with query "campaign hero" to show DAM richness.
+3. Generate an image rendition using create_image_renditions for web and social channels.
+4. Create a content variant using create_content_variant for a personalized audience segment.
+5. Show the site optimization opportunities with get_site_opportunities — what quick wins are available?
+
+Present each step with results so the audience sees the full production pipeline from asset to delivery.`);
+}
+
 const FLOWS = {
   brief: runBrief,
   governance: runGovernance,
@@ -3040,11 +3268,22 @@ const FLOWS = {
   workfront: runWorkfrontPanel,
   services: runServicesPanel,
   blocks: runBlockLibrary,
+  llmo: runLLMO,
   orchestrate: () => { if (!ai.hasApiKey()) { requireApiKey(); return; } runOrchestration(); },
   content: () => {
     switchView('editor');
     addMessage('assistant', md('Ready to create content. Tell me what you\'d like to build — new pages, blocks, or copy for your site.'));
   },
+  /* PMM "Find Your Path" actions */
+  'find-content': runFindContent,
+  'image-variants': runImageVariants,
+  'fix-pipeline': runFixPipeline,
+  'brand-compliance': runBrandCompliance,
+  'update-content': runUpdateContent,
+  /* PMM Use-Case demos */
+  'demo-modernize': runDemoModernizeAI,
+  'demo-compliance': runDemoBrandCompliance,
+  'demo-production': runDemoSpeedProduction,
 };
 
 /* ── User Input ── */
@@ -3079,6 +3318,16 @@ function matchSpecializedFlow(text) {
   if (lower.includes('overdue') || lower.includes('pending approval') || lower.includes('capacity') || lower.includes('workload')) {
     return () => runWorkfrontQuery(text);
   }
+  // PMM "Find Your Path" natural language triggers
+  if (lower.includes('find content') || lower.includes('search dam') || lower.includes('find asset') || lower.includes('search asset')) return runFindContent;
+  if (lower.includes('image variant') || lower.includes('channel-ready') || lower.includes('rendition') || lower.includes('image crop')) return runImageVariants;
+  if (lower.includes('pipeline') || lower.includes('deploy') || lower.includes('build fail') || lower.includes('fix my pipeline')) return runFixPipeline;
+  if (lower.includes('brand compliance') || lower.includes('brand check') || lower.includes('off-brand')) return runBrandCompliance;
+  if (lower.includes('update content') || lower.includes('stale content') || lower.includes('content fast') || lower.includes('expiring')) return runUpdateContent;
+  // PMM demo triggers
+  if (lower.includes('demo modernize') || lower.includes('ai-native') || lower.includes('ai discovery demo')) return runDemoModernizeAI;
+  if (lower.includes('demo compliance') || lower.includes('demo brand') || lower.includes('compliance demo')) return runDemoBrandCompliance;
+  if (lower.includes('demo production') || lower.includes('demo speed') || lower.includes('production demo')) return runDemoSpeedProduction;
   return null;
 }
 
@@ -3815,9 +4064,29 @@ if (localeSelect) {
 const refreshPreviewBtn = document.getElementById('refreshPreviewBtn');
 if (refreshPreviewBtn) {
   refreshPreviewBtn.addEventListener('click', () => {
-    if (previewFrame) previewFrame.src = previewFrame.src;
+    if (!previewFrame) return;
+    // If an LLMO report (or other srcdoc overlay) is showing, restore the real page
+    if (previewFrame.srcdoc && previewFrame.dataset.savedSrc) {
+      previewFrame.removeAttribute('srcdoc');
+      previewFrame.src = previewFrame.dataset.savedSrc;
+      delete previewFrame.dataset.savedSrc;
+    } else {
+      previewFrame.src = previewFrame.src;
+    }
   });
 }
+
+/* ── LLMO Report Detail View ── */
+window.__showLLMOReport = (reportId) => {
+  const html = window[reportId];
+  if (html && previewFrame) {
+    // Save the real page URL so refresh can restore it
+    if (!previewFrame.dataset.savedSrc && previewFrame.src && previewFrame.src !== 'about:blank') {
+      previewFrame.dataset.savedSrc = previewFrame.src;
+    }
+    previewFrame.srcdoc = html;
+  }
+};
 
 const editInUEBtn = document.getElementById('editInUEBtn');
 if (editInUEBtn) {
@@ -4221,9 +4490,7 @@ async function init() {
   // NO auto sign-in. User clicks "Sign In" button when ready.
   // This prevents any redirect to da.live.
 
-  // Auto-connect default site and go straight to editor
-  // XSC team members sign in → land directly in the editor with the team site loaded
-  switchView('editor');
+  // Auto-connect default site in background (stays on Home view)
   connectSite();
 
   // Welcome message

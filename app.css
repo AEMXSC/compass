@@ -2467,6 +2467,132 @@ textarea:focus-visible,
   flex-shrink: 0;
 }
 
+/* ─── LLMO Citation Readability Card ─── */
+.llmo-card .result-card-header {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.llmo-badge {
+  font-size: 9px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  margin-left: auto;
+}
+
+.llmo-badge-eds {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+}
+
+.llmo-badge-std {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.llmo-body {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 20px;
+}
+
+.llmo-gauge {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  flex-shrink: 0;
+}
+
+.llmo-ring-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.llmo-gauge-score {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -65%);
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.llmo-gauge-pct {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, 30%);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.llmo-gauge-grade {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.llmo-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.llmo-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.llmo-stat-val {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  min-width: 40px;
+}
+
+.llmo-stat-lbl {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.llmo-actions {
+  padding: 0 20px 14px;
+}
+
+.llmo-detail-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent-light);
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.llmo-detail-btn:hover {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(139, 92, 246, 0.4);
+}
+
 /* ─── Pipeline Status ─── */
 .pipe-card .result-card-header {
   justify-content: flex-start;
@@ -2581,6 +2707,197 @@ textarea:focus-visible,
 .pipe-badge.running { background: var(--accent-dim); color: var(--accent); }
 .pipe-badge.fail { background: var(--red-dim); color: var(--red); }
 .pipe-badge.pending { background: var(--border); color: var(--text-muted); }
+
+/* ─── Sites Optimizer: Audit Scorecard ─── */
+.so-card .result-card-header {
+  justify-content: flex-start;
+}
+
+.so-gauges {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: 18px 16px 12px;
+}
+
+.so-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+}
+
+.so-gauge svg {
+  width: 56px;
+  height: 56px;
+}
+
+.so-gauge-val {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 16px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+}
+
+.so-gauge-lbl {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.so-cwv-row {
+  display: flex;
+  gap: 10px;
+  padding: 8px 16px 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.so-cwv {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.so-cwv.pass { border-color: color-mix(in srgb, var(--green) 30%, transparent); }
+.so-cwv.warn { border-color: color-mix(in srgb, var(--yellow) 30%, transparent); }
+.so-cwv.fail { border-color: color-mix(in srgb, var(--red) 30%, transparent); }
+
+.so-cwv-name {
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.so-cwv-val {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.so-cwv.pass .so-cwv-val { color: var(--green); }
+.so-cwv.warn .so-cwv-val { color: var(--yellow); }
+.so-cwv.fail .so-cwv-val { color: var(--red); }
+
+.so-backlinks {
+  padding: 8px 16px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.so-bl-count {
+  font-weight: 800;
+  color: var(--red);
+  font-size: 16px;
+  margin-right: 4px;
+}
+
+.so-summary {
+  padding: 10px 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  line-height: 1.5;
+}
+
+/* ─── Sites Optimizer: Opportunities ─── */
+.so-opp-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.so-opp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  transition: background 0.15s;
+}
+
+.so-opp-row:last-child {
+  border-bottom: none;
+}
+
+.so-opp-row:hover {
+  background: var(--bg-card-hover);
+}
+
+.so-opp-priority {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  min-width: 44px;
+  text-align: center;
+}
+
+.so-opp-priority.fail { background: var(--red-dim); color: var(--red); }
+.so-opp-priority.warn { background: var(--yellow-dim); color: var(--yellow); }
+.so-opp-priority.pass { background: var(--green-dim); color: var(--green); }
+
+.so-opp-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.so-opp-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.so-opp-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.so-opp-bar {
+  width: 60px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.so-opp-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+.so-opp-fill.fail { background: var(--red); }
+.so-opp-fill.warn { background: var(--yellow); }
+.so-opp-fill.pass { background: var(--green); }
+
+.so-opp-summary {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
 
 /* ─── Contextual Suggestion Chips (AI Assistant style) ─── */
 .suggestion-bar {

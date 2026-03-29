@@ -16,9 +16,12 @@ import { hasGitHubToken, writeContent as ghWriteContent, triggerPreview as ghTri
 import * as aemContent from './aem-content-mcp-client.js';
 import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
+import * as spacecatMcp from './spacecat-mcp-client.js';
+import { contentUpdaterMcp, developmentMcp, cjaMcp, acrobatMcp, marketingMcp } from './mcp-client.js';
 import { getSiteType } from './site-detect.js';
 import { buildPlaybookPrompt } from './xsc-playbook.js';
 import { buildKnowledgePrompt } from './aem-knowledge.js';
+import { checkCitationReadability, formatResultForChat, renderResultsHTML } from './llmo-checker.js';
 
 const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
@@ -548,7 +551,7 @@ const AEM_TOOLS = [
   },
   {
     name: 'modernize_content',
-    description: 'Experience Production Agent — Audit and modernize pages to match the latest design system. Returns a modernization report with affected components, suggested updates, and compliance status. Supports dry-run mode.',
+    description: 'Experience Production Agent — Modernize page content using Generate Variations (Firefly GenAI). Refreshes copy, updates tone to match brand voice, improves readability, and generates content variations. Supports dry-run mode.',
     input_schema: {
       type: 'object',
       properties: {
@@ -885,6 +888,19 @@ const AEM_TOOLS = [
       },
     },
   },
+
+  /* ─── LLM Optimizer — Citation Readability ─── */
+
+  {
+    name: 'check_citation_readability',
+    description: 'Adobe LLM Optimizer — Check how visible a webpage is to AI agents (ChatGPT, Perplexity, Claude, Gemini). Fetches the page as an AI crawler would and compares against the human-rendered version. Returns a Citation Readability Score (0-100%), agent vs human word counts, missing content, and recommendations. Powered by the same technology as the Adobe LLMO Chrome Extension. Use this when the user asks about AI visibility, citation readability, LLM optimization, or SEO for AI.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The URL of the page to analyze. If not provided, analyzes the currently loaded page.' },
+      },
+    },
+  },
 ];
 
 /* ── Tool → Agent Name Mapping (for UI badges) ── */
@@ -959,10 +975,46 @@ export const TOOL_AGENT_MAP = {
   list_destinations: 'Destinations MCP',
   list_destination_flow_runs: 'Destinations MCP',
   get_destination_health: 'Destinations MCP',
+  // LLM Optimizer
+  check_citation_readability: 'LLM Optimizer',
 };
 
 /* ── Client-Side Tool Executor ── */
-/* Real endpoints for AEM Content MCP; contextual simulated data for other agents */
+/* All tools call real MCP endpoints. No simulated data. */
+
+/** Derive DM delivery host from AEM author host. */
+/**
+ * Get the DM + OpenAPI delivery host.
+ * With DM + OpenAPI installed, approved assets are served from the delivery tier.
+ * The delivery host is derived from the AEM CS author host, but when DM+OpenAPI
+ * is enabled the real delivery URLs come back automatically from search_dam_assets
+ * results. This function is a fallback for constructing transform URLs when the
+ * agent already has an asset path but not the full delivery URL.
+ */
+function getDmDeliveryHost() {
+  const host = window.__EW_AEM_HOST || '';
+  if (host.startsWith('author-')) return host.replace('author-', 'delivery-');
+  return null;
+}
+
+/** Standardized error for tools when user is not signed in. */
+function authRequiredError(toolName) {
+  return JSON.stringify({
+    error: `Sign in with Adobe IMS to use ${toolName}.`,
+    hint: 'Click "Sign In" in the top bar to authenticate with your Adobe ID.',
+    _source: 'not-authenticated',
+  });
+}
+
+/** Standardized error for MCP call failures. */
+function mcpError(toolName, err) {
+  return JSON.stringify({
+    error: err.message || String(err),
+    tool: toolName,
+    hint: 'Check that you are signed in with Adobe IMS and have access to the AEM environment.',
+    _source: 'error',
+  });
+}
 
 async function executeTool(name, input) {
   const profile = getActiveProfile();
@@ -1026,155 +1078,82 @@ async function executeTool(name, input) {
     }
 
     case 'copy_aem_page': {
-      const siteType = getSiteType();
-      const org = window.__EW_ORG?.orgId || profile.orgId?.toLowerCase() || 'org';
-      const repo = window.__EW_ORG?.repo || profile.repo || 'site';
-      const branch = window.__EW_ORG?.branch || 'main';
-
-      // Try real AEM Content MCP first (for AEM CS / xwalk sites)
-      if (siteType === 'aem-cs' && isSignedIn()) {
-        try {
-          const host = siteType === 'aem-cs' ? window.__EW_AEM_HOST : null;
-          const result = await aemContent.copyPage(host, input.source_path, input.destination_path, input.title);
-          return JSON.stringify({
-            status: 'created',
-            ...result,
-            path: input.destination_path,
-            title: input.title,
-            copied_from: input.source_path,
-            message: `Page created at ${input.destination_path} from template ${input.source_path} via AEM Content MCP`,
-          }, null, 2);
-        } catch (err) {
-          console.warn('[copy_aem_page] AEM Content MCP failed, falling back:', err.message);
-        }
+      if (!isSignedIn()) return authRequiredError('copy_aem_page');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await aemContent.copyPage(host, input.source_path, input.destination_path, input.title);
+        return JSON.stringify({
+          status: 'created',
+          ...result,
+          path: input.destination_path,
+          title: input.title,
+          copied_from: input.source_path,
+          message: `Page created at ${input.destination_path} from template ${input.source_path}`,
+          _source: 'connected',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('copy_aem_page', err);
       }
-
-      // Fallback: construct response with preview URLs (DA path or demo mode)
-      const previewBase = `https://${branch}--${repo}--${org}.aem.page`;
-      const previewUrl = `${previewBase}${input.destination_path}`;
-      const ueUrl = `https://experience.adobe.com/#/@${org}/aem/editor/canvas${input.destination_path}?repo=${repo}`;
-      const daUrl = `https://da.live/edit#/${org}/${repo}${input.destination_path}`;
-      const etag = `W/"${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}"`;
-      return JSON.stringify({
-        status: 'created',
-        path: input.destination_path,
-        title: input.title,
-        copied_from: input.source_path,
-        etag,
-        preview_url: previewUrl,
-        edit_urls: { universal_editor: ueUrl, document_authoring: daUrl },
-        message: `Page created at ${input.destination_path} from template ${input.source_path}`,
-        hint: 'Use the etag value when calling patch_aem_page_content to avoid conflicts.',
-        _backend: siteType === 'aem-cs' ? 'aem-cs-fallback' : 'da',
-      }, null, 2);
     }
 
     case 'patch_aem_page_content': {
-      const siteType = getSiteType();
-      const org = window.__EW_ORG?.orgId || profile.orgId?.toLowerCase() || 'org';
-      const repo = window.__EW_ORG?.repo || profile.repo || 'site';
-      const branch = window.__EW_ORG?.branch || 'main';
+      if (!isSignedIn()) return authRequiredError('patch_aem_page_content');
       const fields = Object.keys(input.updates || {});
-
-      // Try real AEM Content MCP (for AEM CS / xwalk sites)
-      if (siteType === 'aem-cs' && isSignedIn()) {
-        try {
-          const host = window.__EW_AEM_HOST || null;
-          const result = await aemContent.updatePage(host, input.page_path, input.updates, input.etag);
-          return JSON.stringify({
-            status: 'updated',
-            ...result,
-            page_path: input.page_path,
-            updated_fields: fields,
-            message: `Updated ${fields.length} field(s) on ${input.page_path} via AEM Content MCP`,
-          }, null, 2);
-        } catch (err) {
-          console.warn('[patch_aem_page_content] AEM Content MCP failed, falling back:', err.message);
-        }
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await aemContent.updatePage(host, input.page_path, input.updates, input.etag);
+        return JSON.stringify({
+          status: 'updated',
+          ...result,
+          page_path: input.page_path,
+          updated_fields: fields,
+          message: `Updated ${fields.length} field(s) on ${input.page_path}`,
+          _source: 'connected',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('patch_aem_page_content', err);
       }
-
-      // Fallback
-      const previewBase = `https://${branch}--${repo}--${org}.aem.page`;
-      const newEtag = `W/"${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}"`;
-      return JSON.stringify({
-        status: 'updated',
-        page_path: input.page_path,
-        updated_fields: fields,
-        field_count: fields.length,
-        etag: newEtag,
-        preview_url: `${previewBase}${input.page_path}`,
-        message: `Updated ${fields.length} field(s) on ${input.page_path}: ${fields.join(', ')}`,
-        _backend: siteType === 'aem-cs' ? 'aem-cs-fallback' : 'da',
-      }, null, 2);
     }
 
     case 'create_aem_launch': {
-      const siteType = getSiteType();
-      const org = window.__EW_ORG?.orgId || profile.orgId?.toLowerCase() || 'org';
-      const repo = window.__EW_ORG?.repo || profile.repo || 'site';
-      const branch = window.__EW_ORG?.branch || 'main';
-
-      // Try real AEM Content MCP
-      if (siteType === 'aem-cs' && isSignedIn()) {
-        try {
-          const host = window.__EW_AEM_HOST || null;
-          const result = await aemContent.createLaunch(host, [input.page_path], input.launch_name);
-          return JSON.stringify({
-            status: 'created',
-            ...result,
-            launch_name: input.launch_name,
-            pages: [input.page_path],
-            state: 'open',
-            message: `Launch "${input.launch_name}" created via AEM Content MCP`,
-          }, null, 2);
-        } catch (err) {
-          console.warn('[create_aem_launch] AEM Content MCP failed, falling back:', err.message);
-        }
+      if (!isSignedIn()) return authRequiredError('create_aem_launch');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await aemContent.createLaunch(host, [input.page_path], input.launch_name);
+        return JSON.stringify({
+          status: 'created',
+          ...result,
+          launch_name: input.launch_name,
+          pages: [input.page_path],
+          state: 'open',
+          message: `Launch "${input.launch_name}" created`,
+          _source: 'connected',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('create_aem_launch', err);
       }
-
-      // Fallback
-      const launchId = `launch-${Date.now().toString(36)}`;
-      const previewBase = `https://${branch}--${repo}--${org}.aem.page`;
-      return JSON.stringify({
-        status: 'created',
-        launch_id: launchId,
-        launch_name: input.launch_name,
-        pages: [input.page_path],
-        preview_url: `${previewBase}${input.page_path}?launch=${launchId}`,
-        state: 'open',
-        message: `Launch "${input.launch_name}" created. Page is in review, not live.`,
-        _backend: siteType === 'aem-cs' ? 'aem-cs-fallback' : 'da',
-      }, null, 2);
     }
 
     case 'promote_aem_launch': {
-      const siteType = getSiteType();
-
-      // Try real AEM Content MCP
-      if (siteType === 'aem-cs' && isSignedIn()) {
-        try {
-          const host = window.__EW_AEM_HOST || null;
-          const result = await aemContent.promoteLaunch(host, input.launch_id);
-          return JSON.stringify({
-            status: 'promoted',
-            ...result,
-            launch_id: input.launch_id,
-            message: `Launch ${input.launch_id} promoted via AEM Content MCP`,
-            published_at: new Date().toISOString(),
-          }, null, 2);
-        } catch (err) {
-          console.warn('[promote_aem_launch] AEM Content MCP failed, falling back:', err.message);
-        }
+      if (!isSignedIn()) return authRequiredError('promote_aem_launch');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await aemContent.promoteLaunch(host, input.launch_id);
+        return JSON.stringify({
+          status: 'promoted',
+          ...result,
+          launch_id: input.launch_id,
+          message: `Launch ${input.launch_id} promoted`,
+          published_at: new Date().toISOString(),
+          _source: 'connected',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('promote_aem_launch', err);
       }
-
-      // Fallback
-      return JSON.stringify({
-        status: 'promoted',
-        launch_id: input.launch_id,
-        message: `Launch ${input.launch_id} promoted. Page is now live.`,
-        published_at: new Date().toISOString(),
-        _backend: siteType === 'aem-cs' ? 'aem-cs-fallback' : 'da',
-      }, null, 2);
     }
 
     /* ─── DA Editing Agent (real DA endpoints) ─── */
@@ -1421,355 +1400,126 @@ async function executeTool(name, input) {
     /* ─── Discovery Agent ─── */
 
     case 'search_dam_assets': {
+      if (!isSignedIn()) return authRequiredError('search_dam_assets');
       const query = input.query || '';
       const type = input.asset_type || 'image';
       const limit = input.limit || 6;
-
-      // Try real Discovery MCP first (for signed-in users with AEM CS)
-      if (isSignedIn()) {
-        try {
-          const host = window.__EW_AEM_HOST || null;
-          const result = await discoveryMcp.searchAssets(host, query, {
-            assetType: type,
-            limit,
-            folder: input.folder,
-            tags: input.tags,
-          });
-          return JSON.stringify({
-            query,
-            ...result,
-            _backend: 'discovery-mcp',
-            message: `Found assets matching "${query.slice(0, 50)}" via AEM Discovery MCP`,
-          }, null, 2);
-        } catch (err) {
-          console.warn('[search_dam_assets] Discovery MCP failed, falling back to demo:', err.message);
-        }
-      }
-
-      // Fallback: generate contextual demo results
-      const dam = profile.damTaxonomy || { root: '/content/dam', folders: ['images', 'brand'], namingConvention: 'asset-name' };
-      const searchFolder = input.folder || dam.root;
-      const tags = input.tags || [];
-      const dateRange = input.date_range || '';
-      const exclude = input.exclude || '';
-
-      const keywords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
-      const excludeWords = exclude.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
-      const filteredKeywords = keywords.filter((k) => !excludeWords.some((e) => k.includes(e)));
-      const useKeywords = filteredKeywords.length > 0 ? filteredKeywords : (keywords.length > 0 ? keywords : ['asset']);
-
-      const assets = [];
-      for (let i = 0; i < limit; i++) {
-        const folder = dam.folders[i % dam.folders.length];
-        const keyword = useKeywords[i % useKeywords.length] || 'asset';
-        const tagSuffix = tags.length > 0 ? `-${tags[i % tags.length]}` : '';
-        const assetName = `${keyword}-${folder}${tagSuffix}-${String(i + 1).padStart(2, '0')}`;
-        const seed = `${keyword}-${folder}-${i}`;
-        const thumbUrl = `https://picsum.photos/seed/${encodeURIComponent(seed)}/400/267`;
-        const dmDeliveryUrl = `https://delivery-p12345-e67890.adobeaemcloud.com/adobe/dynamicmedia/deliver/${assetName}/asset-${i + 1}.webp?width=1200&quality=85`;
-
-        const maxAge = dateRange.includes('6 month') ? 180 : dateRange.includes('12 month') ? 365 : 90;
-        const uploadDate = new Date(Date.now() - ((i + 1) * maxAge / limit) * 86400000);
-
-        assets.push({
-          path: `${searchFolder}/${folder}/${assetName}.jpg`,
-          name: `${assetName}.jpg`,
-          title: `${keyword.charAt(0).toUpperCase() + keyword.slice(1)} — ${folder}`,
-          type,
-          format: 'image/jpeg',
-          dimensions: { width: 2400, height: 1600 },
-          thumbnail_url: thumbUrl,
-          delivery_url: dmDeliveryUrl,
-          dynamic_media_url: dmDeliveryUrl,
-          status: 'approved',
-          rights_safe: true,
-          tags: [...tags, keyword, folder],
-          metadata: {
-            dc_title: `${keyword} ${folder} asset`,
-            dc_description: `Approved ${type} asset matching: ${query.slice(0, 80)}`,
-            dam_status: 'approved',
-            dam_expiry: 'none',
-            upload_date: uploadDate.toISOString().split('T')[0],
-          },
-          last_modified: uploadDate.toISOString().split('T')[0],
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await discoveryMcp.searchAssets(host, query, {
+          assetType: type,
+          limit,
+          folder: input.folder,
+          tags: input.tags,
         });
+        return JSON.stringify({
+          query,
+          ...result,
+          _source: 'connected',
+          source: 'AEM Discovery MCP',
+          message: `Found assets matching "${query.slice(0, 50)}"`,
+        }, null, 2);
+      } catch (err) {
+        return mcpError('search_dam_assets', err);
       }
-
-      return JSON.stringify({
-        query,
-        total_results: assets.length,
-        filter: { type, approved_only: input.approved_only !== false, folder: searchFolder },
-        assets,
-        _backend: 'demo',
-        message: `Found ${assets.length} approved ${type}(s) matching "${query.slice(0, 50)}"`,
-      }, null, 2);
     }
 
     /* ─── Governance Agent ─── */
 
     case 'run_governance_check': {
-      // Try real Experience Governance MCP first
-      if (isSignedIn()) {
-        try {
-          const host = window.__EW_AEM_HOST || null;
-          const result = await govMcp.checkPagePolicy(host, input.page_path);
-          return JSON.stringify({
-            page_path: input.page_path,
-            ...result,
-            _backend: 'governance-mcp',
-            message: `Governance check completed via AEM Experience Governance MCP`,
-          }, null, 2);
-        } catch (err) {
-          console.warn('[run_governance_check] Governance MCP failed, falling back to local:', err.message);
-        }
+      if (!isSignedIn()) return authRequiredError('run_governance_check');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await govMcp.checkPagePolicy(host, input.page_path);
+        return JSON.stringify({
+          page_path: input.page_path,
+          ...result,
+          _source: 'connected',
+          source: 'AEM Experience Governance MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('run_governance_check', err);
       }
-
-      // Fallback: local governance simulation
-      const checks = input.checks || ['brand', 'accessibility', 'metadata', 'legal', 'seo', 'drm'];
-      const legalRules = profile.legalSLA?.specialRules || [];
-      const brandVoice = profile.brandVoice || {};
-      const brandPolicies = profile.brandPolicies || [];
-
-      const results = {};
-      const findings = [];
-
-      checks.forEach((check) => {
-        switch (check) {
-          case 'brand': {
-            if (brandPolicies.length > 0) {
-              // Check each configured brand policy
-              const policyFindings = [];
-              brandPolicies.forEach((p) => {
-                const passed = Math.random() > 0.25;
-                policyFindings.push({ check: 'brand', severity: passed ? 'pass' : 'warn', message: `[${p.category}] ${p.rule}` });
-              });
-              const passCount = policyFindings.filter((f) => f.severity === 'pass').length;
-              const score = Math.round((passCount / policyFindings.length) * 100);
-              results.brand = { status: score >= 80 ? 'pass' : 'warn', score, policiesChecked: brandPolicies.length };
-              findings.push(...policyFindings);
-            } else {
-              results.brand = { status: 'pass', score: 92 };
-              if (brandVoice.colorPalette) findings.push({ check: 'brand', severity: 'info', message: `Brand colors verified: ${brandVoice.colorPalette.primary}, ${brandVoice.colorPalette.secondary}` });
-              findings.push({ check: 'brand', severity: 'pass', message: 'Brand voice tone matches profile guidelines' });
-              findings.push({ check: 'brand', severity: 'info', message: 'Tip: Configure brand policies in Settings → Brand Governance for detailed per-rule checks' });
-            }
-            break;
-          }
-          case 'accessibility':
-            results.accessibility = { status: 'warn', score: 78 };
-            findings.push({ check: 'accessibility', severity: 'warn', message: 'Verify all images have descriptive alt text' });
-            findings.push({ check: 'accessibility', severity: 'warn', message: 'Check color contrast ratios meet 4.5:1 minimum' });
-            findings.push({ check: 'accessibility', severity: 'pass', message: 'Heading hierarchy is correct (H1→H2→H3)' });
-            break;
-          case 'metadata':
-            results.metadata = { status: 'pass', score: 95 };
-            findings.push({ check: 'metadata', severity: 'pass', message: 'Page title, description, and OG tags present' });
-            findings.push({ check: 'metadata', severity: 'pass', message: 'Canonical URL configured' });
-            break;
-          case 'legal':
-            results.legal = { status: legalRules.length > 0 ? 'review' : 'pass', score: 85 };
-            if (legalRules.length > 0) {
-              findings.push({ check: 'legal', severity: 'review', message: `${legalRules.length} customer-specific legal rules require manual review` });
-              legalRules.slice(0, 3).forEach((rule) => findings.push({ check: 'legal', severity: 'info', message: `Rule: ${rule}` }));
-            }
-            findings.push({ check: 'legal', severity: 'pass', message: 'Privacy policy and terms links present' });
-            break;
-          case 'seo':
-            results.seo = { status: 'pass', score: 90 };
-            findings.push({ check: 'seo', severity: 'pass', message: 'Meta description within 160 chars' });
-            findings.push({ check: 'seo', severity: 'pass', message: 'Image optimization (WebP with fallbacks)' });
-            break;
-          case 'drm':
-            results.drm = { status: 'pass', score: 100 };
-            findings.push({ check: 'drm', severity: 'pass', message: 'All assets from approved DAM sources' });
-            break;
-        }
-      });
-
-      const overallScore = Math.round(Object.values(results).reduce((sum, r) => sum + r.score, 0) / Object.values(results).length);
-      const hasBlocking = Object.values(results).some((r) => r.status === 'fail');
-
-      return JSON.stringify({
-        page_path: input.page_path,
-        overall_score: overallScore,
-        overall_status: hasBlocking ? 'blocked' : overallScore >= 90 ? 'approved' : 'approved_with_warnings',
-        checks: results,
-        findings,
-        approval_chain: profile.approvalChain?.map((a) => a.role) || [],
-        recommendation: hasBlocking
-          ? 'Governance check BLOCKED. Fix critical issues before promoting launch.'
-          : `Governance score ${overallScore}/100. Safe to proceed with review.`,
-      }, null, 2);
     }
 
     /* ─── Audience Agent ─── */
 
     case 'get_audience_segments': {
-      const segments = profile.segments || [];
-      const sizes = profile.segmentSizes || {};
-      const aepOrgId = profile.aepOrgId;
-      const aepEndpoint = profile.entitlements?.aep?.endpoint;
-
-      // Try real AEP Segment API if signed in and org configured
-      if (input.action === 'list' && aepOrgId && isSignedIn()) {
-        try {
-          const resp = await da.constructor ? fetch(`https://${aepEndpoint}?limit=100`, {
-            headers: {
-              'x-gw-ims-org-id': aepOrgId,
-              'x-sandbox-name': profile.aepSandbox || 'prod',
-              Authorization: `Bearer ${da.constructor}`, // IMS token
-            },
-          }) : null;
-          if (resp?.ok) {
-            const data = await resp.json();
-            return JSON.stringify({
-              segments: (data.segments || data.children || []).slice(0, 20),
-              total: data.totalCount || data.segments?.length || 0,
-              _source: 'live',
-              _endpoint: aepEndpoint,
-              _org: aepOrgId,
-            }, null, 2);
-          }
-        } catch { /* fall through to curated data */ }
-      }
-
-      if (input.action === 'list') {
+      if (!isSignedIn()) return authRequiredError('get_audience_segments');
+      try {
+        const result = await marketingMcp.callTool('get_audience_segments', {
+          action: input.action || 'list',
+          query: input.query,
+        });
         return JSON.stringify({
-          segments: segments.map((s, i) => ({
-            ...s,
-            size_estimate: sizes[s.id] || 75000,
-            status: 'active',
-            activation: i < 2 ? 'AEP + Target' : 'AEP only',
-            created: '2024-11-15T00:00:00Z',
-            last_evaluated: new Date(Date.now() - 3600000).toISOString(),
-          })),
-          total: segments.length,
+          ...result,
           _source: 'connected',
-          _org: aepOrgId || profile.orgId,
-          _sandbox: profile.aepSandbox || profile.env,
+          source: 'Adobe Marketing Agent MCP — AEP Segments',
         }, null, 2);
+      } catch (err) {
+        return mcpError('get_audience_segments', err);
       }
-
-      if (input.action === 'create') {
-        const segId = `seg-${Date.now().toString(36)}`;
-        return JSON.stringify({
-          status: 'created',
-          segment: {
-            id: segId,
-            name: input.query || 'New Segment',
-            description: `AI-generated segment: ${input.query}`,
-            estimated_size: 54000,
-            status: 'processing',
-            activation: 'AEP (ready for Target sharing)',
-          },
-          message: `Segment "${input.query}" created in AEP. Processing audience data...`,
-          _source: 'connected',
-        }, null, 2);
-      }
-
-      // 'get' — return matching segment
-      const match = segments.find((s) => s.name.toLowerCase().includes((input.query || '').toLowerCase()) || s.id === input.query);
-      if (match) {
-        return JSON.stringify({
-          segment: { ...match, size_estimate: sizes[match.id] || 75000, status: 'active', last_evaluated: new Date(Date.now() - 3600000).toISOString() },
-          _source: 'connected',
-        }, null, 2);
-      }
-      return JSON.stringify({ error: `Segment not found: "${input.query}". Use action "list" to see available segments.` });
     }
 
     /* ─── Content Optimization Agent ─── */
 
     case 'create_content_variant': {
-      const variantId = `variant-${Date.now().toString(36)}`;
-      const matchedSeg = (profile.segments || []).find((s) => s.name.toLowerCase().includes((input.segment || '').toLowerCase()) || s.id === input.segment);
-      const segSize = matchedSeg ? (profile.segmentSizes?.[matchedSeg.id] || 75000) : 75000;
-      return JSON.stringify({
-        status: 'created',
-        variant_id: variantId,
-        source_page: input.page_path,
-        target_segment: input.segment,
-        segment_size: segSize,
-        changes_applied: input.changes || 'Segment-optimized hero image, CTA copy, and content priority',
-        dynamic_media: {
-          hero_rendition: `https://delivery-p12345-e67890.adobeaemcloud.com/adobe/dynamicmedia/deliver/variant-hero/optimized.webp?width=1440&crop=16:9&quality=85`,
-          note: 'Image resized and cropped via Dynamic Media + OpenAPI for segment-specific visual language',
-        },
-        preview_url: `https://main--${profile.repo || 'site'}--${(profile.orgId || 'org').toLowerCase()}.aem.page${input.page_path}?variant=${variantId}`,
-        message: `Content variant created for "${input.segment}" segment (${segSize.toLocaleString()} profiles). Hero image transformed via Dynamic Media, copy optimized for segment preferences.`,
-        _source: 'connected',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('create_content_variant');
+      try {
+        const result = await contentUpdaterMcp.callTool('create_content_variant', {
+          page_path: input.page_path,
+          segment: input.segment,
+          changes: input.changes,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'AEM Content Updater MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('create_content_variant', err);
+      }
     }
 
     /* ─── Data Insights Agent (CJA) ─── */
 
     case 'get_analytics_insights': {
-      const dateRange = input.date_range || 'last 30 days';
-      const ab = profile.analyticsBaseline || {};
-      const cjaEndpoint = profile.entitlements?.cja?.endpoint;
-      return JSON.stringify({
-        query: input.query,
-        date_range: dateRange,
-        page: input.page_path || 'site-wide',
-        metrics: {
-          page_views: ab.page_views || 34200,
-          unique_visitors: ab.unique_visitors || 18700,
-          bounce_rate: ab.bounce_rate || '31.4%',
-          avg_time_on_page: ab.avg_time_on_page || '94s',
-          conversion_rate: ab.conversion_rate || '3.2%',
-          top_entry_source: ab.top_entry_source || 'organic search',
-        },
-        ai_insights: [
-          `Traffic is ${ab.trend || 'stable vs prior period'}`,
-          `Mobile accounts for ${ab.mobile_pct || 62}% of visits`,
-          `Hero CTA click-through rate is ${ab.hero_ctr || '11.3%'} — above industry average`,
-        ],
-        data_view: profile.entitlements?.cja?.note || 'default data view',
-        _source: 'connected',
-        _endpoint: cjaEndpoint || 'CJA Data Insights Agent',
-        source: 'CJA Data Insights Agent',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('get_analytics_insights');
+      try {
+        const result = await cjaMcp.callTool('get_analytics_insights', {
+          query: input.query,
+          date_range: input.date_range || 'last 30 days',
+          page_path: input.page_path,
+          metrics: input.metrics,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'Adobe CJA MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('get_analytics_insights', err);
+      }
     }
 
     /* ─── Journey Agent (AJO) ─── */
 
     case 'get_journey_status': {
-      const journeys = profile.journeys || [
-        { name: 'Welcome Series', status: 'active', messages_sent: 14320, open_rate: '38.1%', conversion: '12.4%' },
-        { name: 'Re-engagement Campaign', status: 'active', messages_sent: 9840, open_rate: '31.7%', conversion: '7.2%' },
-        { name: 'Post-Purchase Follow-up', status: 'draft', messages_sent: 0, open_rate: 'N/A', conversion: 'N/A' },
-      ];
-
-      if (input.action === 'list') {
+      if (!isSignedIn()) return authRequiredError('get_journey_status');
+      try {
+        const result = await marketingMcp.callTool('get_journey_status', {
+          action: input.action || 'list',
+          journey_name: input.journey_name,
+          description: input.description,
+        });
         return JSON.stringify({
-          journeys,
-          total: journeys.length,
+          ...result,
           _source: 'connected',
-          source: 'AJO via Marketing Agent MCP',
+          source: 'Adobe Marketing Agent MCP — AJO',
         }, null, 2);
+      } catch (err) {
+        return mcpError('get_journey_status', err);
       }
-
-      if (input.action === 'create') {
-        return JSON.stringify({
-          status: 'created',
-          journey: {
-            id: `journey-${Date.now().toString(36)}`,
-            name: input.journey_name || 'New Journey',
-            description: input.description || '',
-            state: 'draft',
-            estimated_audience: 32000,
-          },
-          message: `Journey "${input.journey_name}" created in draft. Configure triggers and messages, then activate.`,
-          _source: 'connected',
-        }, null, 2);
-      }
-
-      // 'status' — find matching journey or return first
-      const match = journeys.find((j) => j.name.toLowerCase().includes((input.journey_name || '').toLowerCase()));
-      return JSON.stringify({
-        journey: match || journeys[0] || { name: input.journey_name || 'Unknown', status: 'active', messages_sent: 14320 },
-        _source: 'connected',
-      }, null, 2);
     }
 
     /* ─── Workfront WOA ─── */
@@ -1791,6 +1541,8 @@ async function executeTool(name, input) {
         project: `${profile.name} — Content Operations`,
         approval_chain: chain.map((c) => c.role),
         message: `Workfront task ${taskId} created: "${input.title}" — assigned to ${assignee} (SLA: ${sla})`,
+        _source: 'simulated',
+        _note: 'Workfront MCP not yet available. Wire WOA API when endpoint is published.',
       }, null, 2);
     }
 
@@ -1820,469 +1572,209 @@ async function executeTool(name, input) {
     /* ─── Target Agent (A/B Testing & Personalization) ─── */
 
     case 'create_ab_test': {
-      const activityId = `XT-${Date.now().toString(36).toUpperCase()}`;
-      const variants = input.variants || [
-        { name: 'Control', changes: 'Original content', traffic_pct: 50 },
-        { name: 'Variant B', changes: 'Modified hero CTA and headline', traffic_pct: 50 },
-      ];
-      const duration = input.duration_days || 14;
-      const metric = input.success_metric || 'conversion';
-
-      return JSON.stringify({
-        status: 'created',
-        activity_id: activityId,
-        activity_type: 'A/B Test',
-        name: input.test_name,
-        page: input.page_path,
-        variants: variants.map((v, i) => ({
-          ...v,
-          experience_id: `exp-${i}`,
-          traffic_allocation: v.traffic_pct || Math.round(100 / variants.length),
-        })),
-        success_metric: metric,
-        duration_days: duration,
-        estimated_visitors: 8400,
-        statistical_significance_target: '95%',
-        start_date: new Date().toISOString().split('T')[0],
-        end_date: new Date(Date.now() + duration * 86400000).toISOString().split('T')[0],
-        reporting_source: 'CJA (Customer Journey Analytics)',
-        message: `A/B test "${input.test_name}" created with ${variants.length} variants. Traffic split active. Results in ~${duration} days at 95% significance.`,
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('create_ab_test');
+      try {
+        const result = await marketingMcp.callTool('create_ab_test', {
+          test_name: input.test_name,
+          page_path: input.page_path,
+          variants: input.variants,
+          duration_days: input.duration_days || 14,
+          success_metric: input.success_metric || 'conversion',
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'Adobe Marketing Agent MCP — Target A/B',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('create_ab_test', err);
+      }
     }
 
     case 'get_personalization_offers': {
-      const segment = input.segment || 'all-visitors';
-      const location = input.location || 'hero-cta';
-      const offers = [
-        {
-          offer_id: `offer-${Date.now().toString(36)}`,
-          name: `${segment} — ${location} personalization`,
-          type: 'html',
-          content: `Personalized ${location} content for "${segment}" segment`,
-          priority: 1,
-          segment_match: segment,
-          dynamic_media_asset: `https://delivery-p12345-e67890.adobeaemcloud.com/adobe/dynamicmedia/deliver/personalized-${location}/offer.webp?width=1200&quality=85`,
-        },
-        {
-          offer_id: 'offer-fallback',
-          name: 'Default fallback',
-          type: 'html',
-          content: `Default ${location} content (no segment match)`,
-          priority: 0,
-          segment_match: 'all-visitors',
-        },
-      ];
-
-      return JSON.stringify({
-        page: input.page_path,
-        location,
-        decisioned_offer: offers[0],
-        fallback: offers[1],
-        decision_reason: `Visitor matched segment "${segment}" — serving personalized offer`,
-        response_time_ms: 24,
-        _source: 'connected',
-        source: 'Adobe Target — Experience Decisioning',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('get_personalization_offers');
+      try {
+        const result = await marketingMcp.callTool('get_personalization_offers', {
+          page_path: input.page_path,
+          segment: input.segment || 'all-visitors',
+          location: input.location || 'hero-cta',
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'Adobe Marketing Agent MCP — Target Decisioning',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('get_personalization_offers', err);
+      }
     }
 
     /* ─── AEP Real-time Profile Agent ─── */
 
     case 'get_customer_profile': {
-      const namespace = input.identity_namespace || 'email';
-      const segments = profile.segments || [];
-      const sizes = profile.segmentSizes || {};
-      const customers = profile.sampleCustomers || [];
-      const includeSet = new Set(input.include || ['segments', 'events', 'consent', 'identity_graph']);
-
-      // Match a sample customer by email or return the first one
-      const matchedCustomer = customers.find((c) =>
-        c.email?.toLowerCase() === (input.identity || '').toLowerCase()
-      ) || customers[0] || { firstName: 'Sample', lastName: 'Customer', email: input.identity || 'customer@example.com', ltv: '$4,200', loyalty: 'Gold', channel: 'email', city: 'San Francisco' };
-
-      const profileData = {
-        identity: input.identity || matchedCustomer.email,
-        namespace,
-        profile_id: `prof-${matchedCustomer.firstName?.toLowerCase()}-${matchedCustomer.lastName?.toLowerCase()}`,
-        merge_policy: 'timestamp-ordered',
-        last_updated: new Date(Date.now() - 2 * 86400000).toISOString(),
-        attributes: {
-          firstName: matchedCustomer.firstName,
-          lastName: matchedCustomer.lastName,
-          email: matchedCustomer.email,
-          lifetime_value: matchedCustomer.ltv,
-          loyalty_tier: matchedCustomer.loyalty,
-          preferred_channel: matchedCustomer.channel,
-          city: matchedCustomer.city,
-        },
-      };
-
-      if (includeSet.has('segments')) {
-        profileData.segment_memberships = segments.slice(0, 4).map((s) => ({
-          segment_id: s.id,
-          name: s.name,
-          size: sizes[s.id],
-          status: 'realized',
-          realized_at: new Date(Date.now() - 5 * 86400000).toISOString(),
-        }));
+      if (!isSignedIn()) return authRequiredError('get_customer_profile');
+      try {
+        const result = await marketingMcp.callTool('get_customer_profile', {
+          identity: input.identity,
+          identity_namespace: input.identity_namespace || 'email',
+          include: input.include || ['segments', 'events', 'consent', 'identity_graph'],
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'Adobe Marketing Agent MCP — AEP Profile',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('get_customer_profile', err);
       }
-
-      if (includeSet.has('events')) {
-        const firstJourney = profile.journeys?.[0]?.name || 'Welcome Series';
-        profileData.recent_events = [
-          { event: 'page_view', page: '/index', timestamp: new Date(Date.now() - 3600000).toISOString() },
-          { event: 'product_view', page: '/products/featured', timestamp: new Date(Date.now() - 7200000).toISOString() },
-          { event: 'email_open', campaign: firstJourney, timestamp: new Date(Date.now() - 86400000).toISOString() },
-        ];
-      }
-
-      if (includeSet.has('consent')) {
-        profileData.consent = {
-          marketing_email: 'opt-in',
-          marketing_push: matchedCustomer.channel === 'push' ? 'opt-in' : 'opt-out',
-          marketing_sms: 'opt-out',
-          analytics: 'opt-in',
-          personalization: 'opt-in',
-        };
-      }
-
-      if (includeSet.has('identity_graph')) {
-        profileData.identity_graph = {
-          identities: [
-            { namespace: 'email', value: matchedCustomer.email },
-            { namespace: 'ecid', value: `ECID-${profileData.profile_id.replace(/[^a-z0-9]/g, '')}01` },
-            { namespace: 'crmId', value: `CRM-${matchedCustomer.lastName?.toUpperCase()}-${matchedCustomer.firstName?.charAt(0)}001` },
-          ],
-          link_count: 3,
-        };
-      }
-
-      return JSON.stringify({
-        profile: profileData,
-        _source: 'connected',
-        _org: profile.aepOrgId || profile.orgId,
-        source: 'AEP Real-time Customer Data Platform',
-        sandbox: profile.aepSandbox || 'prod',
-      }, null, 2);
     }
 
     /* ─── Firefly Agent (Generative AI) ─── */
 
     case 'generate_image_variations': {
-      const count = Math.min(input.count || 3, 4);
-      const style = input.style || 'photo';
-      const ratio = input.aspect_ratio || 'original';
-      const variations = [];
-
-      const fireflySeeds = ['firefly-vibrant', 'firefly-dramatic', 'firefly-minimal', 'firefly-bold'];
-      for (let i = 0; i < count; i++) {
-        const varId = `ff-${Date.now().toString(36)}-${i}`;
-        const seed = `${(input.prompt || 'gen').slice(0, 20).replace(/\s+/g, '-')}-${i}`;
-        variations.push({
-          variation_id: varId,
-          delivery_url: `https://delivery-p12345-e67890.adobeaemcloud.com/adobe/dynamicmedia/deliver/firefly-${varId}/generated.webp?width=1440&quality=90`,
-          thumbnail_url: `https://picsum.photos/seed/${encodeURIComponent(seed)}/400/400`,
-          style_preset: style,
-          aspect_ratio: ratio,
-          prompt_used: input.prompt,
-          confidence_score: (0.92 - i * 0.03).toFixed(2),
-          dam_path: `/content/dam/generated/firefly/${varId}.webp`,
-          status: 'approved_for_review',
+      if (!isSignedIn()) return authRequiredError('generate_image_variations');
+      try {
+        const result = await contentUpdaterMcp.callTool('generate_image_variations', {
+          prompt: input.prompt,
+          source_asset: input.source_asset,
+          count: input.count || 3,
+          style: input.style,
+          aspect_ratio: input.aspect_ratio,
         });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'Adobe Firefly via AEM Content Updater MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('generate_image_variations', err);
       }
-
-      return JSON.stringify({
-        status: 'generated',
-        source_asset: input.source_asset || '(generated from prompt)',
-        prompt: input.prompt,
-        variations,
-        total_generated: count,
-        credits_used: count,
-        message: `${count} Firefly variation(s) generated. Assets saved to DAM for review. Use search_dam_assets to find them or patch_aem_page_content to apply.`,
-        _source: 'connected',
-        source: 'Adobe Firefly via GenStudio',
-      }, null, 2);
     }
 
     /* ─── Development Agent (Cloud Manager) ─── */
 
     case 'get_pipeline_status': {
-      const env = input.environment || 'prod';
-      const statusFilter = input.status_filter || null;
-      const programName = input.program_name || null;
-      const pipelines = [
-        {
-          pipeline_id: 'pipe-fullstack-01',
-          name: 'Full-Stack Production Pipeline',
-          type: 'fullStack',
-          environment: 'prod',
-          status: 'completed',
-          last_run: new Date(Date.now() - 2 * 86400000).toISOString(),
-          duration_min: 42,
-          commit: 'edfba4f',
-          trigger: 'git push (main)',
-          program: profile.name || 'AEM Program',
-        },
-        {
-          pipeline_id: 'pipe-frontend-01',
-          name: 'Frontend Pipeline (EDS)',
-          type: 'frontEnd',
-          environment: 'prod',
-          status: 'completed',
-          last_run: new Date(Date.now() - 3600000).toISOString(),
-          duration_min: 3,
-          commit: 'edfba4f',
-          trigger: 'Code Sync (automatic)',
-          program: profile.name || 'AEM Program',
-        },
-        {
-          pipeline_id: 'pipe-stage-01',
-          name: 'Stage Deployment',
-          type: 'fullStack',
-          environment: 'stage',
-          status: 'running',
-          last_run: new Date().toISOString(),
-          duration_min: null,
-          commit: 'latest',
-          trigger: 'manual',
-          program: profile.name || 'AEM Program',
-        },
-        {
-          pipeline_id: 'pipe-fullstack-02',
-          name: 'Nightly Build Pipeline',
-          type: 'fullStack',
-          environment: 'dev',
-          status: 'failed',
-          last_run: new Date(Date.now() - 6 * 3600000).toISOString(),
-          duration_min: 18,
-          commit: 'a3b7c9d',
-          trigger: 'scheduled (nightly)',
-          program: profile.name || 'AEM Program',
-          failure_reason: 'Unit test failure in ContentFragmentServlet',
-          failed_step: 'build',
-          error_log_excerpt: 'java.lang.AssertionError: Expected 200 but got 500 at ContentFragmentServletTest.java:142',
-        },
-      ];
-
-      let filtered = pipelines;
-
-      // Filter by pipeline_id first
-      if (input.pipeline_id) {
-        filtered = filtered.filter((p) => p.pipeline_id === input.pipeline_id);
-      } else {
-        // Filter by environment
-        if (env !== 'all') filtered = filtered.filter((p) => p.environment === env);
+      if (!isSignedIn()) return authRequiredError('get_pipeline_status');
+      try {
+        const result = await developmentMcp.callTool('get_pipeline_status', {
+          environment: input.environment || 'prod',
+          status_filter: input.status_filter,
+          pipeline_id: input.pipeline_id,
+          program_name: input.program_name,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'Cloud Manager via AEM Development MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('get_pipeline_status', err);
       }
-
-      // Filter by status (skip if "all" or empty)
-      if (statusFilter && statusFilter !== 'all') {
-        filtered = filtered.filter((p) => p.status === statusFilter);
-      }
-
-      // Filter by program name
-      if (programName) {
-        filtered = filtered.filter((p) => p.program.toLowerCase().includes(programName.toLowerCase()));
-      }
-
-      return JSON.stringify({
-        environment: env,
-        status_filter: statusFilter,
-        program: profile.name || 'AEM Program',
-        pipelines: filtered,
-        total_found: filtered.length,
-        environment_health: {
-          status: filtered.some((p) => p.status === 'failed') ? 'degraded' : 'healthy',
-          instances: env === 'prod' ? 3 : 1,
-          uptime: '99.97%',
-          last_deployment: filtered[0]?.last_run || 'unknown',
-        },
-        _source: 'connected',
-        source: 'Cloud Manager API via Development Agent',
-      }, null, 2);
     }
 
     /* ─── Acrobat MCP (PDF Services) ─── */
 
     case 'extract_pdf_content': {
-      const text = input.content_text || '';
-      const tables = input.extract_tables !== false;
-      const images = input.extract_images !== false;
-
-      return JSON.stringify({
-        status: 'extracted',
-        file_name: input.file_name,
-        document_structure: {
-          page_count: Math.max(1, Math.ceil(text.length / 3000)),
-          word_count: text ? text.split(/\s+/).length : 0,
-          has_tables: tables,
-          has_images: images,
-          languages_detected: ['en'],
-        },
-        content: {
-          text: text.slice(0, 10000) || '(PDF text content would be extracted here)',
-          headings: ['(AI will extract document headings from content)'],
-          tables: tables ? [{ note: 'Tables extracted as structured JSON' }] : [],
-          images: images ? [{ note: 'Image metadata and positions extracted' }] : [],
-        },
-        metadata: {
-          title: input.file_name?.replace(/\.pdf$/i, '') || 'Untitled',
-          author: '(extracted from PDF metadata)',
-          created: '(extracted from PDF metadata)',
-          modified: new Date().toISOString(),
-        },
-        message: `PDF "${input.file_name}" processed. ${text ? text.split(/\s+/).length + ' words' : 'Content'} extracted with ${tables ? 'table' : 'no table'} and ${images ? 'image' : 'no image'} extraction.`,
-        _source: 'connected',
-        source: 'Adobe PDF Services via Acrobat MCP',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('extract_pdf_content');
+      try {
+        const result = await acrobatMcp.callTool('extract_pdf_content', {
+          file_name: input.file_name,
+          content_text: input.content_text,
+          extract_tables: input.extract_tables !== false,
+          extract_images: input.extract_images !== false,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'Adobe Acrobat MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('extract_pdf_content', err);
+      }
     }
 
     /* ─── Development Agent: Pipeline Failure Analysis ─── */
 
     case 'analyze_pipeline_failure': {
-      const programName = input.program_name || profile.name || 'Main Program';
-      return JSON.stringify({
-        status: 'analyzed',
-        program: programName,
-        pipeline: {
-          pipeline_id: input.pipeline_id || 'pipe-fullstack-01',
-          name: 'Full-Stack Production Pipeline',
-          run_id: `run-${Date.now().toString(36)}`,
-          status: 'failed',
-          failed_at: new Date(Date.now() - 4 * 3600000).toISOString(),
-          duration_min: 18,
-        },
-        failure_analysis: {
-          phase: 'build',
-          root_cause: 'Unit test failure in core module',
-          error_summary: 'com.adobe.aem.core.models.HeroModelTest — testGetTitle FAILED: Expected "Welcome" but was null',
-          confidence: '92%',
-        },
-        log_excerpts: input.include_logs !== false ? [
-          { phase: 'build', level: 'ERROR', message: 'Test com.adobe.aem.core.models.HeroModelTest#testGetTitle FAILED' },
-          { phase: 'build', level: 'ERROR', message: 'java.lang.AssertionError: Expected "Welcome" but was null' },
-          { phase: 'build', level: 'INFO', message: 'BUILD FAILURE — 1 test failed out of 247' },
-        ] : [],
-        remediation: {
-          recommended_action: 'Fix the HeroModel.getTitle() method — it returns null when the resource has no jcr:title property',
-          auto_fixable: false,
-          similar_failures: 2,
-          last_success: new Date(Date.now() - 48 * 3600000).toISOString(),
-        },
-        _source: 'connected',
-        source: 'Cloud Manager API via Development Agent',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('analyze_pipeline_failure');
+      try {
+        const result = await developmentMcp.callTool('analyze_pipeline_failure', {
+          pipeline_id: input.pipeline_id,
+          program_name: input.program_name,
+          include_logs: input.include_logs !== false,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'AEM Development MCP — Pipeline Analysis',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('analyze_pipeline_failure', err);
+      }
     }
 
     /* ─── Experience Production Agent: Translate Page ─── */
 
     case 'translate_page': {
-      const langNames = { es: 'Spanish', fr: 'French', de: 'German', ja: 'Japanese', 'pt-br': 'Brazilian Portuguese', it: 'Italian', ko: 'Korean', zh: 'Chinese' };
-      const lang = input.target_language || 'es';
-      const langName = langNames[lang] || lang;
-      const sourcePath = input.page_url?.replace(/https?:\/\/[^/]+/, '') || '/index';
-      const targetPath = input.language_tree_path || `/content/${input.site_id || 'site'}/${lang}${sourcePath}`;
-
-      return JSON.stringify({
-        status: 'translated',
-        source_page: input.page_url,
-        source_language: 'en',
-        target_language: lang,
-        target_language_name: langName,
-        target_path: targetPath,
-        preview_url: `${input.page_url?.replace(/\/[^/]+$/, '') || 'https://main--site--org.aem.page'}${targetPath}`,
-        translation_provider: 'Adobe AI Translation + AEM Translation Framework',
-        word_count: 1420,
-        segments_translated: 68,
-        quality_score: '94.2%',
-        review_status: 'pending_review',
-        message: `Page translated to ${langName} and placed at ${targetPath}. Translation quality: 94.2%. Pending human review.`,
-        _source: 'connected',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('translate_page');
+      try {
+        const result = await contentUpdaterMcp.callTool('translate_page', {
+          page_url: input.page_url,
+          target_language: input.target_language || 'es',
+          site_id: input.site_id,
+          language_tree_path: input.language_tree_path,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'AEM Content Updater MCP — Translation',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('translate_page', err);
+      }
     }
 
     /* ─── Experience Production Agent: Create Form ─── */
 
     case 'create_form': {
-      const formId = `form-${Date.now().toString(36)}`;
-      const formType = input.form_type || 'custom';
-      const defaultFields = {
-        contact: [
-          { name: 'name', type: 'text', label: 'Full Name', required: true },
-          { name: 'email', type: 'email', label: 'Email Address', required: true },
-          { name: 'phone', type: 'tel', label: 'Phone Number', required: false },
-          { name: 'message', type: 'textarea', label: 'Message', required: true },
-        ],
-        'lead-gen': [
-          { name: 'firstName', type: 'text', label: 'First Name', required: true },
-          { name: 'lastName', type: 'text', label: 'Last Name', required: true },
-          { name: 'email', type: 'email', label: 'Work Email', required: true },
-          { name: 'company', type: 'text', label: 'Company', required: true },
-          { name: 'jobTitle', type: 'text', label: 'Job Title', required: false },
-          { name: 'interest', type: 'select', label: 'Area of Interest', required: true, options: ['AEM Sites', 'AEM Assets', 'Analytics', 'Target', 'Other'] },
-        ],
-        newsletter: [
-          { name: 'email', type: 'email', label: 'Email Address', required: true },
-          { name: 'preferences', type: 'checkbox', label: 'Content Preferences', options: ['Product Updates', 'Best Practices', 'Events', 'Case Studies'] },
-        ],
-      };
-      const fields = input.fields || defaultFields[formType] || defaultFields.contact;
-
-      return JSON.stringify({
-        status: 'created',
-        form_id: formId,
-        form_type: formType,
-        description: input.description,
-        fields,
-        field_count: fields.length,
-        submit_action: input.submit_action || 'spreadsheet',
-        page_path: input.page_path || '/forms/' + formId,
-        eds_block: 'form',
-        spreadsheet_url: `https://main--${profile.repo || 'site'}--${(profile.orgId || 'org').toLowerCase()}.aem.live/forms/${formId}.json`,
-        message: `Form "${input.description}" created with ${fields.length} fields. Type: ${formType}. Submits to: ${input.submit_action || 'spreadsheet'}.`,
-        _source: 'connected',
-        source: 'Experience Production Agent — Form Builder',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('create_form');
+      try {
+        const result = await contentUpdaterMcp.callTool('create_form', {
+          form_type: input.form_type,
+          description: input.description,
+          fields: input.fields,
+          page_path: input.page_path,
+          submit_action: input.submit_action,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'Experience Production Agent — Form Builder',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('create_form', err);
+      }
     }
 
     /* ─── Experience Production Agent: Modernize Content ─── */
 
     case 'modernize_content': {
-      const scope = input.scope || 'full-site';
-      const isDryRun = input.dry_run !== false;
-      const designSystem = input.design_system || 'default';
-      const pagesScanned = scope === 'single-page' ? 1 : scope === 'section' ? 5 : 28;
-      const needsUpdate = scope === 'single-page' ? 3 : scope === 'section' ? 14 : 84;
-      const compliant = scope === 'single-page' ? 5 : scope === 'section' ? 26 : 140;
-
-      return JSON.stringify({
-        status: isDryRun ? 'dry-run-complete' : 'modernization-applied',
-        site: input.site_url,
-        design_system: designSystem,
-        scope,
-        pages_scanned: pagesScanned,
-        report: {
-          total_components: needsUpdate + compliant,
-          needs_update: needsUpdate,
-          already_compliant: compliant,
-          categories: [
-            { category: 'Hero blocks', total: pagesScanned, needs_update: Math.floor(pagesScanned * 0.3), issue: 'Legacy image sizing, missing responsive breakpoints' },
-            { category: 'Cards blocks', total: Math.floor(pagesScanned * 0.8), needs_update: Math.floor(pagesScanned * 0.2), issue: 'Non-standard card grid spacing' },
-            { category: 'Typography', total: pagesScanned, needs_update: Math.floor(pagesScanned * 0.4), issue: 'Font-size tokens not using design system variables' },
-            { category: 'Color tokens', total: pagesScanned, needs_update: Math.floor(pagesScanned * 0.15), issue: 'Hardcoded hex values instead of CSS custom properties' },
-            { category: 'Section metadata', total: Math.floor(pagesScanned * 0.6), needs_update: Math.floor(pagesScanned * 0.1), issue: 'Missing section style classes' },
-          ],
-        },
-        recommended_actions: [
-          'Update hero blocks to use responsive image sizing pattern',
-          'Replace hardcoded colors with CSS custom properties from design system',
-          'Apply updated card grid spacing (gap: var(--spacing-m))',
-          'Add section metadata styles for consistent section theming',
-        ],
-        message: isDryRun
-          ? `Dry-run complete. ${pagesScanned} pages scanned, ${needsUpdate} components need updates to match ${designSystem}.`
-          : `Modernization applied to ${pagesScanned} pages. ${needsUpdate} components updated.`,
-        _source: 'connected',
-        source: 'Experience Production Agent — Content Modernizer',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('modernize_content');
+      try {
+        const result = await contentUpdaterMcp.callTool('modernize_content', {
+          site_url: input.site_url,
+          design_system: input.design_system,
+          scope: input.scope || 'single-page',
+          dry_run: input.dry_run !== false,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'Experience Production Agent — Generate Variations',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('modernize_content', err);
+      }
     }
 
     /* ─── Governance Agent: Brand Guidelines ─── */
@@ -2333,8 +1825,8 @@ async function executeTool(name, input) {
         customer: profile.name || 'Current Customer',
         guidelines: result,
         last_updated: new Date(Date.now() - 15 * 86400000).toISOString().split('T')[0],
-        _source: 'connected',
-        source: 'Governance Agent — Brand Guidelines Repository',
+        _source: 'profile',
+        _note: 'Brand guidelines loaded from customer profile. For enterprise policies, wire Governance MCP get_brand_policy.',
         message: category === 'all'
           ? `Complete brand guidelines for ${profile.name}. Covers voice, colors, typography, imagery, and logo.`
           : `${category.charAt(0).toUpperCase() + category.slice(1)} guidelines for ${profile.name}.`,
@@ -2344,127 +1836,63 @@ async function executeTool(name, input) {
     /* ─── Governance Agent: Asset Expiry ─── */
 
     case 'check_asset_expiry': {
-      const days = input.days_until_expiry || 30;
-      const folder = input.folder || '/content/dam';
-      const includeExpired = input.include_expired !== false;
-
-      const expiringAssets = [
-        { name: 'hero-banner-spring-campaign.jpg', license: 'rights-managed', daysLeft: 3, usages: 8 },
-        { name: 'product-lifestyle-outdoor.jpg', license: 'royalty-free', daysLeft: 11, usages: 4 },
-        { name: 'testimonial-headshot-martinez.jpg', license: 'editorial', daysLeft: 18, usages: 2 },
-        { name: 'promo-video-thumbnail-q2.jpg', license: 'rights-managed', daysLeft: 5, usages: 6 },
-        { name: 'infographic-market-trends.png', license: 'royalty-free', daysLeft: 24, usages: 3 },
-      ].filter((a) => a.daysLeft <= days);
-
-      const expiredAssets = includeExpired ? [
-        { name: 'campaign-header-winter-2024.jpg', license: 'rights-managed', daysAgo: 12, usages: 3, pages: 2 },
-        { name: 'event-photo-summit-keynote.jpg', license: 'editorial', daysAgo: 5, usages: 1, pages: 1 },
-      ] : [];
-
-      const assets = [
-        ...expiringAssets.map((a) => ({
-          path: `${folder}/${a.name}`,
-          name: a.name,
-          status: 'expiring',
-          expires_at: new Date(Date.now() + a.daysLeft * 86400000).toISOString().split('T')[0],
-          days_remaining: a.daysLeft,
-          license_type: a.license,
-          usage_count: a.usages,
-          action_required: a.daysLeft < 7 ? 'urgent-renewal' : 'schedule-renewal',
-        })),
-        ...expiredAssets.map((a) => ({
-          path: `${folder}/${a.name}`,
-          name: a.name,
-          status: 'expired',
-          expires_at: new Date(Date.now() - a.daysAgo * 86400000).toISOString().split('T')[0],
-          days_remaining: 0,
-          license_type: a.license,
-          usage_count: a.usages,
-          action_required: 'immediate-removal',
-          published_pages: a.pages,
-        })),
-      ];
-
-      return JSON.stringify({
-        folder,
-        scan_window_days: days,
-        total_assets_scanned: 142,
-        expiring: assets.filter((a) => a.status === 'expiring'),
-        expired: assets.filter((a) => a.status === 'expired'),
-        summary: {
-          expiring_count: expiringAssets.length,
-          expired_count: expiredAssets.length,
-          urgent_count: assets.filter((a) => a.days_remaining < 7 && a.days_remaining > 0).length,
-        },
-        message: `Found ${expiringAssets.length} assets expiring within ${days} days${includeExpired ? ` and ${expiredAssets.length} already expired` : ''}. ${assets.filter((a) => a.action_required === 'immediate-removal').length} require immediate action.`,
-        _source: 'connected',
-        source: 'Governance Agent — DRM & Asset Expiry',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('check_asset_expiry');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await discoveryMcp.checkAssetExpiry(host, {
+          days: input.days_until_expiry || 30,
+          folder: input.folder,
+          includeExpired: input.include_expired !== false,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'AEM Discovery MCP — Asset Expiry',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('check_asset_expiry', err);
+      }
     }
 
     /* ─── Governance Agent: Content Audit ─── */
 
     case 'audit_content': {
-      const contentType = input.content_type || 'content-fragments';
-      const staleDays = input.stale_days || 90;
-      const statusFilter = input.status_filter || 'published';
-
-      const basePath = contentType === 'content-fragments' ? 'dam/fragments' : contentType === 'pages' ? 'site/en' : 'dam';
-      const typeLabel = contentType === 'content-fragments' ? 'Fragment' : contentType === 'pages' ? 'Page' : 'Asset';
-      const curatedItems = [
-        { title: `${typeLabel}: Q3 Product Launch`, daysStale: 210, author: 'marketing-team', published: true },
-        { title: `${typeLabel}: Partner Integration Guide`, daysStale: 185, author: 'content-author', published: true },
-        { title: `${typeLabel}: Legacy Pricing Table`, daysStale: 340, author: 'admin', published: true },
-        { title: `${typeLabel}: Event Recap — Summit 2024`, daysStale: 142, author: 'marketing-team', published: true },
-        { title: `${typeLabel}: Deprecated API Reference`, daysStale: 275, author: 'content-author', published: false },
-        { title: `${typeLabel}: Holiday Campaign Assets`, daysStale: 118, author: 'marketing-team', published: true },
-        { title: `${typeLabel}: Old Brand Guidelines v2`, daysStale: 390, author: 'admin', published: false },
-        { title: `${typeLabel}: Beta Feature Announcement`, daysStale: 96, author: 'content-author', published: true },
-      ].filter((item) => item.daysStale >= staleDays);
-
-      const staleItems = curatedItems.map((item, i) => ({
-        path: `/content/${basePath}/${contentType}-${String(i + 1).padStart(3, '0')}`,
-        title: item.title,
-        type: contentType,
-        last_modified: new Date(Date.now() - item.daysStale * 86400000).toISOString().split('T')[0],
-        days_since_update: item.daysStale,
-        published: statusFilter === 'published' ? true : item.published,
-        author: item.author,
-        status: item.daysStale > staleDays * 2 ? 'critical' : 'stale',
-      }));
-
-      return JSON.stringify({
-        content_type: contentType,
-        stale_threshold_days: staleDays,
-        status_filter: statusFilter,
-        total_scanned: 168,
-        stale_items: staleItems,
-        summary: {
-          total_stale: staleItems.length,
-          critical: staleItems.filter((i) => i.status === 'critical').length,
-          still_published: staleItems.filter((i) => i.published).length,
-        },
-        recommendations: [
-          `Review and update ${staleItems.filter((i) => i.status === 'critical').length} critical items (over ${staleDays * 2} days stale)`,
-          `Consider unpublishing ${staleItems.filter((i) => i.published).length} stale items that are still live`,
-          'Set up automated staleness alerts for content governance',
-        ],
-        message: `Found ${staleItems.length} stale ${contentType} not updated in ${staleDays}+ days. ${staleItems.filter((i) => i.published).length} are still published.`,
-        _source: 'connected',
-        source: 'Governance Agent — Content Audit',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('audit_content');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await discoveryMcp.auditContent(host, {
+          contentType: input.content_type || 'all',
+          staleDays: input.stale_days || 90,
+          statusFilter: input.status_filter || 'published',
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'AEM Discovery MCP — Content Audit',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('audit_content', err);
+      }
     }
 
     /* ─── Content Optimization Agent: Transform Image ─── */
 
     case 'transform_image': {
+      const dmHost = getDmDeliveryHost();
+      if (!dmHost) {
+        return JSON.stringify({
+          error: 'Dynamic Media delivery host not available. Connect an AEM CS environment to enable image transforms.',
+          hint: 'Sign in and connect an AEM environment with Dynamic Media + OpenAPI enabled.',
+          _source: 'error',
+        });
+      }
       const ops = input.operations || [];
       const smartCrop = input.smart_crop;
       const format = input.output_format || 'webp';
       const quality = input.quality || 85;
       const assetName = input.asset_path?.split('/').pop()?.replace(/\.[^.]+$/, '') || 'transformed';
 
-      // Build DM URL with transformation parameters
+      // Build DM URL with transformation parameters using real delivery host
       let dmParams = `quality=${quality}`;
       if (smartCrop) dmParams += `&crop=${smartCrop}`;
       ops.forEach((op) => {
@@ -2478,7 +1906,7 @@ async function executeTool(name, input) {
         if (op.startsWith('mirror:')) dmParams += `&flip=${op.slice(7)}`;
       });
 
-      const deliveryUrl = `https://delivery-p12345-e67890.adobeaemcloud.com/adobe/dynamicmedia/deliver/${assetName}/transformed.${format}?${dmParams}`;
+      const deliveryUrl = `https://${dmHost}/adobe/dynamicmedia/deliver/${assetName}/transformed.${format}?${dmParams}`;
 
       return JSON.stringify({
         status: 'transformed',
@@ -2488,17 +1916,24 @@ async function executeTool(name, input) {
           delivery_url: deliveryUrl,
           format,
           quality,
-          dam_path: `/content/dam/transformed/${assetName}-transformed.${format}`,
         },
-        message: `Image transformed: ${ops.length + (smartCrop ? 1 : 0)} operation(s) applied. Delivered as ${format.toUpperCase()} at ${quality}% quality via Dynamic Media.`,
-        _source: 'connected',
-        source: 'Content Optimization Agent — Dynamic Media + OpenAPI',
+        message: `Image transformed: ${ops.length + (smartCrop ? 1 : 0)} operation(s) applied via Dynamic Media + OpenAPI.`,
+        _source: 'dm-url',
+        _note: 'DM delivery URL constructed from asset path + transform params. Requires DM+OpenAPI enabled on the AEM environment.',
       }, null, 2);
     }
 
     /* ─── Content Optimization Agent: Batch Renditions ─── */
 
     case 'create_image_renditions': {
+      const dmHost = getDmDeliveryHost();
+      if (!dmHost) {
+        return JSON.stringify({
+          error: 'Dynamic Media delivery host not available. Connect an AEM CS environment to enable renditions.',
+          hint: 'Sign in and connect an AEM environment with Dynamic Media + OpenAPI enabled.',
+          _source: 'error',
+        });
+      }
       const assetName = input.asset_path?.split('/').pop()?.replace(/\.[^.]+$/, '') || 'source';
       const channelSpecs = {
         instagram: [{ name: 'Instagram Story', width: 1080, height: 1920, format: 'jpeg', quality: 90 }, { name: 'Instagram Post', width: 1080, height: 1080, format: 'jpeg', quality: 90 }],
@@ -2530,9 +1965,7 @@ async function executeTool(name, input) {
         height: spec.height,
         format: spec.format || 'webp',
         quality: spec.quality || 85,
-        delivery_url: `https://delivery-p12345-e67890.adobeaemcloud.com/adobe/dynamicmedia/deliver/${assetName}/${(spec.name || `rendition-${i}`).toLowerCase().replace(/\s+/g, '-')}.${spec.format || 'webp'}?width=${spec.width}&height=${spec.height}&quality=${spec.quality || 85}`,
-        dam_path: `/content/dam/renditions/${assetName}/${(spec.name || `rendition-${i}`).toLowerCase().replace(/\s+/g, '-')}.${spec.format || 'webp'}`,
-        file_size_estimate: `${Math.floor(spec.width * spec.height * 0.3 / 1024)}kb`,
+        delivery_url: `https://${dmHost}/adobe/dynamicmedia/deliver/${assetName}/${(spec.name || `rendition-${i}`).toLowerCase().replace(/\s+/g, '-')}.${spec.format || 'webp'}?width=${spec.width}&height=${spec.height}&quality=${spec.quality || 85}`,
       }));
 
       return JSON.stringify({
@@ -2541,31 +1974,29 @@ async function executeTool(name, input) {
         renditions,
         total_renditions: renditions.length,
         channels: input.channels || [],
-        message: `${renditions.length} rendition(s) created from ${assetName}. All saved to DAM and available via Dynamic Media delivery URLs.`,
-        _source: 'connected',
-        source: 'Content Optimization Agent — Dynamic Media Renditions',
+        message: `${renditions.length} rendition(s) created via Dynamic Media + OpenAPI.`,
+        _source: 'dm-url',
+        _note: 'DM delivery URLs constructed from asset path + channel specs. Requires DM+OpenAPI enabled on the AEM environment.',
       }, null, 2);
     }
 
     /* ─── Discovery Agent: Add to Collection ─── */
 
     case 'add_to_collection': {
-      const collectionId = `col-${Date.now().toString(36)}`;
-      const assetCount = input.asset_paths?.length || 0;
-
-      return JSON.stringify({
-        status: input.create_if_missing !== false ? 'created_and_added' : 'added',
-        collection: {
-          id: collectionId,
-          name: input.collection_name,
-          path: `/content/dam/collections/${input.collection_name.toLowerCase().replace(/\s+/g, '-')}`,
-          asset_count: assetCount,
-        },
-        assets_added: input.asset_paths || [],
-        message: `${assetCount} asset(s) added to collection "${input.collection_name}". Collection ${input.create_if_missing !== false ? 'created and ' : ''}ready for campaign use.`,
-        _source: 'connected',
-        source: 'Discovery Agent — DAM Collections',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('add_to_collection');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await discoveryMcp.addToCollection(host, input.collection_name, input.asset_paths, {
+          createIfMissing: input.create_if_missing !== false,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'AEM Discovery MCP — Collections',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('add_to_collection', err);
+      }
     }
 
     /* ─── Journey Agent (conflict analysis) ─── */
@@ -2758,94 +2189,40 @@ async function executeTool(name, input) {
     /* ─── Spacecat / AEM Sites Optimizer MCP ─── */
 
     case 'get_site_opportunities': {
-      const siteUrl = input.site_url || `https://${profile.branch}--${profile.repo}--${profile.orgId.toLowerCase()}.aem.live`;
-      const category = input.category || 'all';
-      const priority = input.priority || 'all';
-
-      const allOpportunities = [
-        { id: 'opp-001', category: 'seo', priority: 'high', title: 'Missing meta descriptions on 12 pages', description: '12 pages lack meta descriptions, reducing click-through rates from search results. Average CTR loss estimated at 15-20%.', impact: 8.5, effort: 'low', pages_affected: 12 },
-        { id: 'opp-002', category: 'performance', priority: 'high', title: 'LCP exceeds 2.5s on 3 pages', description: 'Largest Contentful Paint > 2.5s on homepage, products page, and blog index. Caused by unoptimized hero images (2.4MB avg).', impact: 9.2, effort: 'medium', pages_affected: 3 },
-        { id: 'opp-003', category: 'broken-backlinks', priority: 'high', title: '8 high-authority broken backlinks', description: '8 external sites link to pages returning 404. Combined domain authority of referring sites: 2,340. Significant lost link equity.', impact: 8.8, effort: 'low', pages_affected: 8 },
-        { id: 'opp-004', category: 'seo', priority: 'medium', title: 'Duplicate title tags on 5 pages', description: '5 pages share identical title tags, causing search engine confusion about canonical pages.', impact: 6.2, effort: 'low', pages_affected: 5 },
-        { id: 'opp-005', category: 'accessibility', priority: 'medium', title: 'Images missing alt text (23 instances)', description: '23 images across 9 pages lack alt text, failing WCAG 2.1 AA Level 1.1.1.', impact: 5.8, effort: 'low', pages_affected: 9 },
-        { id: 'opp-006', category: 'performance', priority: 'medium', title: 'CLS > 0.1 on mobile for 4 pages', description: 'Cumulative Layout Shift exceeds threshold on mobile due to dynamically loaded ads and late font swap.', impact: 6.5, effort: 'medium', pages_affected: 4 },
-        { id: 'opp-007', category: 'content', priority: 'low', title: 'Thin content on 7 pages (< 300 words)', description: '7 pages have fewer than 300 words of content, which may be seen as thin content by search engines.', impact: 4.1, effort: 'medium', pages_affected: 7 },
-        { id: 'opp-008', category: 'seo', priority: 'low', title: 'Missing structured data on product pages', description: 'Product pages lack JSON-LD structured data (Product schema), missing rich snippet opportunities in SERPs.', impact: 5.0, effort: 'medium', pages_affected: 15 },
-      ];
-
-      let filtered = allOpportunities;
-      if (category !== 'all') filtered = filtered.filter((o) => o.category === category);
-      if (priority !== 'all') filtered = filtered.filter((o) => o.priority === priority);
-
-      return JSON.stringify({
-        site_url: siteUrl,
-        scan_date: '2026-03-27T08:00:00Z',
-        total_opportunities: filtered.length,
-        summary: {
-          high_priority: filtered.filter((o) => o.priority === 'high').length,
-          medium_priority: filtered.filter((o) => o.priority === 'medium').length,
-          low_priority: filtered.filter((o) => o.priority === 'low').length,
-          avg_impact: +(filtered.reduce((s, o) => s + o.impact, 0) / (filtered.length || 1)).toFixed(1),
-        },
-        opportunities: filtered,
-        _source: 'connected',
-        source: 'Sites Optimizer MCP (Spacecat) — Prod',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('get_site_opportunities');
+      const siteUrl = input.site_url || `https://${profile.branch || 'main'}--${profile.repo || 'site'}--${(profile.orgId || 'org').toLowerCase()}.aem.live`;
+      try {
+        const result = await spacecatMcp.getSiteOpportunities(siteUrl, {
+          category: input.category,
+          priority: input.priority,
+        });
+        return JSON.stringify({
+          site_url: siteUrl,
+          ...result,
+          _source: 'connected',
+          source: 'Sites Optimizer MCP (Spacecat)',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('get_site_opportunities', err);
+      }
     }
 
     case 'get_site_audit': {
-      const siteUrl = input.site_url || `https://${profile.branch}--${profile.repo}--${profile.orgId.toLowerCase()}.aem.live`;
-      const auditType = input.audit_type || 'full';
-
-      const audit = {
-        site_url: siteUrl,
-        audit_date: '2026-03-27T06:30:00Z',
-        audit_type: auditType,
-
-        lighthouse: {
-          performance: 94,
-          accessibility: 88,
-          best_practices: 96,
-          seo: 91,
-        },
-
-        core_web_vitals: {
-          lcp: { value: '1.8s', rating: 'good', p75: '2.1s' },
-          fid: { value: '45ms', rating: 'good', p75: '62ms' },
-          cls: { value: '0.04', rating: 'good', p75: '0.08' },
-          inp: { value: '120ms', rating: 'good', p75: '180ms' },
-        },
-
-        broken_backlinks: {
-          total: 8,
-          high_authority: 3,
-          top_issues: [
-            { source_url: 'https://techcrunch.com/article-link', target_path: '/blog/old-announcement', domain_authority: 94, anchor_text: 'latest platform update' },
-            { source_url: 'https://searchengineland.com/review', target_path: '/features/deprecated-page', domain_authority: 88, anchor_text: 'AEM features overview' },
-            { source_url: 'https://cmswire.com/article', target_path: '/resources/whitepaper-2024', domain_authority: 76, anchor_text: 'digital experience whitepaper' },
-          ],
-        },
-
-        page_errors: {
-          total_404s: 5,
-          redirect_chains: 2,
-          mixed_content: 0,
-        },
-
-        summary: `Site scores well overall (Lighthouse 94/88/96/91). ${auditType === 'full' ? '8 broken backlinks need attention (3 from high-authority domains). CWV all in "good" range. 5 pages returning 404.' : ''}`,
-      };
-
-      // Trim sections based on audit type
-      if (auditType === 'lighthouse') { delete audit.broken_backlinks; delete audit.page_errors; }
-      if (auditType === 'broken-backlinks') { delete audit.lighthouse; delete audit.core_web_vitals; }
-      if (auditType === 'cwv') { delete audit.broken_backlinks; delete audit.page_errors; delete audit.lighthouse; }
-      if (auditType === '404') { delete audit.lighthouse; delete audit.core_web_vitals; delete audit.broken_backlinks; }
-
-      return JSON.stringify({
-        ...audit,
-        _source: 'connected',
-        source: 'Sites Optimizer MCP (Spacecat) — Prod',
-      }, null, 2);
+      if (!isSignedIn()) return authRequiredError('get_site_audit');
+      const siteUrl = input.site_url || `https://${profile.branch || 'main'}--${profile.repo || 'site'}--${(profile.orgId || 'org').toLowerCase()}.aem.live`;
+      try {
+        const result = await spacecatMcp.getSiteAudit(siteUrl, {
+          auditType: input.audit_type || 'full',
+        });
+        return JSON.stringify({
+          site_url: siteUrl,
+          ...result,
+          _source: 'connected',
+          source: 'Sites Optimizer MCP (Spacecat)',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('get_site_audit', err);
+      }
     }
 
     /* ─── Experimentation Agent ─── */
@@ -3024,80 +2401,22 @@ async function executeTool(name, input) {
     /* ─── Forms Agent ─── */
 
     case 'generate_form': {
-      const desc = input.description;
-      let fields = input.fields;
-
-      // If no explicit fields, infer from description
-      if (!fields || fields.length === 0) {
-        const lower = desc.toLowerCase();
-        fields = [];
-        if (lower.includes('name') || lower.includes('contact')) fields.push({ name: 'name', type: 'text', label: 'Full Name', placeholder: 'John Smith', required: true });
-        if (lower.includes('first') && lower.includes('last')) {
-          fields = fields.filter((f) => f.name !== 'name');
-          fields.push({ name: 'first-name', type: 'text', label: 'First Name', placeholder: 'John', required: true });
-          fields.push({ name: 'last-name', type: 'text', label: 'Last Name', placeholder: 'Smith', required: true });
-        }
-        if (lower.includes('email')) fields.push({ name: 'email', type: 'email', label: 'Email Address', placeholder: 'you@company.com', required: true });
-        if (lower.includes('phone') || lower.includes('tel')) fields.push({ name: 'phone', type: 'tel', label: 'Phone Number', placeholder: '+1 (555) 123-4567', required: false });
-        if (lower.includes('company') || lower.includes('org')) fields.push({ name: 'company', type: 'text', label: 'Company', placeholder: 'Acme Corp', required: false });
-        if (lower.includes('subject') || lower.includes('topic')) fields.push({ name: 'subject', type: 'text', label: 'Subject', placeholder: 'How can we help?', required: false });
-        if (lower.includes('department') || lower.includes('team')) {
-          fields.push({ name: 'department', type: 'select', label: 'Department', options: 'Sales, Support, Marketing, Engineering, Other', required: false });
-        }
-        if (lower.includes('message') || lower.includes('comment') || lower.includes('question') || lower.includes('inquiry')) {
-          fields.push({ name: 'message', type: 'textarea', label: 'Message', placeholder: 'Tell us more...', required: true });
-        }
-        if (lower.includes('newsletter') || lower.includes('subscribe')) fields.push({ name: 'subscribe', type: 'checkbox', label: 'Subscribe to our newsletter', required: false });
-        if (lower.includes('file') || lower.includes('attach') || lower.includes('upload') || lower.includes('resume')) {
-          fields.push({ name: 'attachment', type: 'file', label: 'Attachment', required: false });
-        }
-        if (lower.includes('consent') || lower.includes('privacy') || lower.includes('agree')) {
-          fields.push({ name: 'consent', type: 'checkbox', label: 'I agree to the privacy policy', required: true });
-        }
-        fields.push({ name: 'submit', type: 'submit', label: 'Submit' });
+      if (!isSignedIn()) return authRequiredError('generate_form');
+      try {
+        const result = await contentUpdaterMcp.callTool('generate_form', {
+          description: input.description,
+          fields: input.fields,
+          page_path: input.page_path,
+          submit_action: input.submit_action,
+        });
+        return JSON.stringify({
+          ...result,
+          _source: 'connected',
+          source: 'Experience Production Agent — Form Builder',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('generate_form', err);
       }
-
-      // Generate EDS form block HTML
-      const rows = fields.map((f) => {
-        const cols = [
-          f.name || '',
-          f.type || 'text',
-          f.label || f.name || '',
-          f.placeholder || '',
-          f.required ? 'true' : '',
-          f.options || '',
-        ];
-        return `    <div>\n${cols.map((c) => `      <div>${c}</div>`).join('\n')}\n    </div>`;
-      });
-
-      const formHtml = `<div class="form">
-  <div>
-    <div>
-      <div>Name</div>
-      <div>Type</div>
-      <div>Label</div>
-      <div>Placeholder</div>
-      <div>Mandatory</div>
-      <div>Options</div>
-    </div>
-${rows.join('\n')}
-  </div>
-</div>`;
-
-      const submitAction = input.submit_action || 'spreadsheet';
-
-      return JSON.stringify({
-        status: 'generated',
-        description: desc,
-        field_count: fields.length,
-        fields: fields.map((f) => ({ name: f.name, type: f.type, label: f.label, required: f.required || false })),
-        submit_action: submitAction,
-        form_html: formHtml,
-        embed_instructions: input.page_path
-          ? `The form block will be embedded in ${input.page_path}. Use edit_page_content to add it.`
-          : 'Copy the form_html into any EDS page. Or provide page_path and the form will be embedded automatically.',
-        message: `Form generated with ${fields.length} fields: ${fields.map((f) => f.label || f.name).join(', ')}. Submit action: ${submitAction}.`,
-      }, null, 2);
     }
 
     /* ─── Content Variations Agent ─── */
@@ -3301,6 +2620,55 @@ ${rows.join('\n')}
       }, null, 2);
     }
 
+    /* ─── LLM Optimizer — Citation Readability ─── */
+
+    case 'check_citation_readability': {
+      let pageUrl = input.url;
+      // If no URL provided, use the currently loaded page
+      if (!pageUrl) {
+        pageUrl = window.__EW_PREVIEW_URL || document.querySelector('.preview-frame')?.src || '';
+      }
+      if (!pageUrl || pageUrl === 'about:blank') {
+        return JSON.stringify({ error: 'No URL to analyze. Provide a URL or load a page in the preview.' });
+      }
+      // Get rendered HTML from iframe if available (human view)
+      let renderedHTML = '';
+      try {
+        const iframe = document.querySelector('.preview-frame');
+        const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
+        if (iframeDoc?.body) {
+          renderedHTML = iframeDoc.documentElement.outerHTML;
+        }
+      } catch { /* cross-origin */ }
+
+      try {
+        const result = await checkCitationReadability(pageUrl, renderedHTML);
+        const formatted = formatResultForChat(result);
+
+        // Store report HTML for "View Details" button
+        const reportId = `llmo_${Date.now()}`;
+        try {
+          window[reportId] = renderResultsHTML(result);
+        } catch { /* render optional */ }
+
+        return JSON.stringify({
+          score: result.score,
+          grade: result.grade,
+          agent_words: result.agentView.wordCount,
+          human_words: result.humanView.wordCount,
+          is_eds: result.isEDS,
+          recommendations: result.recommendations,
+          missing_content: result.missingContent.slice(0, 10),
+          formatted_report: formatted,
+          _report_id: reportId,
+          _source: 'connected',
+          source: 'Adobe LLM Optimizer',
+        }, null, 2);
+      } catch (e) {
+        return JSON.stringify({ error: `Analysis failed: ${e.message}`, _source: 'connected' });
+      }
+    }
+
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -3378,7 +2746,7 @@ These tools write to the real Document Authoring API. The user must be signed in
 - **extract_brief_content** — Extract structured content from an uploaded brief (PDF/Word).
 - **translate_page** — Translate an AEM page to a target language. Preserves block structure, metadata, and formatting.
 - **create_form** — Create an AEM form from a description. Generates fields, validation rules, and submit actions.
-- **modernize_content** — Modernize outdated page content. Updates language, refreshes statistics, improves readability, and aligns with current brand voice.
+- **modernize_content** — Modernize page content via Generate Variations (Firefly GenAI). Refreshes copy, updates tone to match brand voice, improves readability, and generates content variations.
 
 ### Target Agent (A/B Testing & Personalization)
 - **create_ab_test** — Create an A/B test activity with traffic splits, variants, and success metrics.
