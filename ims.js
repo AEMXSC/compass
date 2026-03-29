@@ -13,7 +13,7 @@
  */
 
 const IMS_CLIENT_ID = '0f5a5fe362ea4afcaf8dd09a8e50ba6e';
-const IMS_SCOPE = 'AdobeID,openid,aem.assets.author,aem.folders,read_organizations,additional_info.projectedProductContext,additional_info.ownerOrg';
+const IMS_SCOPE = 'AdobeID,openid,aem.assets.author,aem.folders';
 const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
 const IMS_ENV = 'prod';
 const IMS_TIMEOUT = 8000;
