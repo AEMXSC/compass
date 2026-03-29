@@ -3495,10 +3495,10 @@ if (settingsBtn) {
   settingsBtn.addEventListener('click', toggleSettings);
 }
 
-// Icon rail settings button
+// Icon rail settings button — opens Demo Admin modal
 const railSettingsBtn = document.getElementById('railSettingsBtn');
 if (railSettingsBtn) {
-  railSettingsBtn.addEventListener('click', toggleSettings);
+  railSettingsBtn.addEventListener('click', () => openDemoAdmin());
 }
 
 // Sidebar panel switching (Home / Content / Code)
@@ -4159,19 +4159,6 @@ function switchProfile(profileId) {
   if (customerNameEl) customerNameEl.textContent = AEM_ORG.name;
   if (customerMetaEl) customerMetaEl.innerHTML = `&bull; ${AEM_ORG.tier} &bull; ${AEM_ORG.env}`;
 
-  // Update customer logo in header
-  const profile = getActiveProfile();
-  const logoEl = document.getElementById('customerLogo');
-  if (logoEl) {
-    if (profile.logoUrl) {
-      logoEl.src = profile.logoUrl;
-      logoEl.alt = profile.name;
-      logoEl.style.display = '';
-    } else {
-      logoEl.style.display = 'none';
-    }
-  }
-
   // Update active state in org selector
   document.querySelectorAll('.org-option').forEach((opt) => {
     opt.classList.toggle('active', opt.dataset.profile === profileId);
@@ -4503,15 +4490,6 @@ async function init() {
   // NO auto sign-in. User clicks "Sign In" button when ready.
   // This prevents any redirect to da.live.
 
-  // Set customer logo on load
-  const initProfile = getActiveProfile();
-  const initLogo = document.getElementById('customerLogo');
-  if (initLogo && initProfile.logoUrl) {
-    initLogo.src = initProfile.logoUrl;
-    initLogo.alt = initProfile.name;
-    initLogo.style.display = '';
-  }
-
   // Auto-connect default site in background (stays on Home view)
   connectSite();
 
@@ -4526,4 +4504,175 @@ async function init() {
   }
 }
 
+/* ─── Demo Admin: Customer Co-Brand Logo ─── */
+
+const LOGO_STORAGE_KEY = 'ew-logo-config';
+
+/** Clamp integer to safe range. */
+function safeInt(val, min, max, fallback) {
+  const n = parseInt(val, 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+/** Read logo config from localStorage with schema validation. */
+function readLogoConfig() {
+  try {
+    const raw = localStorage.getItem(LOGO_STORAGE_KEY);
+    if (!raw) return null;
+    const cfg = JSON.parse(raw);
+    if (typeof cfg !== 'object' || !cfg) return null;
+    return {
+      url: typeof cfg.url === 'string' ? cfg.url : '',
+      name: typeof cfg.name === 'string' ? cfg.name : '',
+      height: safeInt(cfg.height, 16, 48, 20),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Save logo config to localStorage. */
+function saveLogoConfig(cfg) {
+  if (!cfg || !cfg.url) {
+    localStorage.removeItem(LOGO_STORAGE_KEY);
+    return;
+  }
+  localStorage.setItem(LOGO_STORAGE_KEY, JSON.stringify({
+    url: cfg.url,
+    name: cfg.name || '',
+    height: safeInt(cfg.height, 16, 48, 20),
+  }));
+}
+
+/** Apply logo config to the nav bar using safe DOM APIs. */
+function applyLogoToNav(cfg) {
+  const logoEl = document.getElementById('customerLogo');
+  const cobrandEl = document.getElementById('headerCobrand');
+  if (!logoEl) return;
+
+  if (cfg && cfg.url) {
+    logoEl.setAttribute('src', cfg.url);
+    logoEl.setAttribute('alt', cfg.name || 'Customer logo');
+    logoEl.style.height = `${safeInt(cfg.height, 16, 48, 20)}px`;
+    logoEl.style.display = '';
+    if (cobrandEl) {
+      cobrandEl.textContent = cfg.name ? `x ${cfg.name}` : '';
+      cobrandEl.style.display = cfg.name ? '' : 'none';
+    }
+  } else {
+    logoEl.style.display = 'none';
+    logoEl.removeAttribute('src');
+    if (cobrandEl) cobrandEl.style.display = 'none';
+  }
+}
+
+/** Open Demo Admin modal. */
+function openDemoAdmin() {
+  const modal = document.getElementById('demoAdminModal');
+  if (!modal) return;
+  modal.classList.add('visible');
+
+  // Pre-fill from current config
+  const cfg = readLogoConfig();
+  const urlInput = document.getElementById('logoUrlInput');
+  const heightInput = document.getElementById('logoHeightInput');
+  const nameInput = document.getElementById('logoNameInput');
+  if (urlInput) urlInput.value = cfg?.url || '';
+  if (heightInput) heightInput.value = cfg?.height || 20;
+  if (nameInput) nameInput.value = cfg?.name || '';
+
+  // Show preview if we have a URL
+  updateLogoPreview(cfg?.url);
+
+  // Focus first input
+  if (urlInput) urlInput.focus();
+}
+
+function closeDemoAdmin() {
+  const modal = document.getElementById('demoAdminModal');
+  if (modal) modal.classList.remove('visible');
+}
+
+function updateLogoPreview(url) {
+  const preview = document.getElementById('logoPreview');
+  const previewImg = document.getElementById('logoPreviewImg');
+  if (!preview || !previewImg) return;
+  if (url) {
+    previewImg.setAttribute('src', url);
+    const h = safeInt(document.getElementById('logoHeightInput')?.value, 16, 48, 20);
+    previewImg.style.height = `${h}px`;
+    preview.style.display = '';
+  } else {
+    preview.style.display = 'none';
+  }
+}
+
+// Wire Demo Admin modal
+(function initDemoAdmin() {
+  const modal = document.getElementById('demoAdminModal');
+  const closeBtn = document.getElementById('demoAdminClose');
+  const applyBtn = document.getElementById('logoApplyBtn');
+  const removeBtn = document.getElementById('logoRemoveBtn');
+  const urlInput = document.getElementById('logoUrlInput');
+  const fileInput = document.getElementById('logoFileInput');
+  const heightInput = document.getElementById('logoHeightInput');
+
+  if (!modal) return;
+
+  // Close handlers
+  if (closeBtn) closeBtn.addEventListener('click', closeDemoAdmin);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeDemoAdmin(); });
+  modal.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDemoAdmin(); });
+
+  // URL input → live preview
+  if (urlInput) urlInput.addEventListener('input', () => updateLogoPreview(urlInput.value));
+  if (heightInput) heightInput.addEventListener('input', () => updateLogoPreview(urlInput?.value));
+
+  // File upload → convert to data URL
+  if (fileInput) {
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (urlInput) urlInput.value = reader.result;
+        updateLogoPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Apply
+  if (applyBtn) {
+    applyBtn.addEventListener('click', () => {
+      const cfg = {
+        url: urlInput?.value || '',
+        name: document.getElementById('logoNameInput')?.value || '',
+        height: safeInt(heightInput?.value, 16, 48, 20),
+      };
+      saveLogoConfig(cfg);
+      applyLogoToNav(cfg);
+      closeDemoAdmin();
+    });
+  }
+
+  // Remove
+  if (removeBtn) {
+    removeBtn.addEventListener('click', () => {
+      saveLogoConfig(null);
+      applyLogoToNav(null);
+      if (urlInput) urlInput.value = '';
+      if (document.getElementById('logoNameInput')) document.getElementById('logoNameInput').value = '';
+      if (heightInput) heightInput.value = 20;
+      updateLogoPreview(null);
+      closeDemoAdmin();
+    });
+  }
+})();
+
 init();
+
+// Apply saved logo config on page load (after init)
+const savedLogoCfg = readLogoConfig();
+if (savedLogoCfg?.url) applyLogoToNav(savedLogoCfg);

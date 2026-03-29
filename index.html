@@ -39,6 +39,7 @@
           </div>
           <span class="header-title">Adobe Experience Manager</span>
           <img id="customerLogo" class="customer-logo" style="display:none" alt="Customer logo">
+          <span id="headerCobrand" class="header-cobrand" style="display:none"></span>
         </div>
 
         <!-- Editor Toolbar (visible in content/editor mode) -->
@@ -505,7 +506,58 @@
         </div>
       </div>
 
+      <!-- Footer -->
+      <footer class="site-footer" aria-label="Footer">
+        <nav aria-label="Footer">
+          <a href="/" class="footer-brand">Adobe Experience Manager</a>
+          <span class="footer-sep">/</span>
+          <span class="footer-sub">Edge Delivery Services</span>
+        </nav>
+      </footer>
+
     </main>
+  </div>
+
+  <!-- Demo Admin Modal -->
+  <div class="demo-admin-modal" id="demoAdminModal" role="dialog" aria-modal="true" aria-labelledby="demoAdminTitle">
+    <div class="demo-admin-content">
+      <div class="demo-admin-header">
+        <h2 id="demoAdminTitle">Demo Admin</h2>
+        <button class="demo-admin-close" id="demoAdminClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="demo-admin-body">
+        <div class="demo-admin-section">
+          <label class="demo-admin-label">Customer Co-Brand Logo</label>
+          <p class="demo-admin-hint">Appears as "Adobe Experience Manager x [Customer]" in the nav bar.</p>
+          <div class="demo-admin-field">
+            <label for="logoUrlInput">Logo URL</label>
+            <input type="url" id="logoUrlInput" class="demo-admin-input" placeholder="https://example.com/logo.png">
+          </div>
+          <div class="demo-admin-field">
+            <label for="logoFileInput">Or upload a file</label>
+            <input type="file" id="logoFileInput" accept="image/png,image/jpeg,image/svg+xml,image/webp">
+          </div>
+          <div class="demo-admin-row">
+            <div class="demo-admin-field" style="flex:1">
+              <label for="logoHeightInput">Height (px)</label>
+              <input type="number" id="logoHeightInput" class="demo-admin-input" value="20" min="16" max="48">
+            </div>
+            <div class="demo-admin-field" style="flex:2">
+              <label for="logoNameInput">Company name</label>
+              <input type="text" id="logoNameInput" class="demo-admin-input" placeholder="Acme Corp">
+            </div>
+          </div>
+          <div class="demo-admin-preview" id="logoPreview" style="display:none">
+            <span class="demo-admin-preview-label">Preview:</span>
+            <img id="logoPreviewImg" alt="">
+          </div>
+          <div class="demo-admin-actions">
+            <button class="demo-admin-btn primary" id="logoApplyBtn">Apply</button>
+            <button class="demo-admin-btn" id="logoRemoveBtn">Remove</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- PDF.js for real PDF text extraction (Differentiator #3) -->
