@@ -220,9 +220,9 @@ function updateAuthUI() {
       authBtn.title = 'Signed in';
       authBtn.innerHTML = '<span class="auth-avatar">●</span>';
     } else {
-      authBtn.textContent = 'Sign In';
+      // Not signed in — show "Sign In" text button
       authBtn.classList.remove('signed-in', 'avatar-mode');
-      authBtn.innerHTML = '';
+      authBtn.innerHTML = 'Sign In';
       authBtn.title = 'Sign in with Adobe';
       if (userMenu) userMenu.classList.remove('visible');
     }
