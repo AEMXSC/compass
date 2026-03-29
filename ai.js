@@ -1248,11 +1248,19 @@ async function executeTool(name, input) {
           const result = await ghWriteContent(org, repo, pagePath, input.html, null, branch);
           console.log('[edit_page_content] GitHub write:', result.commitSha);
 
+          // Trigger preview — prefer IMS auth (required for DA-backed sites)
+          // GitHub PAT alone gets 401 on admin.hlx.page for DA sites.
           let previewStatus = 'skipped';
           if (input.trigger_preview !== false) {
             try {
-              const pResult = await ghTriggerPreview(org, repo, branch, pagePath);
-              previewStatus = pResult.ok ? 'success' : `pending (${pResult.status})`;
+              if (isSignedIn()) {
+                // Use DA client's previewPage which sends IMS Bearer token
+                const previewResp = await da.previewPage(pagePath);
+                previewStatus = previewResp.ok ? 'success' : `pending (${previewResp.status})`;
+              } else {
+                const pResult = await ghTriggerPreview(org, repo, branch, pagePath);
+                previewStatus = pResult.ok ? 'success' : `pending (${pResult.status})`;
+              }
             } catch {
               previewStatus = 'pending';
             }
