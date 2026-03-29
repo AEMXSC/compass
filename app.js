@@ -747,22 +747,43 @@ let cachedPageHTML = null;
 let cachedPageUrl = null;
 
 async function fetchPageHTML(url) {
-  // AEM EDS .plain.html endpoint returns clean HTML without page shell
+  // Method 1: AEM EDS .plain.html endpoint (same-origin or CORS-friendly)
   const plainUrl = url.replace(/\/?$/, '.plain.html');
   try {
     const resp = await fetch(plainUrl);
     if (resp.ok) return resp.text();
   } catch { /* CORS or network error */ }
-  // Fallback: try the URL directly
+
+  // Method 2: try the URL directly
   try {
     const resp = await fetch(url);
     if (resp.ok) {
       const text = await resp.text();
-      // Extract body content from full HTML
       const match = text.match(/<body[^>]*>([\s\S]*)<\/body>/i);
       return match ? match[1] : text;
     }
   } catch { /* ignore */ }
+
+  // Method 3: GitHub raw content (CORS-friendly — works from any origin)
+  // Parse the preview URL to extract org/repo/branch/path
+  try {
+    const u = new URL(url);
+    const hostParts = u.hostname.split('--');
+    if (hostParts.length >= 3) {
+      const branch = hostParts[0];
+      const repo = hostParts[1];
+      const org = hostParts[2].replace('.aem.page', '').replace('.aem.live', '').replace('.hlx.page', '').replace('.hlx.live', '');
+      const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
+      const rawUrl = `https://raw.githubusercontent.com/${org}/${repo}/${branch}${path}.html`;
+      const resp = await fetch(rawUrl);
+      if (resp.ok) {
+        const text = await resp.text();
+        const match = text.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+        return match ? match[1] : text;
+      }
+    }
+  } catch { /* ignore */ }
+
   return null;
 }
 
