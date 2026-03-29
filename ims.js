@@ -12,8 +12,8 @@
  * 3. TOKEN PASTE — Manual fallback in Settings panel.
  */
 
-const IMS_CLIENT_ID = 'darkalley';
-const IMS_SCOPE = 'ab.manage,AdobeID,gnav,openid,org.read,read_organizations,session,aem.frontend.all,additional_info.ownerOrg,additional_info.projectedProductContext,account_cluster.read';
+const IMS_CLIENT_ID = '0f5a5fe362ea4afcaf8dd09a8e50ba6e';
+const IMS_SCOPE = 'AdobeID,openid,aem.assets.author,aem.folders,read_organizations,additional_info.projectedProductContext,additional_info.ownerOrg';
 const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
 const IMS_ENV = 'prod';
 const IMS_TIMEOUT = 8000;
