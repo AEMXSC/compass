@@ -2,36 +2,22 @@
  * IMS Authentication Module
  *
  * PKCE OAuth sign-in (this client only supports authorization_code grant).
- * IMS library loaded for session management + token validation.
+ * No IMS library — it uses implicit grant internally which this client rejects.
+ * We handle PKCE, token storage, profile, and sign-out directly.
  *
  * Fallback: Manual token paste in Settings, bookmarklet relay.
  */
 
 const IMS_CLIENT_ID = '0f5a5fe362ea4afcaf8dd09a8e50ba6e';
 const IMS_SCOPE = 'AdobeID,openid,aem.assets.author,aem.folders';
-const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
-const IMS_ENV = 'prod';
-const IMS_TIMEOUT = 8000;
 
 const IMS_AUTH_URL = 'https://ims-na1.adobelogin.com/ims/authorize/v2';
 const IMS_TOKEN_URL = 'https://ims-na1.adobelogin.com/ims/token/v3';
+const IMS_LOGOUT_URL = 'https://ims-na1.adobelogin.com/ims/logout/v1';
 const PKCE_PENDING_KEY = 'ew-pkce-pending';
 const PROFILE_STORAGE_KEY = 'ew-ims-profile';
 
-let imsReady = null;
 let profile = null;
-
-/* ─── Helpers ─── */
-
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = resolve;
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
-}
 
 /* ─── PKCE helpers ─── */
 
@@ -66,17 +52,7 @@ function getRedirectUri() {
 /* ─── Token access ─── */
 
 export function getToken() {
-  // 1. Our PKCE / manual / relay token
-  const stored = localStorage.getItem('ew-ims-token');
-  if (stored) return stored;
-  // 2. IMS library token (if it ever picks up a session)
-  if (window.adobeIMS) {
-    try {
-      const t = window.adobeIMS.getAccessToken();
-      if (t?.token) return t.token;
-    } catch { /* ignore */ }
-  }
-  return null;
+  return localStorage.getItem('ew-ims-token') || null;
 }
 
 export function getProfile() {
@@ -183,7 +159,14 @@ function cleanCallbackUrl() {
   url.searchParams.delete('code');
   url.searchParams.delete('state');
   url.searchParams.delete('error');
-  const clean = url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : '') + url.hash;
+  // Also clean hash-based errors (IMS library remnants)
+  let hash = url.hash;
+  if (hash.includes('error=')) {
+    hash = '';
+  }
+  const clean = url.pathname
+    + (url.searchParams.toString() ? `?${url.searchParams}` : '')
+    + hash;
   history.replaceState(null, '', clean);
 }
 
@@ -194,9 +177,6 @@ export function signOut() {
   localStorage.removeItem('ew-ims');
   localStorage.removeItem(PROFILE_STORAGE_KEY);
   profile = null;
-  if (window.adobeIMS) {
-    try { window.adobeIMS.signOut(); } catch { /* ignore */ }
-  }
   window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: false } }));
 }
 
@@ -274,10 +254,17 @@ export function relaySignIn() {
   });
 }
 
-/* ─── IMS library initialization ─── */
+/* ─── Init (replaces loadIms — no library needed) ─── */
 
 export async function loadIms() {
-  if (imsReady) return imsReady;
+  // Clean up error/hash remnants from previous failed IMS library redirects
+  const url = new URL(window.location.href);
+  if (url.hash.includes('error=') || url.searchParams.has('error')) {
+    console.warn('[IMS] Cleaning up error params from URL');
+    url.searchParams.delete('error');
+    history.replaceState(null, '', url.pathname
+      + (url.searchParams.toString() ? `?${url.searchParams}` : ''));
+  }
 
   // Check for token in URL hash (from bookmarklet that opens EW directly)
   const hash = window.location.hash;
@@ -291,60 +278,13 @@ export async function loadIms() {
     }
   }
 
-  imsReady = new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      console.warn('IMS timeout — continuing without auth');
-      resolve({ anonymous: !getToken() });
-    }, IMS_TIMEOUT);
+  // If already signed in (from previous session), dispatch event
+  if (isSignedIn()) {
+    console.log('[IMS] Existing token found');
+    window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
+  }
 
-    window.adobeid = {
-      client_id: IMS_CLIENT_ID,
-      scope: IMS_SCOPE,
-      locale: 'en_US',
-      autoValidateToken: true,
-      environment: IMS_ENV,
-      useLocalStorage: true,
-      onReady: async () => {
-        clearTimeout(timeout);
-        console.log('[IMS] onReady fired');
-
-        // Check if we have a token (from PKCE callback or manual)
-        if (isSignedIn()) {
-          localStorage.setItem('ew-ims', 'true');
-          window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
-          resolve({ anonymous: false });
-        } else {
-          resolve({ anonymous: true });
-        }
-      },
-      onAccessToken(token) {
-        console.log('[IMS] onAccessToken — token received');
-        if (token?.token) {
-          localStorage.setItem('ew-ims-token', token.token);
-          localStorage.setItem('ew-ims', 'true');
-          window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
-        }
-      },
-      onAccessTokenHasExpired() {
-        console.log('[IMS] Token expired');
-        localStorage.removeItem('ew-ims-token');
-        window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: false } }));
-      },
-      onError: (err) => {
-        clearTimeout(timeout);
-        console.error('IMS error:', err);
-        resolve({ anonymous: !getToken(), error: err });
-      },
-    };
-
-    loadScript(IMS_LIB_URL).catch(() => {
-      clearTimeout(timeout);
-      console.warn('Failed to load IMS library — continuing without auth');
-      resolve({ anonymous: true });
-    });
-  });
-
-  return imsReady;
+  return { anonymous: !isSignedIn() };
 }
 
 export async function fetchWithToken(url, opts = {}) {
