@@ -421,24 +421,93 @@ export function signIn() {
   }, 500);
 }
 
-/* ─── IMS library sign-in (Sidekick-style popup) ─── */
+/* ─── IMS popup sign-in ─── */
 
 /**
- * Sign in using the IMS library's built-in popup flow.
- * adobeIMS.signIn() opens a popup → Adobe-hosted callback → postMessage token back.
- * No redirect URI registration needed for the host app's domain.
+ * Revalidate IMS session after popup auth completes.
+ * Tries: 1) IMS library revalidation, 2) re-init IMS library, 3) give up.
  */
-export function imsSignIn() {
+async function revalidateImsSession() {
+  // Method 1: IMS library re-validation (picks up session cookie)
   if (window.adobeIMS) {
     try {
-      window.adobeIMS.signIn();
-      return;
-    } catch (err) {
-      console.warn('[IMS] adobeIMS.signIn() failed, trying legacy popup:', err);
-    }
+      // Some IMS library versions expose revalidateToken
+      if (typeof window.adobeIMS.revalidateToken === 'function') {
+        await window.adobeIMS.revalidateToken();
+      }
+      const token = window.adobeIMS.getAccessToken();
+      if (token?.token) {
+        localStorage.setItem('ew-ims-token', token.token);
+        localStorage.setItem('ew-ims', 'true');
+        window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
+        console.log('[IMS] Session picked up via revalidation');
+        return true;
+      }
+    } catch { /* ignore */ }
   }
-  // Fallback: legacy popup if IMS library not loaded yet
-  signIn();
+
+  // Method 2: Re-initialize the IMS library (fresh autoValidateToken check)
+  try {
+    imsReady = null;
+    const result = await loadIms();
+    if (result && !result.anonymous) {
+      window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
+      console.log('[IMS] Session picked up via re-init');
+      return true;
+    }
+  } catch { /* ignore */ }
+
+  return false;
+}
+
+/**
+ * Sign in via IMS popup. Opens Adobe login in a popup window.
+ * After login, the popup lands on DA (darkalley's registered redirect).
+ * When the popup closes, we try to pick up the IMS session.
+ * Also listens for the relay bookmarklet postMessage as a fallback.
+ */
+export function imsSignIn() {
+  const params = new URLSearchParams({
+    client_id: IMS_CLIENT_ID,
+    scope: IMS_SCOPE,
+    response_type: 'token',
+    redirect_uri: 'https://da.live/',
+    locale: 'en_US',
+  });
+  const authUrl = `https://ims-na1.adobelogin.com/ims/authorize/v2?${params}`;
+
+  const w = 600;
+  const h = 700;
+  const left = Math.round((screen.width - w) / 2);
+  const top = Math.round((screen.height - h) / 2);
+  const popup = window.open(
+    authUrl,
+    'adobeImsLogin',
+    `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`,
+  );
+
+  if (!popup) {
+    // eslint-disable-next-line no-alert
+    alert('Pop-up blocked — please allow pop-ups for this site, then click Sign In again.');
+    return;
+  }
+
+  // Poll until popup closes, then try to pick up the session
+  const pollTimer = setInterval(async () => {
+    if (popup.closed) {
+      clearInterval(pollTimer);
+      const picked = await revalidateImsSession();
+      if (!picked && !getToken()) {
+        // Session didn't transfer — prompt relay bookmarklet
+        window.dispatchEvent(new CustomEvent('ew-toast', {
+          detail: { message: 'Signed in at Adobe — open DA and click the relay bookmarklet to transfer your token, or paste it in Settings.', type: 'info' },
+        }));
+      }
+    }
+  }, 500);
+
+  // Also listen for relay postMessage (user might click bookmarklet in the popup)
+  // handleRelayMessage is already listening globally
 }
 
 /* ─── Sign out ─── */
