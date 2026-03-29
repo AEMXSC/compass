@@ -299,6 +299,12 @@ function saveSettings() {
 document.getElementById('settingsSaveBtn')?.addEventListener('click', saveSettings);
 document.getElementById('settingsCancelBtn')?.addEventListener('click', toggleSettings);
 
+// Close settings modal when clicking backdrop or close button
+settingsPanel?.addEventListener('click', (e) => {
+  if (e.target === settingsPanel) toggleSettings();
+});
+document.getElementById('settingsCloseBtn')?.addEventListener('click', toggleSettings);
+
 /* ── GitHub Token paste ── */
 const githubTokenBtn = document.getElementById('githubTokenBtn');
 const githubTokenInput = document.getElementById('githubTokenInput');
