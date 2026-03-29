@@ -179,6 +179,14 @@ export function relaySignIn() {
 export async function loadIms() {
   if (imsReady) return imsReady;
 
+  // Clean up error params from failed OAuth redirects (breaks redirect loops)
+  const url = new URL(window.location.href);
+  if (url.searchParams.has('error')) {
+    console.warn('[IMS] OAuth error in URL:', url.searchParams.get('error'));
+    url.searchParams.delete('error');
+    history.replaceState(null, '', url.pathname + (url.search || '') + (url.hash || ''));
+  }
+
   // Check for token in URL hash (from bookmarklet that opens EW directly)
   const hash = window.location.hash;
   if (hash.includes('access_token=')) {
@@ -201,6 +209,7 @@ export async function loadIms() {
       client_id: IMS_CLIENT_ID,
       scope: IMS_SCOPE,
       locale: 'en_US',
+      response_type: 'code',
       autoValidateToken: true,
       environment: IMS_ENV,
       useLocalStorage: true,
