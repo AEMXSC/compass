@@ -287,13 +287,22 @@ export function relaySignIn() {
 /* ─── Init (replaces loadIms — no library needed) ─── */
 
 export async function loadIms() {
-  // Clean up error/hash remnants from previous failed IMS library redirects
+  // Log and clean up error params from IMS redirect
   const url = new URL(window.location.href);
-  if (url.hash.includes('error=') || url.searchParams.has('error')) {
-    console.warn('[IMS] Cleaning up error params from URL');
+  const hashParams = new URLSearchParams(url.hash.slice(1));
+  const imsError = url.searchParams.get('error') || hashParams.get('error');
+  const imsErrorDesc = url.searchParams.get('error_description') || hashParams.get('error_description');
+
+  if (imsError || url.hash.includes('error=')) {
+    console.error(`[IMS] Auth error: ${imsError} — ${imsErrorDesc || 'no description'}`);
+    console.error(`[IMS] Full callback URL: ${window.location.href}`);
     url.searchParams.delete('error');
+    url.searchParams.delete('error_description');
+    let cleanHash = url.hash;
+    if (cleanHash.includes('error=')) cleanHash = '';
     history.replaceState(null, '', url.pathname
-      + (url.searchParams.toString() ? `?${url.searchParams}` : ''));
+      + (url.searchParams.toString() ? `?${url.searchParams}` : '')
+      + cleanHash);
   }
 
   // Check for token in URL hash (from bookmarklet that opens EW directly)
