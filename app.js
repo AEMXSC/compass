@@ -3617,17 +3617,7 @@ if (authBtn) {
       const menu = document.getElementById('userMenu');
       if (menu) menu.classList.toggle('visible');
     } else {
-      // Use da.live relay sign-in (PKCE client not yet configured for authorization_code)
-      relaySignIn().then(() => {
-        updateAuthUI();
-        showToast('Signed in successfully', 'success');
-      }).catch((err) => {
-        if (err.message === 'popup-blocked') {
-          showToast('Popup blocked — please allow popups for this site', 'error');
-        } else if (err.message !== 'popup-closed') {
-          showToast('Sign in failed — try again', 'error');
-        }
-      });
+      signIn();
     }
   });
 }

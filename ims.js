@@ -80,6 +80,25 @@ export function isSignedIn() { return !!getToken(); }
 /* ─── Sign in (PKCE redirect) ─── */
 
 export async function signIn() {
+  // Try implicit grant first (response_type=token) — simpler, no CORS issues.
+  // Falls back to PKCE if the client is configured for authorization_code only.
+  const state = generateState();
+  sessionStorage.setItem('ew-auth-state', state);
+
+  const params = new URLSearchParams({
+    client_id: IMS_CLIENT_ID,
+    response_type: 'token',
+    redirect_uri: getRedirectUri(),
+    scope: IMS_SCOPE,
+    state,
+    locale: 'en_US',
+  });
+
+  console.log('[IMS] Redirecting to IMS (implicit grant)...');
+  window.location.assign(`${IMS_AUTH_URL}?${params}`);
+}
+
+export async function signInPkce() {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
   const state = generateState();
