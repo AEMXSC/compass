@@ -214,11 +214,15 @@ function updateAuthUI() {
       if (userName) userName.textContent = profile.displayName;
       if (userEmail) userEmail.textContent = profile.email || '';
     } else if (signedIn) {
-      // Signed in but no profile yet — show generic
+      // Signed in but no profile (S2S service account)
       authBtn.textContent = '';
       authBtn.classList.add('signed-in', 'avatar-mode');
-      authBtn.title = 'Signed in';
-      authBtn.innerHTML = '<span class="auth-avatar">●</span>';
+      authBtn.title = 'Signed in — Adobe S2S';
+      authBtn.innerHTML = '<span class="auth-avatar">A</span>';
+      // Populate dropdown with service account info
+      if (userAvatar) userAvatar.textContent = 'A';
+      if (userName) userName.textContent = 'AEM Service Account';
+      if (userEmail) userEmail.textContent = 'S2S · OAuth Server-to-Server';
     } else {
       // Not signed in — show "Sign In" text button
       authBtn.classList.remove('signed-in', 'avatar-mode');
