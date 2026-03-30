@@ -155,6 +155,63 @@ export async function getStatus(path) {
   return resp.json();
 }
 
+/** Unpublish from preview (.aem.page) */
+export async function unpublishPreview(path) {
+  const url = `https://admin.hlx.page/preview/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
+  const resp = await fetchWithToken(url, { method: 'DELETE' });
+  return resp;
+}
+
+/** Unpublish from live (.aem.live) */
+export async function unpublishLive(path) {
+  const url = `https://admin.hlx.page/live/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
+  const resp = await fetchWithToken(url, { method: 'DELETE' });
+  return resp;
+}
+
+/** Purge CDN cache for a path */
+export async function purgeCache(path) {
+  const url = `https://admin.hlx.page/cache/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
+  const resp = await fetchWithToken(url, { method: 'POST' });
+  return resp;
+}
+
+/** Sync code from GitHub to CDN */
+export async function syncCode() {
+  const url = `https://admin.hlx.page/code/${DA_ORG}/${DA_REPO}/${DA_BRANCH}`;
+  const resp = await fetchWithToken(url, { method: 'POST' });
+  return resp;
+}
+
+/** Bulk preview — preview all pages under a path (use "/*" for entire site) */
+export async function bulkPreview(paths) {
+  const url = `https://admin.hlx.page/preview/${DA_ORG}/${DA_REPO}/${DA_BRANCH}/*`;
+  const resp = await fetchWithToken(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
+  return resp;
+}
+
+/** Bulk publish — publish all pages under a path */
+export async function bulkPublish(paths) {
+  const url = `https://admin.hlx.page/live/${DA_ORG}/${DA_REPO}/${DA_BRANCH}/*`;
+  const resp = await fetchWithToken(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
+  return resp;
+}
+
+/** Re-index a path (updates query-index) */
+export async function reindex(path) {
+  const url = `https://admin.hlx.page/index/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
+  const resp = await fetchWithToken(url, { method: 'POST' });
+  return resp;
+}
+
 /* ─── URL helpers ─── */
 
 export function getPreviewUrl(path) {

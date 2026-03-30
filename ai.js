@@ -182,6 +182,101 @@ const AEM_TOOLS = [
       required: ['page_path'],
     },
   },
+  /* ─── Admin API — admin.hlx.page operations ─── */
+  {
+    name: 'unpublish_preview',
+    description: 'Admin API — Remove a page from the .aem.page preview CDN. The source content in DA is NOT deleted — only the preview URL is taken down.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_path: { type: 'string', description: 'Page path to unpublish from preview (e.g., "/old-page")' },
+      },
+      required: ['page_path'],
+    },
+  },
+  {
+    name: 'unpublish_live',
+    description: 'Admin API — Remove a page from the live .aem.live CDN. The source content in DA is NOT deleted — only the live URL is taken down. Use for content takedowns.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_path: { type: 'string', description: 'Page path to unpublish from live (e.g., "/old-page")' },
+      },
+      required: ['page_path'],
+    },
+  },
+  {
+    name: 'purge_cache',
+    description: 'Admin API — Purge the CDN cache for a specific path. Forces the CDN to re-fetch content from origin on the next request. Use when a page shows stale content after updates.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_path: { type: 'string', description: 'Page path to purge cache for (e.g., "/")' },
+      },
+      required: ['page_path'],
+    },
+  },
+  {
+    name: 'sync_code',
+    description: 'Admin API — Sync code (JS, CSS, config) from the GitHub repository to the CDN. Call this after pushing code changes to GitHub so the live site picks them up immediately.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'bulk_preview',
+    description: 'Admin API — Preview multiple pages at once. Accepts an array of page paths and triggers preview for all of them. Much faster than previewing one at a time.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of page paths to preview (e.g., ["/", "/about", "/blog/post-1"])',
+        },
+      },
+      required: ['paths'],
+    },
+  },
+  {
+    name: 'bulk_publish',
+    description: 'Admin API — Publish multiple pages to live at once. Accepts an array of page paths and publishes all of them. Use for site-wide launches or batch publishing.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of page paths to publish (e.g., ["/", "/about", "/blog/post-1"])',
+        },
+      },
+      required: ['paths'],
+    },
+  },
+  {
+    name: 'reindex_page',
+    description: 'Admin API — Re-index a page in the query index. Updates the search/query index so the page appears in query-index.json results. Use after content changes that affect indexed fields.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_path: { type: 'string', description: 'Page path to re-index (e.g., "/blog/new-post")' },
+      },
+      required: ['page_path'],
+    },
+  },
+  {
+    name: 'get_page_status',
+    description: 'Admin API — Get the preview/live publishing status for a page. Returns last modified dates, URLs, and permissions. No authentication required.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_path: { type: 'string', description: 'Page path to check (e.g., "/")' },
+      },
+      required: ['page_path'],
+    },
+  },
   {
     name: 'list_site_pages',
     description: 'DA Editing Agent — List all pages/folders in a DA directory. Returns the file tree from admin.da.live. Use to discover what content exists on the site.',
@@ -918,6 +1013,14 @@ export const TOOL_AGENT_MAP = {
   edit_page_content: 'DA Editing Agent',
   preview_page: 'DA Editing Agent',
   publish_page: 'DA Editing Agent',
+  unpublish_preview: 'Admin API',
+  unpublish_live: 'Admin API',
+  purge_cache: 'Admin API',
+  sync_code: 'Admin API',
+  bulk_preview: 'Admin API',
+  bulk_publish: 'Admin API',
+  reindex_page: 'Admin API',
+  get_page_status: 'Admin API',
   list_site_pages: 'DA Editing Agent',
   delete_page: 'DA Editing Agent',
   // Adobe AI Agents
@@ -1357,6 +1460,146 @@ async function executeTool(name, input) {
           error: `Publish failed: ${err.message}`,
           page_path: pagePath,
         }, null, 2);
+      }
+    }
+
+    /* ─── Admin API operations ─── */
+
+    case 'unpublish_preview': {
+      const pagePath = input.page_path.replace(/\.html$/, '');
+      try {
+        const resp = await da.unpublishPreview(pagePath);
+        return JSON.stringify({
+          status: resp.ok ? 'unpublished' : 'failed',
+          page_path: pagePath,
+          http_status: resp.status,
+          message: resp.ok
+            ? `Preview removed for ${pagePath}. The .aem.page URL will return 404.`
+            : `Unpublish preview returned ${resp.status}`,
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ status: 'error', error: err.message, page_path: pagePath }, null, 2);
+      }
+    }
+
+    case 'unpublish_live': {
+      const pagePath = input.page_path.replace(/\.html$/, '');
+      try {
+        const resp = await da.unpublishLive(pagePath);
+        return JSON.stringify({
+          status: resp.ok ? 'unpublished' : 'failed',
+          page_path: pagePath,
+          http_status: resp.status,
+          message: resp.ok
+            ? `Live page removed for ${pagePath}. The .aem.live URL will return 404.`
+            : `Unpublish live returned ${resp.status}`,
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ status: 'error', error: err.message, page_path: pagePath }, null, 2);
+      }
+    }
+
+    case 'purge_cache': {
+      const pagePath = input.page_path.replace(/\.html$/, '');
+      try {
+        const resp = await da.purgeCache(pagePath);
+        return JSON.stringify({
+          status: resp.ok ? 'purged' : 'failed',
+          page_path: pagePath,
+          http_status: resp.status,
+          message: resp.ok
+            ? `CDN cache purged for ${pagePath}. Next request will fetch fresh content from origin.`
+            : `Cache purge returned ${resp.status}`,
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ status: 'error', error: err.message, page_path: pagePath }, null, 2);
+      }
+    }
+
+    case 'sync_code': {
+      const org = da.getOrg();
+      const repo = da.getRepo();
+      try {
+        const resp = await da.syncCode();
+        return JSON.stringify({
+          status: resp.ok ? 'synced' : 'failed',
+          http_status: resp.status,
+          message: resp.ok
+            ? `Code synced from ${org}/${repo} to CDN. JS/CSS changes are now live.`
+            : `Code sync returned ${resp.status}`,
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ status: 'error', error: err.message }, null, 2);
+      }
+    }
+
+    case 'bulk_preview': {
+      const paths = input.paths || [];
+      try {
+        const resp = await da.bulkPreview(paths);
+        const data = await resp.json().catch(() => ({}));
+        return JSON.stringify({
+          status: resp.ok ? 'success' : 'failed',
+          paths_count: paths.length,
+          http_status: resp.status,
+          details: data,
+          message: resp.ok
+            ? `Bulk preview triggered for ${paths.length} pages.`
+            : `Bulk preview returned ${resp.status}`,
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ status: 'error', error: err.message, paths_count: paths.length }, null, 2);
+      }
+    }
+
+    case 'bulk_publish': {
+      const paths = input.paths || [];
+      try {
+        const resp = await da.bulkPublish(paths);
+        const data = await resp.json().catch(() => ({}));
+        return JSON.stringify({
+          status: resp.ok ? 'success' : 'failed',
+          paths_count: paths.length,
+          http_status: resp.status,
+          details: data,
+          message: resp.ok
+            ? `Bulk publish triggered for ${paths.length} pages. All pages going live.`
+            : `Bulk publish returned ${resp.status}`,
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ status: 'error', error: err.message, paths_count: paths.length }, null, 2);
+      }
+    }
+
+    case 'reindex_page': {
+      const pagePath = input.page_path.replace(/\.html$/, '');
+      try {
+        const resp = await da.reindex(pagePath);
+        return JSON.stringify({
+          status: resp.ok ? 'reindexed' : 'failed',
+          page_path: pagePath,
+          http_status: resp.status,
+          message: resp.ok
+            ? `Page ${pagePath} re-indexed. Will appear in query-index.json results.`
+            : `Re-index returned ${resp.status}`,
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ status: 'error', error: err.message, page_path: pagePath }, null, 2);
+      }
+    }
+
+    case 'get_page_status': {
+      const pagePath = input.page_path.replace(/\.html$/, '');
+      try {
+        const data = await da.getStatus(pagePath);
+        return JSON.stringify({
+          status: 'success',
+          page_path: pagePath,
+          ...data,
+          message: `Status retrieved for ${pagePath}`,
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ status: 'error', error: err.message, page_path: pagePath }, null, 2);
       }
     }
 
