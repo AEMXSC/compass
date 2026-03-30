@@ -88,7 +88,6 @@ export async function signIn() {
 
   const params = new URLSearchParams({
     client_id: IMS_CLIENT_ID,
-    scope: IMS_SCOPE,
     response_type: 'code',
     redirect_uri: getRedirectUri(),
     code_challenge: codeChallenge,
