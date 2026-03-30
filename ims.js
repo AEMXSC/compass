@@ -13,7 +13,7 @@
  */
 
 const IMS_CLIENT_ID = '0f5a5fe362ea4afcaf8dd09a8e50ba6e';
-const IMS_SCOPE = 'AdobeID,openid,gnav,session,aem.assets.author,aem.folders,additional_info.projectedProductContext';
+const IMS_SCOPE = 'AdobeID,openid';
 
 const IMS_AUTH_URL = 'https://ims-na1.adobelogin.com/ims/authorize/v2';
 const IMS_TOKEN_URL = 'https://ims-na1.adobelogin.com/ims/token/v3';
