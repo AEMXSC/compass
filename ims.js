@@ -179,11 +179,11 @@ export async function loadIms() {
     history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 
-  // Auto-refresh if token is expired
+  // Auto-refresh if token is expired (non-blocking — UI updates via ew-auth-change event)
   const expiry = Number(localStorage.getItem('ew-ims-expiry') || 0);
   if (isSignedIn() && expiry && Date.now() > expiry - 300000) {
-    console.log('[IMS] Token expired or expiring — refreshing...');
-    await signIn();
+    console.log('[IMS] Token expired or expiring — refreshing in background...');
+    signIn(); // fire-and-forget: UI updates when ew-auth-change fires
   }
 
   if (isSignedIn()) {

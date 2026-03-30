@@ -9,9 +9,9 @@
  * 5. Speed of iteration (update system prompts same day, not next quarter)
  */
 
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js?v=44';
-import * as ai from './ai.js?v=33';
-import { TOOL_AGENT_MAP } from './ai.js?v=33';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js?v=46';
+import * as ai from './ai.js?v=46';
+import { TOOL_AGENT_MAP } from './ai.js?v=46';
 import * as da from './da-client.js?v=33';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
@@ -603,17 +603,24 @@ window.addEventListener('ew-auth-change', async (e) => {
     // Reset MCP state so it re-initializes with fresh IMS token
     da.resetMcpState?.();
 
+    // Pre-warm everything in parallel (profile + MCP sessions)
+    // Don't await sequentially — speed is the product
+    const warmups = [];
+
     // Fetch user profile if not already cached
     if (!getProfile()) {
-      await fetchUserProfile();
+      warmups.push(fetchUserProfile().catch(() => {}));
     }
 
     // Pre-warm DA MCP session so first edit is fast
-    try {
-      console.log('[Auth] Signed in — warming DA MCP session...');
-      const available = await da.isAuthenticated();
-      console.log('[Auth] DA MCP ready:', available);
-    } catch { /* ignore — will retry on first tool call */ }
+    warmups.push(
+      da.isAuthenticated()
+        .then((ok) => console.log('[Auth] DA MCP ready:', ok))
+        .catch(() => {})
+    );
+
+    console.log('[Auth] Signed in — warming sessions...');
+    await Promise.all(warmups);
   }
   updateAuthUI();
 });
@@ -4708,8 +4715,8 @@ async function init() {
   // Welcome message
   addMessage('assistant', md(`**Connected to ${AEM_ORG.name}** (${AEM_ORG.orgId}/${AEM_ORG.repo})\nSite loaded. You can:\n- **Prompt to edit**: "Change the hero headline"\n- **Set up experiments**: "A/B test the hero on the homepage"\n- **Generate variations**: "Create 3 hero variations targeting millennials"\n- **Add forms**: "Add a contact form to /contact"\n- **Switch site**: Click the site URL in the toolbar to connect a different repo`));
 
-  // Pre-fetch page context after iframe starts loading
-  setTimeout(() => ensurePageContext(), 3000);
+  // Pre-fetch page context when iframe finishes loading (not after arbitrary delay)
+  previewFrame.addEventListener('load', () => ensurePageContext(), { once: true });
 
   if (ai.hasApiKey()) {
     console.log(`Claude API key found — live AI mode for ${AEM_ORG.name}`);

@@ -1,6 +1,5 @@
 /* Compass — AEMCoder-inspired Theme */
-
-@import url('https://use.typekit.net/mge7bvf.css'); /* Adobe Clean */
+/* Adobe Clean font loaded via <link rel="preload"> in index.html (non-blocking) */
 
 /* ─── EDS Overrides ─── */
 body.appear {

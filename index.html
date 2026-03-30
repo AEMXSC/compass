@@ -5,7 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Compass</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23e34850'><path d='M12 2L2 7l10 5 10-5-10-5z'/><path d='M2 17l10 5 10-5'/><path d='M2 12l10 5 10-5'/></svg>">
-  <link rel="stylesheet" href="app.css?v=33">
+  <!-- Preconnect to critical origins (saves 100-300ms per cold connection) -->
+  <link rel="preconnect" href="https://use.typekit.net" crossorigin>
+  <link rel="preconnect" href="https://api.anthropic.com" crossorigin>
+  <link rel="preconnect" href="https://compass-ims-proxy.compass-xsc.workers.dev" crossorigin>
+  <link rel="preconnect" href="https://mcp.adobeaemcloud.com" crossorigin>
+  <!-- Adobe Clean font (non-blocking — loaded via preload instead of CSS @import) -->
+  <link rel="preload" href="https://use.typekit.net/mge7bvf.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://use.typekit.net/mge7bvf.css"></noscript>
+  <link rel="stylesheet" href="app.css?v=46">
 </head>
 <body>
   <div class="workspace">
@@ -600,13 +608,10 @@
     </div>
   </div>
 
-  <!-- PDF.js for real PDF text extraction (Differentiator #3) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e" crossorigin="anonymous"></script>
-  <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+  <!-- PDF.js + Mammoth.js loaded async (only needed on file upload, not page load) -->
+  <script async src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e" crossorigin="anonymous" onload="if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'"></script>
+  <script async src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
 
-  <!-- Mammoth.js for DOCX text extraction -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
-
-  <script src="app.js?v=45" type="module"></script>
+  <script src="app.js?v=46" type="module"></script>
 </body>
 </html>
