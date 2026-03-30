@@ -183,7 +183,10 @@ export async function loadIms() {
   const expiry = Number(localStorage.getItem('ew-ims-expiry') || 0);
   if (isSignedIn() && expiry && Date.now() > expiry - 300000) {
     console.log('[IMS] Token expired or expiring — refreshing in background...');
-    signIn(); // fire-and-forget: UI updates when ew-auth-change fires
+    signIn().catch(() => {
+      console.warn('[IMS] Background token refresh failed — user may need to re-sign in');
+      window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: false } }));
+    });
   }
 
   if (isSignedIn()) {

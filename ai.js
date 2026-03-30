@@ -1120,6 +1120,15 @@ function mcpError(toolName, err) {
   });
 }
 
+/** Sanitize page paths to prevent traversal attacks in URL construction */
+function sanitizePath(p) {
+  let clean = (p || '/').replace(/\.html$/, '');
+  if (!clean.startsWith('/')) clean = '/' + clean;
+  // Strip traversal sequences and encoded dots
+  clean = clean.replace(/\.\.[\\/]/g, '').replace(/%2e/gi, '');
+  return clean;
+}
+
 async function executeTool(name, input) {
   const profile = getActiveProfile();
 
@@ -1466,7 +1475,7 @@ async function executeTool(name, input) {
     /* ─── Admin API operations ─── */
 
     case 'unpublish_preview': {
-      const pagePath = input.page_path.replace(/\.html$/, '');
+      const pagePath = sanitizePath(input.page_path);
       try {
         const resp = await da.unpublishPreview(pagePath);
         return JSON.stringify({
@@ -1483,7 +1492,7 @@ async function executeTool(name, input) {
     }
 
     case 'unpublish_live': {
-      const pagePath = input.page_path.replace(/\.html$/, '');
+      const pagePath = sanitizePath(input.page_path);
       try {
         const resp = await da.unpublishLive(pagePath);
         return JSON.stringify({
@@ -1500,7 +1509,7 @@ async function executeTool(name, input) {
     }
 
     case 'purge_cache': {
-      const pagePath = input.page_path.replace(/\.html$/, '');
+      const pagePath = sanitizePath(input.page_path);
       try {
         const resp = await da.purgeCache(pagePath);
         return JSON.stringify({
@@ -1534,7 +1543,7 @@ async function executeTool(name, input) {
     }
 
     case 'bulk_preview': {
-      const paths = input.paths || [];
+      const paths = (input.paths || []).slice(0, 100).map(sanitizePath);
       try {
         const resp = await da.bulkPreview(paths);
         const data = await resp.json().catch(() => ({}));
@@ -1553,7 +1562,7 @@ async function executeTool(name, input) {
     }
 
     case 'bulk_publish': {
-      const paths = input.paths || [];
+      const paths = (input.paths || []).slice(0, 100).map(sanitizePath);
       try {
         const resp = await da.bulkPublish(paths);
         const data = await resp.json().catch(() => ({}));
@@ -1572,7 +1581,7 @@ async function executeTool(name, input) {
     }
 
     case 'reindex_page': {
-      const pagePath = input.page_path.replace(/\.html$/, '');
+      const pagePath = sanitizePath(input.page_path);
       try {
         const resp = await da.reindex(pagePath);
         return JSON.stringify({
@@ -1589,7 +1598,7 @@ async function executeTool(name, input) {
     }
 
     case 'get_page_status': {
-      const pagePath = input.page_path.replace(/\.html$/, '');
+      const pagePath = sanitizePath(input.page_path);
       try {
         const data = await da.getStatus(pagePath);
         return JSON.stringify({
@@ -3576,12 +3585,20 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     messages.push({ role: 'assistant', content: contentBlocks });
 
     // Execute all tools in parallel (saves 500-3000ms on multi-tool turns)
-    const toolResultContent = await Promise.all(toolUseBlocks.map(async (toolBlock) => {
+    // Use allSettled so one failing tool doesn't kill the others
+    const settled = await Promise.allSettled(toolUseBlocks.map(async (toolBlock) => {
       if (onToolCall) onToolCall(toolBlock.name, toolBlock.input);
       const result = await executeTool(toolBlock.name, toolBlock.input);
       if (onToolResult) onToolResult(toolBlock.name, result);
       return { type: 'tool_result', tool_use_id: toolBlock.id, content: result };
     }));
+    const toolResultContent = settled.map((r, i) =>
+      r.status === 'fulfilled' ? r.value : {
+        type: 'tool_result',
+        tool_use_id: toolUseBlocks[i].id,
+        content: JSON.stringify({ status: 'error', error: r.reason?.message || 'Tool execution failed' }),
+      }
+    );
 
     // Add tool results as user message and continue the loop
     messages.push({ role: 'user', content: toolResultContent });
