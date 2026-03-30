@@ -9,7 +9,7 @@
  * 5. Speed of iteration (update system prompts same day, not next quarter)
  */
 
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js?v=42';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js?v=43';
 import * as ai from './ai.js?v=33';
 import { TOOL_AGENT_MAP } from './ai.js?v=33';
 import * as da from './da-client.js?v=33';
