@@ -1,35 +1,31 @@
 /**
- * Cloudflare Worker — IMS OAuth BFF (Backend for Frontend)
+ * Cloudflare Worker — Compass Auth Gateway
+ *
+ * S2S (Server-to-Server) OAuth: the Worker holds the credential,
+ * generates tokens via client_credentials grant, and serves them
+ * to Compass. No per-user IMS sign-in needed.
  *
  * Routes:
- *   GET  /login    → Redirects to Adobe IMS authorize
- *   GET  /callback → Exchanges auth code for token, redirects to Compass
- *   POST /token    → CORS proxy for direct token exchange (legacy)
+ *   GET  /auth   → Returns S2S access token (CORS-protected)
+ *   POST /token  → Legacy CORS proxy for direct token exchange
  *
- * Setup:
- *   1. Create OAuth Web App in Adobe Developer Console
- *   2. Set redirect URI: https://compass-ims-proxy.compass-xsc.workers.dev/callback
- *   3. wrangler secret put IMS_CLIENT_ID
- *   4. wrangler secret put IMS_CLIENT_SECRET
- *   5. npx wrangler deploy
+ * Secrets (set via wrangler secret put):
+ *   IMS_CLIENT_ID      — from Adobe Developer Console
+ *   IMS_CLIENT_SECRET   — from Adobe Developer Console
  */
 
-const IMS_AUTH_URL = 'https://ims-na1.adobelogin.com/ims/authorize/v2';
 const IMS_TOKEN_URL = 'https://ims-na1.adobelogin.com/ims/token/v3';
-
-const IMS_SCOPE = 'AdobeID,openid,session,additional_info.projectedProductContext';
-
-const ALLOWED_REDIRECTS = [
-  'https://aemxsc.github.io/compass/',
-  'http://localhost:3000/',
-  'http://localhost:3001/',
-];
+const IMS_SCOPE = 'aem.frontend.all,openid,AdobeID,read_organizations,additional_info.projectedProductContext';
 
 const ALLOWED_ORIGINS = [
   'https://aemxsc.github.io',
   'http://localhost:3000',
   'http://localhost:3001',
 ];
+
+// Cache the S2S token in memory (lives as long as the Worker instance)
+let cachedToken = null;
+let tokenExpiry = 0;
 
 /* ─── Router ─── */
 
@@ -40,153 +36,83 @@ addEventListener('fetch', (event) => {
 async function route(request) {
   const url = new URL(request.url);
 
-  if (url.pathname === '/login' && request.method === 'GET') {
-    return handleLogin(request);
+  if (request.method === 'OPTIONS') {
+    return handleCors(request);
   }
-  if (url.pathname === '/callback' && request.method === 'GET') {
-    return handleCallback(request);
+  if (url.pathname === '/auth' && request.method === 'GET') {
+    return handleAuth(request);
   }
   if (url.pathname === '/token' && request.method === 'POST') {
     return handleTokenProxy(request);
   }
-
-  // Legacy: POST to root also proxies tokens
   if (request.method === 'POST') {
     return handleTokenProxy(request);
   }
-  if (request.method === 'OPTIONS') {
-    return handleCors(request);
-  }
 
-  return new Response('Not found', { status: 404 });
+  return new Response('Compass Auth Gateway', { status: 200 });
 }
 
-/* ─── GET /login ─── */
+/* ─── GET /auth — S2S token for Compass ─── */
 
-async function handleLogin(request) {
-  const url = new URL(request.url);
-  const returnTo = url.searchParams.get('redirect') || ALLOWED_REDIRECTS[0];
+async function handleAuth(request) {
+  const origin = request.headers.get('Origin') || '';
 
-  // Validate redirect target
-  if (!ALLOWED_REDIRECTS.some((r) => returnTo.startsWith(r))) {
-    return new Response('Invalid redirect target', { status: 400 });
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403, headers: corsHeaders(origin) });
   }
 
-  // Client ID from wrangler secret (global in Service Worker format)
+  // Check secrets
   if (typeof IMS_CLIENT_ID === 'undefined' || !IMS_CLIENT_ID) {
-    return new Response('Server misconfigured: IMS_CLIENT_ID not set', { status: 500 });
+    return jsonResponse({ error: 'IMS_CLIENT_ID not configured' }, 500, origin);
   }
-
-  const callbackUrl = `${url.origin}/callback`;
-
-  // State encodes both CSRF nonce and the return URL
-  const nonce = crypto.randomUUID();
-  const stateObj = { n: nonce, r: returnTo };
-  const stateB64 = btoa(JSON.stringify(stateObj));
-
-  const params = new URLSearchParams({
-    client_id: IMS_CLIENT_ID,
-    response_type: 'code',
-    redirect_uri: callbackUrl,
-    scope: IMS_SCOPE,
-    state: stateB64,
-    locale: 'en_US',
-  });
-
-  return new Response(null, {
-    status: 302,
-    headers: {
-      'Location': `${IMS_AUTH_URL}?${params}`,
-      'Set-Cookie': `ims_nonce=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=300`,
-    },
-  });
-}
-
-/* ─── GET /callback ─── */
-
-async function handleCallback(request) {
-  const url = new URL(request.url);
-  const code = url.searchParams.get('code');
-  const stateB64 = url.searchParams.get('state');
-  const error = url.searchParams.get('error');
-  const errorDesc = url.searchParams.get('error_description');
-
-  // Default redirect on error
-  const fallbackRedirect = ALLOWED_REDIRECTS[0];
-
-  // Parse state
-  let returnTo = fallbackRedirect;
-  let expectedNonce = '';
-  try {
-    const stateObj = JSON.parse(atob(stateB64));
-    expectedNonce = stateObj.n || '';
-    returnTo = stateObj.r || fallbackRedirect;
-    // Re-validate redirect
-    if (!ALLOWED_REDIRECTS.some((r) => returnTo.startsWith(r))) {
-      returnTo = fallbackRedirect;
-    }
-  } catch { /* use fallback */ }
-
-  // IMS returned an error
-  if (error) {
-    const msg = errorDesc || error;
-    return redirect302(returnTo, `error=${encodeURIComponent(msg)}`);
-  }
-  if (!code) {
-    return redirect302(returnTo, 'error=missing_code');
-  }
-
-  // Validate CSRF nonce from cookie
-  const cookies = parseCookies(request.headers.get('Cookie') || '');
-  if (cookies.ims_nonce !== expectedNonce) {
-    return redirect302(returnTo, 'error=state_mismatch');
-  }
-
-  // Exchange code for token (server-side — no CORS issues)
   if (typeof IMS_CLIENT_SECRET === 'undefined' || !IMS_CLIENT_SECRET) {
-    return redirect302(returnTo, 'error=server_misconfigured');
+    return jsonResponse({ error: 'IMS_CLIENT_SECRET not configured' }, 500, origin);
   }
 
-  const callbackUrl = `${url.origin}/callback`;
+  // Return cached token if still valid (with 5 min buffer)
+  const now = Date.now();
+  if (cachedToken && tokenExpiry > now + 300000) {
+    return jsonResponse({ access_token: cachedToken, expires_at: tokenExpiry, cached: true }, 200, origin);
+  }
 
+  // Generate new S2S token via client_credentials
   try {
-    const tokenBody = new URLSearchParams({
-      grant_type: 'authorization_code',
+    const body = new URLSearchParams({
+      grant_type: 'client_credentials',
       client_id: IMS_CLIENT_ID,
       client_secret: IMS_CLIENT_SECRET,
-      code,
-      redirect_uri: callbackUrl,
+      scope: IMS_SCOPE,
     });
 
     const imsResp = await fetch(IMS_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: tokenBody,
+      body,
     });
 
     if (!imsResp.ok) {
       const errText = await imsResp.text();
-      console.error('Token exchange failed:', imsResp.status, errText);
-      return redirect302(returnTo, 'error=token_exchange_failed');
+      console.error('S2S token generation failed:', imsResp.status, errText);
+      return jsonResponse({ error: 'token_generation_failed', details: errText }, imsResp.status, origin);
     }
 
     const data = await imsResp.json();
+
     if (!data.access_token) {
-      return redirect302(returnTo, 'error=no_access_token');
+      return jsonResponse({ error: 'no_access_token', response: data }, 502, origin);
     }
 
-    // Redirect to Compass with token in hash (hash never sent to server)
-    return new Response(null, {
-      status: 302,
-      headers: {
-        'Location': `${returnTo}#access_token=${data.access_token}`,
-        'Set-Cookie': 'ims_nonce=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
-        'Cache-Control': 'no-store',
-      },
-    });
+    // Cache it (expires_in is in milliseconds from IMS)
+    cachedToken = data.access_token;
+    tokenExpiry = now + (data.expires_in || 86400000);
+
+    return jsonResponse({
+      access_token: data.access_token,
+      expires_at: tokenExpiry,
+    }, 200, origin);
   } catch (err) {
-    console.error('Callback error:', err);
-    return redirect302(returnTo, 'error=server_error');
+    console.error('S2S auth error:', err);
+    return jsonResponse({ error: err.message }, 502, origin);
   }
 }
 
@@ -223,40 +149,32 @@ async function handleTokenProxy(request) {
   }
 }
 
-/* ─── CORS preflight ─── */
+/* ─── CORS ─── */
 
 function handleCors(request) {
   const origin = request.headers.get('Origin') || '';
   return new Response(null, { status: 204, headers: corsHeaders(origin) });
 }
 
-/* ─── Helpers ─── */
-
 function corsHeaders(origin) {
   const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   return {
     'Access-Control-Allow-Origin': allowed,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
   };
 }
 
-function redirect302(baseUrl, hashParams) {
-  return new Response(null, {
-    status: 302,
+/* ─── Helpers ─── */
+
+function jsonResponse(data, status, origin) {
+  return new Response(JSON.stringify(data), {
+    status,
     headers: {
-      'Location': `${baseUrl}#${hashParams}`,
+      'Content-Type': 'application/json',
       'Cache-Control': 'no-store',
+      ...corsHeaders(origin),
     },
   });
-}
-
-function parseCookies(cookieHeader) {
-  const cookies = {};
-  for (const part of cookieHeader.split(';')) {
-    const [key, ...rest] = part.trim().split('=');
-    if (key) cookies[key] = rest.join('=');
-  }
-  return cookies;
 }
