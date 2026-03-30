@@ -59,8 +59,7 @@ function initImsLibrary() {
 
   imsReadyPromise = new Promise(async (resolve) => {
     try {
-      await loadImsLibrary();
-
+      // MUST set config BEFORE loading library — it reads window.adobeid on init
       window.adobeid = {
         client_id: IMS_CLIENT_ID,
         scope: IMS_SCOPE,
@@ -96,7 +95,10 @@ function initImsLibrary() {
         },
       };
 
-      // Wait for IMS to initialize (it reads window.adobeid)
+      // Load library AFTER config is set
+      await loadImsLibrary();
+
+      // Wait for IMS to initialize
       const checkReady = setInterval(() => {
         if (window.adobeIMS && window.adobeIMS.initialized) {
           clearInterval(checkReady);
