@@ -5,6 +5,10 @@
  * No IMS library — it uses implicit grant internally which this client rejects.
  * We handle PKCE, token storage, profile, and sign-out directly.
  *
+ * The IMS /ims/token/v3 endpoint doesn't send CORS headers for browser-based
+ * SPAs, so the PKCE token exchange is proxied through a Cloudflare Worker.
+ * See worker/ims-token-proxy.js for the proxy source.
+ *
  * Fallback: Manual token paste in Settings, bookmarklet relay.
  */
 
@@ -14,6 +18,13 @@ const IMS_SCOPE = 'AdobeID,openid,gnav,session,aem.assets.author,aem.folders,add
 const IMS_AUTH_URL = 'https://ims-na1.adobelogin.com/ims/authorize/v2';
 const IMS_TOKEN_URL = 'https://ims-na1.adobelogin.com/ims/token/v3';
 const IMS_LOGOUT_URL = 'https://ims-na1.adobelogin.com/ims/logout/v1';
+
+// CF Worker proxy for token exchange (IMS blocks CORS from browser origins).
+// After deploying worker/ims-token-proxy.js, replace this with your worker URL.
+// Set to '' to attempt direct IMS call (will fail unless CORS is whitelisted).
+const IMS_TOKEN_PROXY = localStorage.getItem('ew-ims-proxy')
+  || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+
 const PKCE_PENDING_KEY = 'ew-pkce-pending';
 const PROFILE_STORAGE_KEY = 'ew-ims-profile';
 
@@ -113,17 +124,23 @@ export async function handlePkceCallback() {
     return false;
   }
 
+  const tokenBody = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: IMS_CLIENT_ID,
+    code,
+    code_verifier: codeVerifier,
+    redirect_uri: getRedirectUri(),
+  });
+
+  // Use proxy if configured (IMS blocks CORS from browser origins)
+  const tokenEndpoint = IMS_TOKEN_PROXY || IMS_TOKEN_URL;
+  console.log(`[IMS] Token exchange via ${IMS_TOKEN_PROXY ? 'proxy' : 'direct'}: ${tokenEndpoint}`);
+
   try {
-    const resp = await fetch(IMS_TOKEN_URL, {
+    const resp = await fetch(tokenEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        client_id: IMS_CLIENT_ID,
-        code,
-        code_verifier: codeVerifier,
-        redirect_uri: getRedirectUri(),
-      }),
+      body: tokenBody,
     });
 
     if (!resp.ok) {
@@ -135,6 +152,13 @@ export async function handlePkceCallback() {
     }
 
     const data = await resp.json();
+    if (!data.access_token) {
+      console.error('[IMS] Token response missing access_token:', Object.keys(data));
+      sessionStorage.removeItem(PKCE_PENDING_KEY);
+      cleanCallbackUrl();
+      return false;
+    }
+
     localStorage.setItem('ew-ims-token', data.access_token);
     localStorage.setItem('ew-ims', 'true');
     sessionStorage.removeItem(PKCE_PENDING_KEY);
@@ -148,6 +172,12 @@ export async function handlePkceCallback() {
     return true;
   } catch (err) {
     console.error('[IMS] PKCE token exchange error:', err);
+
+    // If proxy failed, hint at deployment
+    if (IMS_TOKEN_PROXY) {
+      console.error('[IMS] Ensure the CF Worker is deployed. See worker/ims-token-proxy.js');
+    }
+
     sessionStorage.removeItem(PKCE_PENDING_KEY);
     cleanCallbackUrl();
     return false;
