@@ -17,6 +17,7 @@ import * as aemContent from './aem-content-mcp-client.js';
 import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
+import * as aemAssets from './aem-assets-client.js';
 import { contentUpdaterMcp, developmentMcp, cjaMcp, acrobatMcp, marketingMcp } from './mcp-client.js';
 import { hasWebhook, createTaskViaWebhook } from './workfront.js';
 import { getSiteType } from './site-detect.js';
@@ -765,6 +766,125 @@ const AEM_TOOLS = [
     },
   },
 
+  /* ─── AEM Assets Direct API (faster than MCP for CRUD) ─── */
+
+  {
+    name: 'browse_dam_folder',
+    description: 'Browse a DAM folder — list assets and subfolders at a given path. Direct API, fast. Use for navigating asset hierarchies.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'DAM folder path (e.g., "/content/dam/wknd" or just "/wknd"). Defaults to DAM root.' },
+      },
+    },
+  },
+
+  {
+    name: 'get_asset_metadata',
+    description: 'Get detailed metadata for a specific asset — title, description, dimensions, tags, DRM status, delivery URL, and all properties.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Asset path in DAM (e.g., "/wknd/en/adventures/bali/bali-hero.jpg")' },
+      },
+      required: ['path'],
+    },
+  },
+
+  {
+    name: 'update_asset_metadata',
+    description: 'Update metadata properties on an asset — title, description, tags, expiration date, etc.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Asset path in DAM' },
+        properties: {
+          type: 'object',
+          description: 'Properties to update (e.g., {"dc:title": "New Title", "dc:description": "Updated desc", "cq:tags": ["properties:orientation/landscape"]})',
+        },
+      },
+      required: ['path', 'properties'],
+    },
+  },
+
+  {
+    name: 'upload_asset',
+    description: 'Upload a file to a DAM folder. Provide the folder path, file name, and a URL to fetch the file from.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        folder: { type: 'string', description: 'DAM folder path to upload into (e.g., "/wknd/en/adventures")' },
+        file_name: { type: 'string', description: 'File name including extension (e.g., "hero-banner.jpg")' },
+        source_url: { type: 'string', description: 'URL to fetch the file from for upload' },
+      },
+      required: ['folder', 'file_name', 'source_url'],
+    },
+  },
+
+  {
+    name: 'delete_asset',
+    description: 'Delete an asset or folder from DAM. Use with caution — this is permanent.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Asset or folder path to delete' },
+      },
+      required: ['path'],
+    },
+  },
+
+  {
+    name: 'move_asset',
+    description: 'Move an asset to a new location in DAM. Updates all references.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: 'Current asset path' },
+        destination: { type: 'string', description: 'New path (including filename)' },
+      },
+      required: ['source', 'destination'],
+    },
+  },
+
+  {
+    name: 'copy_asset',
+    description: 'Copy an asset to a new location in DAM.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: 'Source asset path' },
+        destination: { type: 'string', description: 'Destination path (including filename)' },
+      },
+      required: ['source', 'destination'],
+    },
+  },
+
+  {
+    name: 'create_dam_folder',
+    description: 'Create a new folder in DAM.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        parent: { type: 'string', description: 'Parent folder path (e.g., "/wknd/en")' },
+        name: { type: 'string', description: 'Folder name (kebab-case, e.g., "campaign-2026")' },
+        title: { type: 'string', description: 'Display title (e.g., "Campaign 2026")' },
+      },
+      required: ['parent', 'name'],
+    },
+  },
+
+  {
+    name: 'get_asset_renditions',
+    description: 'List all available renditions for an asset — original, thumbnails, web-optimized, and Dynamic Media delivery URLs.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Asset path in DAM' },
+      },
+      required: ['path'],
+    },
+  },
+
   /* ─── Journey Agent (conflict analysis) ─── */
 
   {
@@ -1057,6 +1177,16 @@ export const TOOL_AGENT_MAP = {
   create_image_renditions: 'Content Optimization Agent',
   // Discovery Agent (extended)
   add_to_collection: 'Discovery Agent',
+  // AEM Assets Direct API
+  browse_dam_folder: 'AEM Assets API',
+  get_asset_metadata: 'AEM Assets API',
+  update_asset_metadata: 'AEM Assets API',
+  upload_asset: 'AEM Assets API',
+  delete_asset: 'AEM Assets API',
+  move_asset: 'AEM Assets API',
+  copy_asset: 'AEM Assets API',
+  create_dam_folder: 'AEM Assets API',
+  get_asset_renditions: 'AEM Assets API',
   // Journey Agent (extended)
   analyze_journey_conflicts: 'Journey Agent',
   // Product Support Agent
@@ -2323,6 +2453,104 @@ async function executeTool(name, input) {
         }, null, 2);
       } catch (err) {
         return mcpError('add_to_collection', err);
+      }
+    }
+
+    /* ─── AEM Assets Direct API ─── */
+
+    case 'browse_dam_folder': {
+      if (!isSignedIn()) return authRequiredError('browse_dam_folder');
+      try {
+        const result = await aemAssets.listFolder(sanitizePath(input.path || '/'));
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'AEM Assets API' });
+      }
+    }
+
+    case 'get_asset_metadata': {
+      if (!isSignedIn()) return authRequiredError('get_asset_metadata');
+      try {
+        const result = await aemAssets.getMetadata(sanitizePath(input.path));
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'AEM Assets API' });
+      }
+    }
+
+    case 'update_asset_metadata': {
+      if (!isSignedIn()) return authRequiredError('update_asset_metadata');
+      try {
+        const result = await aemAssets.updateMetadata(sanitizePath(input.path), input.properties);
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'AEM Assets API' });
+      }
+    }
+
+    case 'upload_asset': {
+      if (!isSignedIn()) return authRequiredError('upload_asset');
+      try {
+        // Fetch the source file first
+        const fileResp = await fetch(input.source_url);
+        if (!fileResp.ok) throw new Error(`Failed to fetch source file: ${fileResp.status}`);
+        const blob = await fileResp.blob();
+        const result = await aemAssets.uploadAsset(
+          sanitizePath(input.folder), input.file_name, blob, blob.type,
+        );
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'AEM Assets API' });
+      }
+    }
+
+    case 'delete_asset': {
+      if (!isSignedIn()) return authRequiredError('delete_asset');
+      try {
+        const result = await aemAssets.deleteAsset(sanitizePath(input.path));
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'AEM Assets API' });
+      }
+    }
+
+    case 'move_asset': {
+      if (!isSignedIn()) return authRequiredError('move_asset');
+      try {
+        const result = await aemAssets.moveAsset(sanitizePath(input.source), sanitizePath(input.destination));
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'AEM Assets API' });
+      }
+    }
+
+    case 'copy_asset': {
+      if (!isSignedIn()) return authRequiredError('copy_asset');
+      try {
+        const result = await aemAssets.copyAsset(sanitizePath(input.source), sanitizePath(input.destination));
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'AEM Assets API' });
+      }
+    }
+
+    case 'create_dam_folder': {
+      if (!isSignedIn()) return authRequiredError('create_dam_folder');
+      try {
+        const result = await aemAssets.createFolder(sanitizePath(input.parent), input.name, input.title);
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'AEM Assets API' });
+      }
+    }
+
+    case 'get_asset_renditions': {
+      if (!isSignedIn()) return authRequiredError('get_asset_renditions');
+      try {
+        const result = await aemAssets.getRenditions(sanitizePath(input.path));
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'AEM Assets API' });
       }
     }
 
