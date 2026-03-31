@@ -1328,6 +1328,14 @@ export const TOOL_AGENT_MAP = {
  * results. This function is a fallback for constructing transform URLs when the
  * agent already has an asset path but not the full delivery URL.
  */
+/** Return error JSON if no DA site is connected, or null if OK */
+function requireDaSite() {
+  if (!da.getOrg() || !da.getRepo()) {
+    return JSON.stringify({ status: 'error', message: 'No site connected. Connect a site first using the home screen.' });
+  }
+  return null;
+}
+
 function getDmDeliveryHost() {
   const host = window.__EW_AEM_HOST || '';
   const bare = host.replace(/^https?:\/\//, '');
@@ -1544,6 +1552,9 @@ async function executeTool(name, input) {
       const org = da.getOrg();
       const repo = da.getRepo();
       const branch = da.getBranch();
+
+      { const noSite = requireDaSite(); if (noSite) return noSite; }
+
       const baseUrl = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
       const previewUrl = `${baseUrl}${pagePath}`;
       const daUrl = `https://da.live/edit#/${org}/${repo}${pagePath}`;
@@ -1649,6 +1660,7 @@ async function executeTool(name, input) {
     }
 
     case 'preview_page': {
+      { const noSite = requireDaSite(); if (noSite) return noSite; }
       const pagePath = input.page_path.replace(/\.html$/, '');
       const org = da.getOrg();
       const repo = da.getRepo();
@@ -1679,6 +1691,7 @@ async function executeTool(name, input) {
     }
 
     case 'publish_page': {
+      { const noSite = requireDaSite(); if (noSite) return noSite; }
       const pagePath = input.page_path.replace(/\.html$/, '');
       const org = da.getOrg();
       const repo = da.getRepo();
@@ -1760,6 +1773,7 @@ async function executeTool(name, input) {
     }
 
     case 'sync_code': {
+      { const noSite = requireDaSite(); if (noSite) return noSite; }
       const org = da.getOrg();
       const repo = da.getRepo();
       try {
@@ -1832,6 +1846,7 @@ async function executeTool(name, input) {
     }
 
     case 'get_page_status': {
+      { const noSite = requireDaSite(); if (noSite) return noSite; }
       const pagePath = sanitizePath(input.page_path);
       try {
         const data = await da.getStatus(pagePath);
@@ -1847,6 +1862,7 @@ async function executeTool(name, input) {
     }
 
     case 'list_site_pages': {
+      { const noSite = requireDaSite(); if (noSite) return noSite; }
       const listPath = input.path || '/';
 
       try {
@@ -2934,6 +2950,7 @@ async function executeTool(name, input) {
     /* ─── Experimentation Agent ─── */
 
     case 'setup_experiment': {
+      { const noSite = requireDaSite(); if (noSite) return noSite; }
       const controlPage = input.control_page.replace(/\.html$/, '');
       const expName = input.experiment_name;
       const numVariants = input.num_variants || 1;
@@ -3059,6 +3076,7 @@ async function executeTool(name, input) {
     }
 
     case 'get_experiment_status': {
+      { const noSite = requireDaSite(); if (noSite) return noSite; }
       const expName = input.experiment_name;
       const pagePath = input.page_path || '/';
       const org = da.getOrg();
@@ -3128,6 +3146,7 @@ async function executeTool(name, input) {
     /* ─── Content Variations Agent ─── */
 
     case 'generate_page_variations': {
+      { const noSite = requireDaSite(); if (noSite) return noSite; }
       const pagePath = input.page_path;
       const numVariations = input.num_variations || 3;
       const audience = input.target_audience || 'general audience';
