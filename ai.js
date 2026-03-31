@@ -1603,7 +1603,9 @@ async function executeTool(name, input) {
 
       const baseUrl = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
       const previewUrl = `${baseUrl}${pagePath}`;
-      const daUrl = `https://da.live/edit#/${org}/${repo}${pagePath}`;
+      // DA edit URLs need explicit /index for root path (da.live doesn't resolve / to /index)
+      const daEditPath = pagePath === '/' ? '/index' : pagePath;
+      const daUrl = `https://da.live/edit#/${org}/${repo}${daEditPath}`;
 
       // ── DA MCP write (primary — native path for DA-backed sites) ──
       // Uses the DA MCP server at mcp.adobeaemcloud.com/adobe/mcp/da
