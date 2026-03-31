@@ -1330,7 +1330,8 @@ export const TOOL_AGENT_MAP = {
  */
 function getDmDeliveryHost() {
   const host = window.__EW_AEM_HOST || '';
-  if (host.startsWith('author-')) return host.replace('author-', 'delivery-');
+  const bare = host.replace(/^https?:\/\//, '');
+  if (bare.startsWith('author-')) return `https://${bare.replace('author-', 'delivery-')}`;
   return null;
 }
 
@@ -3764,15 +3765,20 @@ function buildSystemParts(context = {}) {
 
   if (context.org && context.org.orgId && context.org.repo) {
     const o = context.org;
+    const siteType = window.__EW_SITE_TYPE || 'unknown';
+    const aemHost = window.__EW_AEM_HOST || null;
+    const isJcr = siteType === 'aem-cs';
+
     parts.push(`\n## Connected AEM Environment (ACTIVE — use this for ALL operations)
 - **Organization**: ${o.name} (${o.orgId})
 - **Repository**: ${o.repo} (branch: ${o.branch})
+- **Site type**: ${isJcr ? 'AEM CS (JCR/Universal Editor)' : siteType === 'da' ? 'DA (Document Authoring)' : 'EDS'}
 - **Tier**: ${o.tier}
 - **Environment**: ${o.env}
 - **Services**: ${o.services?.join(', ') || 'EDS'}
 - **Preview**: ${o.previewOrigin}
 - **Live**: ${o.liveOrigin}
-- **DA Path**: admin.da.live/source/${o.daOrg}/${o.daRepo}
+${isJcr && aemHost ? `- **AEM Author**: ${aemHost}\n- **Content tools**: Use AEM Content MCP tools (get-aem-page-content, patch-aem-page-content, get-aem-pages). Do NOT use DA tools for this site.` : `- **DA Path**: admin.da.live/source/${o.daOrg}/${o.daRepo}`}
 
 IMPORTANT: You are connected to **${o.orgId}/${o.repo}** (branch: ${o.branch}). ALL content reads and writes MUST target this repository. Ignore any other repository references from earlier context or customer profiles. The preview URL is ${o.previewOrigin}.`);
   }

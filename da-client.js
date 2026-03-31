@@ -19,9 +19,11 @@ let DA_BRANCH = 'main';
 let mcpAvailable = null;
 
 export function configure({ org, repo, branch } = {}) {
-  if (org) DA_ORG = org;
-  if (repo) DA_REPO = repo;
-  if (branch) DA_BRANCH = branch;
+  // Guard: reject values that look like URL artifacts (e.g. "https:" from bad parsing)
+  const safe = /^[\w][\w.-]*$/;
+  if (org && safe.test(org)) DA_ORG = org;
+  if (repo && safe.test(repo)) DA_REPO = repo;
+  if (branch && safe.test(branch)) DA_BRANCH = branch;
 }
 
 export function getOrg() { return DA_ORG; }

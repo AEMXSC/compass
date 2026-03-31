@@ -15,7 +15,7 @@ import { TOOL_AGENT_MAP } from './ai.js?v=47';
 import * as da from './da-client.js?v=47';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
-import { detectSiteMention } from './known-sites.js';
+import { detectSiteMention, resolveSite } from './known-sites.js';
 import { getGitHubToken, setGitHubToken, hasGitHubToken, getRepoInfo, listBranches, getRepoTree } from './github-content.js';
 import { detectAndCacheSiteType, getSiteType } from './site-detect.js';
 
@@ -3070,26 +3070,123 @@ function renderRecentRepos() {
 /* ── Connect Custom Site (AEMCoder-style org/repo input) ── */
 let customSiteConnected = false;
 
-async function connectCustomSite(orgRepo) {
+/**
+ * Parse any AEM-related URL or org/repo string into { org, repo, branch }.
+ * Supported formats:
+ *   org/repo                                          → { org, repo }
+ *   https://github.com/org/repo                       → { org, repo }
+ *   https://{branch}--{repo}--{org}.aem.page/...      → { org, repo, branch }
+ *   https://{branch}--{repo}--{org}.aem.live/...      → { org, repo, branch }
+ *   https://{branch}--{repo}--{org}.hlx.page/...      → { org, repo, branch } (legacy)
+ *   https://{branch}--{repo}--{org}.hlx.live/...      → { org, repo, branch } (legacy)
+ *   https://da.live/edit#/org/repo/...                 → { org, repo }
+ *   https://da.admin.hlx.page/list/org/repo/...       → { org, repo }
+ *   UE: https://experience.adobe.com/.../{branch}--{repo}--{org}.aem.page/... → { org, repo, branch }
+ *
+ * Returns { org, repo, branch?, error? }
+ */
+function parseConnectInput(input) {
+  const trimmed = input.trim();
+
+  // 1. EDS preview/live URLs: {branch}--{repo}--{org}.aem.page or .aem.live or .hlx.page or .hlx.live
+  const edsMatch = trimmed.match(/(\w[\w-]*)--(\w[\w-]*)--(\w[\w-]*)\.(aem|hlx)\.(page|live)/);
+  if (edsMatch) {
+    return { branch: edsMatch[1], repo: edsMatch[2], org: edsMatch[3] };
+  }
+
+  // 2. DA editor URLs: https://da.live/edit#/org/repo/...
+  const daEditMatch = trimmed.match(/da\.live\/edit#?\/?([^/]+)\/([^/]+)/);
+  if (daEditMatch) {
+    return { org: daEditMatch[1], repo: daEditMatch[2] };
+  }
+
+  // 3. DA admin URLs: https://da.admin.hlx.page/list/org/repo/...
+  const daAdminMatch = trimmed.match(/da\.admin\.hlx\.page\/\w+\/([^/]+)\/([^/]+)/);
+  if (daAdminMatch) {
+    return { org: daAdminMatch[1], repo: daAdminMatch[2] };
+  }
+
+  // 3b. Malformed EDS URLs — has .aem.page/.aem.live but didn't match the branch--repo--org pattern
+  if (/\.(aem|hlx)\.(page|live)/.test(trimmed)) {
+    return { error: 'malformed-eds', message: 'Malformed EDS URL — expected format: https://main--repo--org.aem.page/' };
+  }
+
+  // 4. /content/ path = JCR/UE site — auto-resolve from known sites or known AEM instances
+  //    Covers: author-p* URLs, UE editor URLs, bare /content/ paths
+  const contentMatch = trimmed.match(/\/content\/([^/]+)/);
+  const authorHostMatch = trimmed.match(/(author-p\d+-e\d+)\.adobeaemcloud\.com/);
+  if (contentMatch || authorHostMatch) {
+    const siteName = contentMatch?.[1];
+    const authorHost = authorHostMatch ? `${authorHostMatch[1]}.adobeaemcloud.com` : null;
+
+    // Try known-sites registry first
+    if (siteName) {
+      const knownSite = resolveSite(siteName);
+      if (knownSite) {
+        return { org: knownSite.org, repo: knownSite.repo, branch: knownSite.branch, aemHost: authorHost, jcr: !!authorHost };
+      }
+    }
+
+    // XSC Showcase instance (author-p153659-e1614585) — we have S2S access to all sites
+    if (authorHost?.startsWith('author-p153659-e1614585')) {
+      if (siteName) {
+        // Best-guess EDS mapping: site name = repo, try common orgs
+        return { org: 'aem-showcase', repo: siteName, branch: 'main', aemHost: authorHost, jcr: true };
+      }
+      return { error: 'jcr', message: 'AEM Showcase instance detected — add /content/{sitename}/ to the URL so Compass can identify the site.' };
+    }
+
+    // Unknown author instance
+    return { error: 'jcr', message: 'JCR/UE site — not recognized. Paste the .aem.page delivery URL or enter org/repo.' };
+  }
+
+  // 5. GitHub URLs: https://github.com/org/repo
+  const ghMatch = trimmed.match(/github\.com\/([^/]+)\/([^/?\s#]+)/);
+  if (ghMatch) {
+    return { org: ghMatch[1], repo: ghMatch[2].replace(/\.git$/, '') };
+  }
+
+  // 6. Plain org/repo (existing behavior)
+  const parts = trimmed.split('/');
+  if (parts.length >= 2 && parts[0] && parts[1]) {
+    return { org: parts[0], repo: parts[1] };
+  }
+
+  return { error: 'invalid', message: 'Enter org/repo or paste an .aem.page URL' };
+}
+
+// Validate org/repo/branch segments — only allow safe characters for URL construction
+function isValidSegment(s) { return /^[\w][\w.-]*$/.test(s); }
+
+async function connectCustomSite(input) {
   const statusEl = document.getElementById('connectSiteStatus');
   const btn = document.getElementById('connectSiteBtn');
 
-  // Parse org/repo
-  const parts = orgRepo.trim().replace(/^https?:\/\/github\.com\//, '').split('/');
-  if (parts.length < 2) {
+  // Parse the input (URL or org/repo)
+  const parsed = parseConnectInput(input);
+  if (parsed.error) {
     if (statusEl) {
-      statusEl.textContent = 'Enter org/repo format (e.g., AEMXSC/xscteamsite)';
+      statusEl.textContent = parsed.message;
       statusEl.className = 'connect-site-status error';
     }
     return;
   }
 
-  const [org, repo] = parts;
+  const { org, repo } = parsed;
 
-  // Detect default branch via GitHub API (falls back to 'main')
-  let branch = 'main';
+  // Validate segments to prevent URL corruption from special characters
+  if (!isValidSegment(org) || !isValidSegment(repo) || (parsed.branch && !isValidSegment(parsed.branch))) {
+    if (statusEl) {
+      statusEl.textContent = 'Invalid org/repo name — check the URL and try again';
+      statusEl.className = 'connect-site-status error';
+    }
+    return;
+  }
+
+  // Use branch from URL if provided, otherwise detect via GitHub API (fallback to 'main')
+  let branch = parsed.branch || 'main';
   let repoMeta = null;
-  if (hasGitHubToken()) {
+  if (!parsed.branch && hasGitHubToken()) {
     try {
       repoMeta = await getRepoInfo(org, repo);
       branch = repoMeta.defaultBranch || 'main';
@@ -3139,7 +3236,7 @@ async function connectCustomSite(orgRepo) {
   // Always accept the connection (demo-friendly — even if ping fails, the iframe will show the error)
   // In a real product you'd validate more strictly
 
-  // Update the org config dynamically
+  // Update the org config dynamically (explicitly set daOrg/daRepo — spread destroys getters)
   AEM_ORG = {
     ...AEM_ORG,
     name: `${org}/${repo}`,
@@ -3148,17 +3245,31 @@ async function connectCustomSite(orgRepo) {
     branch,
     previewOrigin,
     liveOrigin: `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.live`,
+    daOrg: org,
+    daRepo: repo,
   };
   PREVIEW_URL = previewOrigin + '/';
   customSiteConnected = true;
   window.__EW_ORG = AEM_ORG;
 
-  // Reconfigure DA client
-  da.configure({ org, repo, branch });
-  console.log(`[EW] DA client reconfigured: ${org}/${repo} (${branch}), da.getOrg()=${da.getOrg()}, da.getRepo()=${da.getRepo()}`);
+  // If parsed from a JCR/author URL, set the AEM host immediately (skip fstab detection)
+  if (parsed.aemHost) {
+    window.__EW_AEM_HOST = `https://${parsed.aemHost}`;
+    window.__EW_SITE_TYPE = 'aem-cs';
+    console.log(`[EW] AEM CS site: ${parsed.aemHost} — site type set to aem-cs`);
+  }
+
+  // Reconfigure DA client (skip for known JCR sites — DA won't work)
+  if (!parsed.jcr) {
+    da.configure({ org, repo, branch });
+    console.log(`[EW] DA client reconfigured: ${org}/${repo} (${branch}), da.getOrg()=${da.getOrg()}, da.getRepo()=${da.getRepo()}`);
+  } else {
+    console.log(`[EW] JCR site — DA client not configured. AEM Content MCP tools available via ${parsed.aemHost}`);
+  }
 
   // Detect site type (DA vs AEM CS) via fstab.yaml — runs async, non-blocking
-  detectAndCacheSiteType(org, repo, branch).then((type) => {
+  // Skip if already set from author URL
+  (parsed.aemHost ? Promise.resolve('aem-cs') : detectAndCacheSiteType(org, repo, branch)).then((type) => {
     const typeLabel = type === 'aem-cs' ? 'AEM CS (xwalk)' : type === 'da' ? 'DA' : type;
     console.log(`[EW] Site type: ${typeLabel}`);
     if (statusEl) {
@@ -3196,7 +3307,11 @@ async function connectCustomSite(orgRepo) {
   // Populate branch select — real branches from GitHub API
   const branchSelect = document.getElementById('branchSelect');
   if (branchSelect) {
-    branchSelect.innerHTML = `<option value="${branch}">${branch}</option>`;
+    branchSelect.innerHTML = '';
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = branch;
+    defaultOpt.textContent = branch;
+    branchSelect.appendChild(defaultOpt);
     if (hasGitHubToken()) {
       listBranches(org, repo).then((branches) => {
         branchSelect.innerHTML = '';
@@ -4901,7 +5016,7 @@ async function init() {
     addMessage('assistant', md(`**Connected to ${AEM_ORG.name}** (${AEM_ORG.orgId}/${AEM_ORG.repo})\nSite loaded. You can:\n- **Prompt to edit**: "Change the hero headline"\n- **Set up experiments**: "A/B test the hero on the homepage"\n- **Generate variations**: "Create 3 hero variations targeting millennials"\n- **Add forms**: "Add a contact form to /contact"\n- **Switch site**: Click the site URL in the toolbar to connect a different repo`));
     previewFrame.addEventListener('load', () => ensurePageContext(), { once: true });
   } else {
-    addMessage('assistant', md(`**Welcome to Compass**\nConnect a site using the **org/repo** input on the home screen to get started.\n\nExample: \`AEMXSC/lifepoint\``));
+    addMessage('assistant', md(`**Welcome to Compass**\nConnect a site by pasting an **.aem.page URL** or entering **org/repo** on the home screen.\n\nExamples: \`https://main--lifepoint--aemxsc.aem.page/\` or \`AEMXSC/lifepoint\``));
   }
 
   if (ai.hasApiKey()) {

@@ -13,7 +13,7 @@
   <!-- Adobe Clean font (non-blocking — loaded via preload instead of CSS @import) -->
   <link rel="preload" href="https://use.typekit.net/mge7bvf.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
   <noscript><link rel="stylesheet" href="https://use.typekit.net/mge7bvf.css"></noscript>
-  <link rel="stylesheet" href="app.css?v=51">
+  <link rel="stylesheet" href="app.css?v=55">
 </head>
 <body>
   <div class="workspace">
@@ -389,7 +389,7 @@
             <div class="connect-site-label">Connect your site</div>
             <div class="connect-site-row">
               <div class="connect-site-input-wrap">
-                <input type="text" class="connect-site-input" id="connectSiteInput" placeholder="org/repo  (e.g. AEMXSC/xscteamsite)" autocomplete="off" aria-label="GitHub organization and repository">
+                <input type="text" class="connect-site-input" id="connectSiteInput" placeholder="org/repo or .aem.page URL" autocomplete="off" aria-label="GitHub org/repo or AEM URL">
                 <button class="connect-site-btn" id="connectSiteBtn">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
                   Connect
@@ -397,7 +397,7 @@
               </div>
               <div class="connect-site-status" id="connectSiteStatus"></div>
             </div>
-            <div class="connect-site-hint">Enter a GitHub org/repo to load an Edge Delivery Services site</div>
+            <div class="connect-site-hint">Paste an .aem.page URL or enter org/repo to connect</div>
             <div class="recent-repos" id="recentRepos"></div>
           </div>
 
@@ -537,7 +537,7 @@
               <div class="preview-site-url" id="previewSiteUrl" title="Click to switch site">
                 <span class="site-dot connected" id="previewDot"></span>
                 <span class="preview-url-text" id="previewUrlText">Not connected</span>
-                <input type="text" class="site-switch-input" id="siteSwitchInput" placeholder="org/repo" autocomplete="off" style="display:none">
+                <input type="text" class="site-switch-input" id="siteSwitchInput" placeholder="org/repo or URL" autocomplete="off" style="display:none">
               </div>
               <div class="preview-view-tabs" id="previewViewTabs">
                 <button class="preview-view-tab active" data-view="preview" title="Page preview">Preview</button>
@@ -676,6 +676,6 @@
   <script async src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e" crossorigin="anonymous" onload="if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'"></script>
   <script async src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
 
-  <script src="app.js?v=54" type="module"></script>
+  <script src="app.js?v=55" type="module"></script>
 </body>
 </html>
