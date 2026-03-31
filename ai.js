@@ -1709,19 +1709,26 @@ async function executeTool(name, input) {
         }
       }
 
-      // ── No auth — return clear error (never fake success) ──
+      // ── No auth — return diagnostic error (never fake success) ──
+      const imsToken = isSignedIn();
+      const ghToken = hasGitHubToken();
+      console.error(`[edit_page_content] Auth check: IMS=${imsToken}, GitHub=${ghToken}, org=${org}, repo=${repo}`);
+
+      // If we got here with IMS token, the DA MCP write threw — include that error
       const hints = [];
-      if (!isSignedIn()) hints.push('Click "Sign In" to authenticate with Adobe IMS — this enables DA MCP writes');
-      if (!hasGitHubToken()) hints.push('Or add a GitHub Personal Access Token in Settings');
-      console.error('[edit_page_content] No auth available — cannot write content');
+      if (!imsToken) hints.push('Click "Sign In" to authenticate with Adobe IMS — this enables DA MCP writes');
+      if (!ghToken) hints.push('Or add a GitHub Personal Access Token in Settings');
+      if (imsToken && !ghToken) hints.push('IMS is active but DA write failed above — check browser console for details');
+
       return JSON.stringify({
         status: 'error',
         error: 'Authentication required to edit content.',
         page_path: pagePath,
         preview_url: previewUrl,
         da_edit_url: daUrl,
+        auth_state: { ims: imsToken, github: ghToken },
         how_to_fix: hints,
-        message: `Cannot save changes to ${pagePath} — no authentication. ${hints.join('. ')}.`,
+        message: `Cannot save changes to ${pagePath}. Auth state: IMS=${imsToken}, GitHub=${ghToken}. ${hints.join('. ')}.`,
         _action: 'auth_required',
       }, null, 2);
     }
