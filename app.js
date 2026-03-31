@@ -9,10 +9,14 @@
  * 5. Speed of iteration (update system prompts same day, not next quarter)
  */
 
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js?v=46';
-import * as ai from './ai.js?v=57';
-import { TOOL_AGENT_MAP } from './ai.js?v=57';
-import * as da from './da-client.js?v=57';
+// IMPORTANT: Import specifiers must match EXACTLY across files (app.js + ai.js).
+// Different query strings (e.g., './da-client.js' vs './da-client.js?v=57') create
+// separate module instances with separate state — causing shared state (like DA org/repo)
+// to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js';
+import * as ai from './ai.js';
+import { TOOL_AGENT_MAP } from './ai.js';
+import * as da from './da-client.js';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
 import { detectSiteMention, resolveSite } from './known-sites.js';
