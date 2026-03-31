@@ -1623,11 +1623,12 @@ async function executeTool(name, input) {
 
       // ── DA MCP write (primary — native path for DA-backed sites) ──
       // Requires IMS Bearer token. Auto-refresh if token missing/expired.
+      console.log(`[edit_page_content] ── START ── org=${org} repo=${repo} path=${htmlPath} htmlLen=${input.html?.length || 0} auth=${isSignedIn()} ghToken=${hasGitHubToken()}`);
       if (await ensureAuth()) {
         try {
-          console.log('[edit_page_content] Writing via DA MCP...');
+          console.log(`[edit_page_content] Writing via DA MCP: ${da.getBasePath()}${htmlPath}`);
           const writeResult = await da.updatePage(htmlPath, input.html);
-          console.log('[edit_page_content] DA MCP write result:', writeResult?.status || writeResult?.ok || 'returned');
+          console.log('[edit_page_content] DA MCP write returned:', JSON.stringify(writeResult)?.slice(0, 300));
 
           // Verify the write landed by reading back
           let verified = false;
