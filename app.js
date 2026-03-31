@@ -3154,6 +3154,7 @@ async function connectCustomSite(orgRepo) {
 
   // Reconfigure DA client
   da.configure({ org, repo, branch });
+  console.log(`[EW] DA client reconfigured: ${org}/${repo} (${branch}), da.getOrg()=${da.getOrg()}, da.getRepo()=${da.getRepo()}`);
 
   // Detect site type (DA vs AEM CS) via fstab.yaml — runs async, non-blocking
   detectAndCacheSiteType(org, repo, branch).then((type) => {

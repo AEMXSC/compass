@@ -3764,7 +3764,7 @@ function buildSystemParts(context = {}) {
 
   if (context.org) {
     const o = context.org;
-    parts.push(`\n## Connected AEM Environment
+    parts.push(`\n## Connected AEM Environment (ACTIVE — use this for ALL operations)
 - **Organization**: ${o.name} (${o.orgId})
 - **Repository**: ${o.repo} (branch: ${o.branch})
 - **Tier**: ${o.tier}
@@ -3774,7 +3774,7 @@ function buildSystemParts(context = {}) {
 - **Live**: ${o.liveOrigin}
 - **DA Path**: admin.da.live/source/${o.daOrg}/${o.daRepo}
 
-You are working with the ${o.name} AEM environment. Reference this org context when discussing pages, blocks, publishing, and content operations.`);
+IMPORTANT: You are connected to **${o.orgId}/${o.repo}** (branch: ${o.branch}). ALL content reads and writes MUST target this repository. Ignore any other repository references from earlier context or customer profiles. The preview URL is ${o.previewOrigin}.`);
   }
 
   return parts.join('\n');
