@@ -3669,11 +3669,6 @@ textarea:focus-visible,
   box-shadow: 0 0 0 2px rgba(227, 72, 80, 0.15);
 }
 
-.connect-site-icon {
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
 .connect-site-input {
   flex: 1;
   border: none;
