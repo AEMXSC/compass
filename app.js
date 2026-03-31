@@ -3052,17 +3052,30 @@ function saveRecentRepo(org, repo, branch) {
   renderRecentRepos();
 }
 
+function removeRecentRepo(org, repo) {
+  const recents = getRecentRepos().filter((r) => !(r.org === org && r.repo === repo));
+  localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(recents));
+  renderRecentRepos();
+}
+
 function renderRecentRepos() {
   const container = document.getElementById('recentRepos');
   if (!container) return;
   const recents = getRecentRepos();
   if (recents.length === 0) { container.innerHTML = ''; return; }
-  container.innerHTML = recents.map((r) => `<button class="recent-repo-chip" data-org="${escapeHtml(r.org)}" data-repo="${escapeHtml(r.repo)}" title="${escapeHtml(r.org)}/${escapeHtml(r.repo)} (${escapeHtml(r.branch)})">${escapeHtml(r.org)}/${escapeHtml(r.repo)}</button>`).join('');
-  container.querySelectorAll('.recent-repo-chip').forEach((chip) => {
-    chip.addEventListener('click', () => {
+  container.innerHTML = recents.map((r) => `<span class="recent-repo-chip" data-org="${escapeHtml(r.org)}" data-repo="${escapeHtml(r.repo)}" title="${escapeHtml(r.org)}/${escapeHtml(r.repo)} (${escapeHtml(r.branch)})"><span class="recent-repo-name">${escapeHtml(r.org)}/${escapeHtml(r.repo)}</span><button class="recent-repo-remove" data-org="${escapeHtml(r.org)}" data-repo="${escapeHtml(r.repo)}" title="Remove" aria-label="Remove ${escapeHtml(r.org)}/${escapeHtml(r.repo)}">&times;</button></span>`).join('');
+  container.querySelectorAll('.recent-repo-name').forEach((name) => {
+    name.addEventListener('click', () => {
+      const chip = name.closest('.recent-repo-chip');
       const input = document.getElementById('connectSiteInput');
       if (input) input.value = `${chip.dataset.org}/${chip.dataset.repo}`;
       connectCustomSite(`${chip.dataset.org}/${chip.dataset.repo}`);
+    });
+  });
+  container.querySelectorAll('.recent-repo-remove').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeRecentRepo(btn.dataset.org, btn.dataset.repo);
     });
   });
 }

@@ -3777,21 +3777,52 @@ textarea:focus-visible,
 .recent-repo-chip {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
+  gap: 2px;
+  padding: 4px 6px 4px 10px;
   font-size: 11px;
   font-family: var(--font-sans);
   color: var(--text-secondary);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 12px;
-  cursor: pointer;
   transition: all 0.15s;
+}
+
+.recent-repo-name {
+  cursor: pointer;
 }
 
 .recent-repo-chip:hover {
   color: var(--accent);
   border-color: var(--accent);
   background: rgba(var(--accent-rgb, 0, 122, 255), 0.08);
+}
+
+.recent-repo-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+}
+
+.recent-repo-chip:hover .recent-repo-remove {
+  opacity: 1;
+}
+
+.recent-repo-remove:hover {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.12);
 }
 
 .spin { animation: spin 0.8s linear infinite; }
