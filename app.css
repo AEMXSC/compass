@@ -1557,7 +1557,7 @@ textarea:focus-visible,
 
 .input-wrapper {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -1632,6 +1632,11 @@ textarea:focus-visible,
   font-family: var(--font-sans);
   padding: 8px 4px;
   outline: none;
+  resize: none;
+  overflow-y: hidden;
+  max-height: 150px;
+  line-height: 1.4;
+  min-height: 22px;
 }
 
 .chat-input::placeholder {

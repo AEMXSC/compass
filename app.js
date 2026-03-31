@@ -3450,6 +3450,7 @@ function handleUserInput() {
   const text = chatInput.value.trim();
   if (!text && !pendingFile) return;
   chatInput.value = '';
+  autoResizeChatInput();
 
   // Capture and clear pending file
   const file = pendingFile;
@@ -3465,7 +3466,7 @@ function handleUserInput() {
   if (!file) {
     const specializedFlow = matchSpecializedFlow(text);
     if (specializedFlow) {
-      addMessage('user', displayText);
+      addMessage('user', escapeHtml(displayText));
       setTimeout(() => specializedFlow(), 400);
       return;
     }
@@ -3481,16 +3482,16 @@ function handleUserInput() {
             <div class="upload-indicator" style="margin-bottom:6px">
               <span class="file-icon">${file.type === 'image' ? '🖼' : '📄'}</span>
               <div>
-                <div style="font-weight:500">${file.name}</div>
+                <div style="font-weight:500">${escapeHtml(file.name)}</div>
                 <div style="font-size:10px;color:var(--text-muted)">${(file.size / 1024).toFixed(0)} KB</div>
               </div>
             </div>
-            ${text ? `<div>${text}</div>` : ''}
+            ${text ? `<div>${escapeHtml(text)}</div>` : ''}
           </div>
         </div>
       `);
     } else {
-      addMessage('user', displayText);
+      addMessage('user', escapeHtml(displayText));
     }
     // Augment prompt with design selection context + plan mode
     let augmentedText = text || `I've uploaded a file: ${file?.name}. Please analyze it.`;
@@ -3506,7 +3507,7 @@ function handleUserInput() {
   }
 
   // No API key — prompt to configure
-  addMessage('user', displayText);
+  addMessage('user', escapeHtml(displayText));
   requireApiKey();
 }
 
@@ -3524,6 +3525,14 @@ sendBtn.addEventListener('click', handleUserInput);
 chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleUserInput(); }
 });
+
+// Auto-resize textarea as user types
+function autoResizeChatInput() {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 150) + 'px';
+  chatInput.style.overflowY = chatInput.scrollHeight > 150 ? 'auto' : 'hidden';
+}
+chatInput.addEventListener('input', autoResizeChatInput);
 
 // Attach file button (paperclip)
 const attachBtn = document.querySelector('.attach-btn');
@@ -3900,6 +3909,7 @@ document.querySelectorAll('.home-card').forEach((card) => {
     switchView('editor');
     if (prompt && chatInput) {
       chatInput.value = prompt;
+      autoResizeChatInput();
       chatInput.focus();
     }
   });
