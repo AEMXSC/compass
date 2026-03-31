@@ -10,9 +10,9 @@
  */
 
 import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js?v=46';
-import * as ai from './ai.js?v=56';
-import { TOOL_AGENT_MAP } from './ai.js?v=56';
-import * as da from './da-client.js?v=56';
+import * as ai from './ai.js?v=57';
+import { TOOL_AGENT_MAP } from './ai.js?v=57';
+import * as da from './da-client.js?v=57';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
 import { detectSiteMention, resolveSite } from './known-sites.js';
@@ -3175,8 +3175,10 @@ async function connectCustomSite(input) {
   const statusEl = document.getElementById('connectSiteStatus');
   const btn = document.getElementById('connectSiteBtn');
 
+  try {
   // Parse the input (URL or org/repo)
   const parsed = parseConnectInput(input);
+  console.log('[EW] parseConnectInput result:', JSON.stringify(parsed));
   if (parsed.error) {
     if (statusEl) {
       statusEl.textContent = parsed.message;
@@ -3219,35 +3221,17 @@ async function connectCustomSite(input) {
     btn.innerHTML = '<svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> Connecting...';
   }
 
-  // Validate: ping the site
-  let valid = false;
-  try {
-    await fetch(previewOrigin, { mode: 'no-cors' });
-    valid = true; // no-cors won't give us status, but if it doesn't throw, the host exists
-  } catch {
-    // Try with cors
+  // For JCR sites, skip preview URL validation — the .aem.page URL may not resolve
+  // (xwalk sites use different GitHub orgs for EDS delivery)
+  if (!parsed.jcr) {
     try {
-      const resp = await fetch(`${previewOrigin}/`, { mode: 'cors' });
-      valid = resp.ok || resp.type === 'opaque';
+      await fetch(previewOrigin, { mode: 'no-cors' });
     } catch {
-      valid = false;
+      try {
+        await fetch(`${previewOrigin}/`, { mode: 'cors' });
+      } catch { /* ignore — demo-friendly, always accept */ }
     }
   }
-
-  // Even if fetch was opaque, try to load query-index to confirm it's EDS
-  if (valid) {
-    try {
-      const qiResp = await fetch(`${previewOrigin}/query-index.json`);
-      if (qiResp.ok) {
-        valid = true;
-      }
-    } catch {
-      // Still might be valid even without query-index
-    }
-  }
-
-  // Always accept the connection (demo-friendly — even if ping fails, the iframe will show the error)
-  // In a real product you'd validate more strictly
 
   // Update the org config dynamically (explicitly set daOrg/daRepo — spread destroys getters)
   AEM_ORG = {
@@ -3280,19 +3264,15 @@ async function connectCustomSite(input) {
     console.log(`[EW] JCR site — DA client not configured. AEM Content MCP tools available via ${parsed.aemHost}`);
   }
 
-  // Detect site type (DA vs AEM CS) via fstab.yaml — runs async, non-blocking
+  // Detect site type (DA vs AEM CS) via fstab.yaml — AWAIT so AI knows the type before first prompt
   // Skip if already set from author URL
-  (parsed.aemHost ? Promise.resolve('aem-cs') : detectAndCacheSiteType(org, repo, branch)).then((type) => {
-    const typeLabel = type === 'aem-cs' ? 'AEM CS (xwalk)' : type === 'da' ? 'DA' : type;
-    console.log(`[EW] Site type: ${typeLabel}`);
-    if (statusEl) {
-      statusEl.textContent = `Connected to ${org}/${repo} · ${typeLabel}`;
-    }
-  });
+  const detectedType = parsed.aemHost ? 'aem-cs' : await detectAndCacheSiteType(org, repo, branch);
+  const typeLabel = detectedType === 'aem-cs' ? 'AEM CS (xwalk)' : detectedType === 'da' ? 'DA' : detectedType;
+  console.log(`[EW] Site type: ${typeLabel}`);
 
   // Update UI (home view elements may not exist when switching from toolbar)
   if (statusEl) {
-    statusEl.textContent = `Connected to ${org}/${repo}`;
+    statusEl.textContent = `Connected to ${org}/${repo} · ${typeLabel}`;
     statusEl.className = 'connect-site-status success';
   }
   if (btn) {
@@ -3342,11 +3322,28 @@ async function connectCustomSite(input) {
   // Save to recent repos
   saveRecentRepo(org, repo, branch);
 
-  // Welcome message in chat
-  addMessage('assistant', md(`**Connected to ${org}/${repo}**\nSite loaded in preview. Page tree populated from query-index.json. You can now:\n- **Prompt to edit**: "Change the hero headline on /coffee"\n- **Set up experiments**: "A/B test the hero on the homepage"\n- **Generate variations**: "Create 3 hero variations targeting millennials"\n- **Add forms**: "Add a contact form to /contact"\n- **Edit visually**: Use the DA or UE buttons in the toolbar`));
+  // Welcome message in chat — different for JCR vs DA
+  if (parsed.jcr) {
+    addMessage('assistant', md(`**Connected to ${org}/${repo}** (AEM CS)\nAuthor: ${parsed.aemHost}\nYou can now:\n- **Prompt to edit**: "Change the hero headline"\n- **Read pages**: "Show me the homepage content"\n- **Governance**: "Run a governance check on this site"\n- **Edit visually**: Use the UE button in the toolbar`));
+  } else {
+    addMessage('assistant', md(`**Connected to ${org}/${repo}**\nSite loaded in preview. Page tree populated from query-index.json. You can now:\n- **Prompt to edit**: "Change the hero headline on /coffee"\n- **Set up experiments**: "A/B test the hero on the homepage"\n- **Generate variations**: "Create 3 hero variations targeting millennials"\n- **Add forms**: "Add a contact form to /contact"\n- **Edit visually**: Use the DA or UE buttons in the toolbar`));
+  }
 
   // Clear conversation for fresh start
   conversationHistory = [];
+
+  } catch (err) {
+    console.error('[EW] connectCustomSite error:', err);
+    if (statusEl) {
+      statusEl.textContent = `Connection failed: ${err.message}`;
+      statusEl.className = 'connect-site-status error';
+    }
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('connecting');
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Connect';
+    }
+  }
 }
 
 /* ── Preview (hidden iframe for page context) ── */

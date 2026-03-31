@@ -3580,8 +3580,8 @@ Use these when users ask about:
 15. For journey conflict analysis (scheduling, audience overlap), call analyze_journey_conflicts.
 16. For support tickets, call create_support_ticket to create and get_ticket_status to check updates.
 17. IMPORTANT: After creating or patching pages, ALWAYS share the Universal Editor and DA edit links in your response so the user can open and edit the page visually.
-18. **DA EDITING LOOP (highest priority for content edits)**: When the user wants to edit existing page content or create new pages, prefer the DA Editing Agent tools (edit_page_content, preview_page, publish_page). The workflow: get_page_content → modify HTML → edit_page_content → preview refreshes automatically in the workspace. This is a LIVE editing loop — changes appear immediately. If the user is not signed in, edit_page_content automatically renders content locally in the preview panel (no auth needed). Always proceed with edits regardless of auth status — the system handles it.
-19. When users say "edit the page", "change the headline", "update the hero", "create a landing page" — use the DA editing tools. Read first, then write.
+18. **CONTENT EDITING LOOP**: When the user wants to edit page content, **check the TOOL ROUTING section** in the Connected AEM Environment block below to determine the correct tools. For **DA sites**: use edit_page_content, preview_page, publish_page. For **AEM CS (JCR) sites**: use get-aem-page-content → patch-aem-page-content. The tool routing section is authoritative — always follow it over these general guidelines.
+19. When users say "edit the page", "change the headline", "update the hero", "create a landing page" — check the TOOL ROUTING section first. For DA sites: use DA tools (read first, then write). For JCR sites: use AEM Content MCP tools (get ETag first, then patch).
 20. NEVER call edit_page_content without first reading the page with get_page_content (unless creating a brand new page that doesn't exist yet).
 21. For documentation questions ("how do I...", "what is...", "show me docs on..."), call search_experience_league. For release notes ("what's new", "latest features"), call get_product_release_notes.
 22. For site health, performance, or SEO questions, call get_site_audit for scores and get_site_opportunities for recommendations. Use Spacecat tools BEFORE giving optimization advice.
@@ -3787,19 +3787,50 @@ function buildSystemParts(context = {}) {
     const siteType = window.__EW_SITE_TYPE || 'unknown';
     const aemHost = window.__EW_AEM_HOST || null;
     const isJcr = siteType === 'aem-cs';
+    const isDa = siteType === 'da';
+
+    // Build tool routing instructions based on detected site type
+    let toolRouting = '';
+    if (isJcr && aemHost) {
+      toolRouting = `- **AEM Author**: ${aemHost}
+
+### TOOL ROUTING (MANDATORY)
+This is an **AEM CS (JCR)** site. You MUST use AEM Content MCP tools:
+- Read pages: \`get-aem-page-content\`
+- Write pages: \`patch-aem-page-content\` (always get-aem-page-content first for ETag)
+- List pages: \`get-aem-pages\`
+- Content Fragments: \`get-aem-fragment-variation\`, \`patch-aem-fragment-variation\`
+
+**DO NOT** use DA tools (edit_page_content, preview_page, list_site_pages) — they will fail on this site.
+**DO NOT** attempt the Experience Production Agent or DA editing agent.`;
+    } else if (isDa) {
+      toolRouting = `- **DA Path**: admin.da.live/source/${o.daOrg}/${o.daRepo}
+
+### TOOL ROUTING (MANDATORY)
+This is a **DA (Document Authoring)** site. You MUST use DA tools:
+- Read pages: \`list_site_pages\`, fetch page HTML from preview URL
+- Write pages: \`edit_page_content\` (writes via GitHub API to the DA-backed repo)
+- Preview: \`preview_page\` (triggers preview pipeline)
+- Publish: \`publish_page\`
+
+**DO NOT** use AEM Content MCP tools (get-aem-page-content, patch-aem-page-content) — they will fail on this site.
+Use the GitHub Contents API write path (edit_page_content tool) for all content changes.`;
+    } else {
+      toolRouting = `- **DA Path**: admin.da.live/source/${o.daOrg}/${o.daRepo}
+
+### TOOL ROUTING
+Site type could not be determined from fstab.yaml. Try DA tools first (edit_page_content). If DA fails, inform the user that the site type is unknown and ask how they'd like to proceed.`;
+    }
 
     parts.push(`\n## Connected AEM Environment (ACTIVE — use this for ALL operations)
 - **Organization**: ${o.name} (${o.orgId})
 - **Repository**: ${o.repo} (branch: ${o.branch})
-- **Site type**: ${isJcr ? 'AEM CS (JCR/Universal Editor)' : siteType === 'da' ? 'DA (Document Authoring)' : 'EDS'}
-- **Tier**: ${o.tier}
-- **Environment**: ${o.env}
-- **Services**: ${o.services?.join(', ') || 'EDS'}
+- **Site type**: ${isJcr ? 'AEM CS (JCR/Universal Editor)' : isDa ? 'DA (Document Authoring)' : 'Unknown (fstab not found)'}
 - **Preview**: ${o.previewOrigin}
 - **Live**: ${o.liveOrigin}
-${isJcr && aemHost ? `- **AEM Author**: ${aemHost}\n- **Content tools**: Use AEM Content MCP tools (get-aem-page-content, patch-aem-page-content, get-aem-pages). Do NOT use DA tools for this site.` : `- **DA Path**: admin.da.live/source/${o.daOrg}/${o.daRepo}`}
+${toolRouting}
 
-IMPORTANT: You are connected to **${o.orgId}/${o.repo}** (branch: ${o.branch}). ALL content reads and writes MUST target this repository. Ignore any other repository references from earlier context or customer profiles. The preview URL is ${o.previewOrigin}.`);
+IMPORTANT: You are connected to **${o.orgId}/${o.repo}** (branch: ${o.branch}). ALL content reads and writes MUST target this repository. The preview URL is ${o.previewOrigin}. Follow the TOOL ROUTING section above — using the wrong tool stack will cause failures.`);
   }
 
   return parts.join('\n');
