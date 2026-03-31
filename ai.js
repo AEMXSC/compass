@@ -19,7 +19,8 @@ import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
 import * as aemAssets from './aem-assets-client.js';
 import { contentUpdaterMcp, developmentMcp, cjaMcp, acrobatMcp, marketingMcp } from './mcp-client.js';
-import { hasWebhook, createTaskViaWebhook } from './workfront.js';
+import * as wf from './workfront.js';
+const { hasWebhook, createTaskViaWebhook } = wf;
 import { getSiteType } from './site-detect.js';
 import { buildPlaybookPrompt } from './xsc-playbook.js';
 import { buildKnowledgePrompt } from './aem-knowledge.js';
@@ -468,12 +469,106 @@ const AEM_TOOLS = [
       properties: {
         title: { type: 'string', description: 'Task title' },
         description: { type: 'string', description: 'Task description with governance findings' },
+        project_id: { type: 'string', description: 'Workfront project ID to create the task in' },
         preview_url: { type: 'string', description: 'Preview URL for the reviewer' },
         priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'], description: 'Task priority' },
         assignee: { type: 'string', description: 'Role or person to assign to (from approval chain)' },
       },
       required: ['title', 'description'],
     },
+  },
+
+  {
+    name: 'list_workfront_projects',
+    description: 'Workfront — List projects with status, progress, priority. Filter by status (CUR=current, PLN=planning, CPL=complete).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter by status: CUR, PLN, CPL, DED, ONH' },
+        limit: { type: 'number', description: 'Max results (default 20)' },
+      },
+    },
+  },
+
+  {
+    name: 'get_workfront_project',
+    description: 'Workfront — Get detailed project info including tasks, owner, timeline, and completion percentage.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'Workfront project ID' },
+      },
+      required: ['project_id'],
+    },
+  },
+
+  {
+    name: 'list_workfront_tasks',
+    description: 'Workfront — List tasks, optionally filtered by project, status, or assignee.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'Filter by project ID' },
+        status: { type: 'string', description: 'Filter by status: NEW, INP, CPL, DED' },
+        limit: { type: 'number', description: 'Max results (default 30)' },
+      },
+    },
+  },
+
+  {
+    name: 'update_workfront_task',
+    description: 'Workfront — Update a task (status, assignee, priority, percent complete).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task ID to update' },
+        status: { type: 'string', description: 'New status: NEW, INP, CPL' },
+        percentComplete: { type: 'number', description: 'Completion percentage (0-100)' },
+        priority: { type: 'number', description: 'Priority: 0=None, 1=Low, 2=Normal, 3=High, 4=Urgent' },
+      },
+      required: ['task_id'],
+    },
+  },
+
+  {
+    name: 'list_workfront_approvals',
+    description: 'Workfront — List pending approvals across projects.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter: PENDING, APPROVED, REJECTED' },
+        limit: { type: 'number', description: 'Max results (default 20)' },
+      },
+    },
+  },
+
+  {
+    name: 'ask_workfront',
+    description: 'Workfront Intelligent Answers — Ask natural language questions about projects, tasks, approvals, workload, and deadlines. Returns data from real Workfront instance when connected.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'Natural language question (e.g., "What tasks are overdue?", "Who has availability this sprint?")' },
+      },
+      required: ['question'],
+    },
+  },
+
+  {
+    name: 'get_project_health',
+    description: 'Workfront Project Health — AI assessment of a project: health score, risk factors, timeline variance, task breakdown.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'Workfront project ID (optional — uses default if omitted)' },
+      },
+    },
+  },
+
+  {
+    name: 'check_workfront_connection',
+    description: 'Check if Workfront API is reachable and which auth mode is active (IMS, API key, or demo).',
+    input_schema: { type: 'object', properties: {} },
   },
 
   /* ─── Experience Production Agent ─── */
@@ -1151,6 +1246,14 @@ export const TOOL_AGENT_MAP = {
   get_analytics_insights: 'Data Insights Agent',
   get_journey_status: 'Journey Agent',
   create_workfront_task: 'Workfront WOA',
+  list_workfront_projects: 'Workfront API',
+  get_workfront_project: 'Workfront API',
+  list_workfront_tasks: 'Workfront API',
+  update_workfront_task: 'Workfront API',
+  list_workfront_approvals: 'Workfront API',
+  ask_workfront: 'Workfront WOA',
+  get_project_health: 'Workfront WOA',
+  check_workfront_connection: 'Workfront API',
   extract_brief_content: 'Experience Production Agent',
   // Target Agent
   create_ab_test: 'Target Agent',
@@ -1956,51 +2059,98 @@ async function executeTool(name, input) {
     case 'create_workfront_task': {
       const chain = profile.approvalChain || [];
       const assignee = input.assignee || chain[0]?.role || 'Content Reviewer';
-      const sla = chain.find((c) => c.role === assignee)?.sla || '24h';
-
-      // If webhook is configured (N8N / Zapier / custom), POST to it
-      if (hasWebhook()) {
-        try {
-          const result = await createTaskViaWebhook({
-            title: input.title,
-            description: input.description,
-            preview_url: input.preview_url || '',
-            priority: input.priority || 'normal',
-            assignee,
-            sla,
-            project: `${profile.name} — Content Operations`,
-            approval_chain: chain.map((c) => c.role),
-          });
-          return JSON.stringify({
-            ...result,
-            _source: 'connected',
-            source: 'Workfront WOA — via webhook integration',
-          }, null, 2);
-        } catch (err) {
-          return JSON.stringify({
-            error: true,
-            message: `Workfront webhook failed: ${err.message}`,
-            _source: 'error',
-          }, null, 2);
-        }
+      try {
+        const result = await wf.createTask({
+          projectId: input.project_id,
+          name: input.title,
+          description: input.description,
+          priority: input.priority || 'normal',
+          assignee,
+        });
+        return JSON.stringify({
+          ...result,
+          assignee,
+          source: result.source === 'live' ? 'Workfront API' : 'Workfront (demo)',
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'Workfront' });
       }
+    }
 
-      // Fallback: simulated response (no webhook configured)
-      const taskId = `WF-${Date.now().toString(36).toUpperCase()}`;
-      return JSON.stringify({
-        status: 'created',
-        task_id: taskId,
-        title: input.title,
-        assignee,
-        priority: input.priority || 'normal',
-        sla,
-        preview_url: input.preview_url || '',
-        project: `${profile.name} — Content Operations`,
-        approval_chain: chain.map((c) => c.role),
-        message: `Workfront task ${taskId} created: "${input.title}" — assigned to ${assignee} (SLA: ${sla})`,
-        _source: 'simulated',
-        _note: 'Configure a Workfront webhook URL in Settings to create real tasks.',
-      }, null, 2);
+    case 'list_workfront_projects': {
+      try {
+        const result = await wf.listProjects({ status: input.status, limit: input.limit });
+        return JSON.stringify({ ...result, source: result.source === 'live' ? 'Workfront API' : 'Workfront (demo)' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'Workfront' });
+      }
+    }
+
+    case 'get_workfront_project': {
+      try {
+        const result = await wf.getProject(input.project_id);
+        return JSON.stringify({ ...result, source: result?.source === 'live' ? 'Workfront API' : 'Workfront (demo)' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'Workfront' });
+      }
+    }
+
+    case 'list_workfront_tasks': {
+      try {
+        const result = await wf.listTasks({ projectID: input.project_id, status: input.status, limit: input.limit });
+        return JSON.stringify({ ...result, source: result.source === 'live' ? 'Workfront API' : 'Workfront (demo)' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'Workfront' });
+      }
+    }
+
+    case 'update_workfront_task': {
+      try {
+        const fields = {};
+        if (input.status) fields.status = input.status;
+        if (input.percentComplete != null) fields.percentComplete = input.percentComplete;
+        if (input.priority != null) fields.priority = input.priority;
+        const result = await wf.updateTask(input.task_id, fields);
+        return JSON.stringify({ ...result, source: result.source === 'live' ? 'Workfront API' : 'Workfront (demo)' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'Workfront' });
+      }
+    }
+
+    case 'list_workfront_approvals': {
+      try {
+        const result = await wf.listApprovals({ status: input.status, limit: input.limit });
+        return JSON.stringify({ ...result, source: result.source === 'live' ? 'Workfront API' : 'Workfront (demo)' }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'Workfront' });
+      }
+    }
+
+    case 'ask_workfront': {
+      try {
+        const result = await wf.askWorkfront(input.question);
+        return JSON.stringify(result, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'Workfront' });
+      }
+    }
+
+    case 'get_project_health': {
+      try {
+        const result = await wf.getProjectHealth(input.project_id);
+        return JSON.stringify(result, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: err.message, source: 'Workfront' });
+      }
+    }
+
+    case 'check_workfront_connection': {
+      try {
+        const result = await wf.checkConnection();
+        return JSON.stringify(result, null, 2);
+      } catch (err) {
+        return JSON.stringify({ connected: false, error: err.message });
+      }
     }
 
     /* ─── Experience Production Agent ─── */
