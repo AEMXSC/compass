@@ -1457,6 +1457,9 @@ function timeAgo(isoStr) {
 
 /* ── REAL: AI Chat (with native tool use) ── */
 async function handleRealChat(text, file) {
+  // Abort any in-flight AI request before starting a new one
+  ai.abortCurrentChat();
+
   // Build message content — with file attachment if present
   let messageContent;
   if (file && file.type === 'image') {
@@ -2749,6 +2752,18 @@ function updateBreadcrumb(path) {
 function navigateToPage(path) {
   activeResourcePath = path;
   const url = AEM_ORG.previewOrigin + path;
+
+  // Reset design mode on page navigation to avoid stale state
+  if (designModeActive) {
+    disableDesignMode();
+    clearDesignSelection();
+    currentPreviewView = 'preview';
+    const tabs = document.getElementById('previewViewTabs');
+    if (tabs) tabs.querySelectorAll('.preview-view-tab').forEach((t) => {
+      t.classList.toggle('active', t.dataset.view === 'preview');
+    });
+  }
+
   if (previewFrame) previewFrame.src = url;
   if (previewUrlText) previewUrlText.textContent = url.replace(/^https?:\/\//, '');
   if (previewDot) previewDot.classList.add('connected');
@@ -4115,6 +4130,9 @@ if (branchSelect) {
 }
 
 /* ── Design Mode ── */
+/* Uses postMessage to communicate with the srcdoc iframe instead of overlay
+   coordinate mapping. This fixes scroll support, coordinate accuracy, and
+   hover highlighting — the iframe handles its own events and posts results. */
 let designModeActive = false;
 let designSelectedElement = null;
 const designOverlay = document.getElementById('designOverlay');
@@ -4122,31 +4140,98 @@ const designSelection = document.getElementById('designSelection');
 const designSelectionLabel = document.getElementById('designSelectionLabel');
 const designSelectionClear = document.getElementById('designSelectionClear');
 
+// Script injected into the srcdoc iframe for design mode click/hover handling
+const DESIGN_MODE_SCRIPT = `
+(function() {
+  let highlighted = null;
+  let hovered = null;
+
+  function buildSelector(el) {
+    if (el.id) return '#' + el.id;
+    var tag = el.tagName.toLowerCase();
+    var cls = el.className && typeof el.className === 'string'
+      ? '.' + el.className.trim().split(/\\s+/).join('.') : '';
+    return tag + cls;
+  }
+
+  function clearHover() {
+    if (hovered) { hovered.style.outline = ''; hovered = null; }
+  }
+
+  function clearHighlight() {
+    if (highlighted) { highlighted.style.outline = ''; highlighted = null; }
+  }
+
+  document.addEventListener('mousemove', function(e) {
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || el === document.body || el === document.documentElement) { clearHover(); return; }
+    if (el === highlighted || el === hovered) return;
+    clearHover();
+    if (el !== highlighted) {
+      el.style.outline = '2px solid rgba(0,122,255,0.4)';
+      hovered = el;
+    }
+  });
+
+  document.addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || el === document.body || el === document.documentElement) return;
+
+    clearHighlight();
+    clearHover();
+    el.style.outline = '3px solid #007AFF';
+    highlighted = el;
+
+    var tag = el.tagName.toLowerCase();
+    var cls = el.className && typeof el.className === 'string'
+      ? '.' + el.className.split(/\\s+/).slice(0, 2).join('.') : '';
+    var text = (el.textContent || '').trim().slice(0, 40);
+    var label = '<' + tag + cls + '>' + (text ? ' "' + text + (el.textContent.trim().length > 40 ? '...' : '') + '"' : '');
+
+    window.parent.postMessage({
+      type: 'ew-design-select',
+      label: label,
+      tag: tag,
+      className: el.className || '',
+      html: el.outerHTML.slice(0, 2000),
+      textContent: (el.textContent || '').trim().slice(0, 500),
+      selector: buildSelector(el)
+    }, '*');
+  }, true);
+
+  // Signal ready
+  window.parent.postMessage({ type: 'ew-design-ready' }, '*');
+})();
+`;
+
 async function enableDesignMode() {
   designModeActive = true;
-  if (designOverlay) designOverlay.style.display = 'block';
+  if (designOverlay) designOverlay.classList.add('active');
 
-  // Check if iframe is cross-origin — if so, re-render as srcdoc for DOM access
-  let isCrossOrigin = false;
-  try {
-    const doc = previewFrame?.contentDocument || previewFrame?.contentWindow?.document;
-    if (!doc || !doc.body) isCrossOrigin = true;
-  } catch { isCrossOrigin = true; }
+  if (!previewFrame) return;
 
-  if (isCrossOrigin && previewFrame) {
-    const path = activeResourcePath || '/';
-    const base = AEM_ORG.previewOrigin;
-    showToast('Loading page for design mode...', 'info');
+  const path = activeResourcePath || '/';
+  const base = AEM_ORG.previewOrigin;
+  showToast('Loading design mode...', 'info');
 
-    // Fetch page HTML via .plain.html (bypasses CORS when same-origin fetch works)
-    await ensurePageContext();
-    const html = cachedPageHTML;
-    if (html) {
-      // Save original src so we can restore on exit
-      if (!previewFrame.dataset.designSavedSrc) {
-        previewFrame.dataset.designSavedSrc = previewFrame.src;
-      }
-      previewFrame.srcdoc = `<!DOCTYPE html>
+  // Fetch page HTML for srcdoc rendering (always use srcdoc for design mode —
+  // the production iframe is cross-origin, so we need same-origin DOM access)
+  await ensurePageContext();
+  const html = cachedPageHTML;
+  if (!html) {
+    showToast('Could not load page content for design mode', 'warn');
+    return;
+  }
+
+  // Save original src so we can restore on exit
+  if (!previewFrame.dataset.designSavedSrc) {
+    previewFrame.dataset.designSavedSrc = previewFrame.src;
+  }
+
+  // Render as srcdoc with injected design mode handler
+  previewFrame.srcdoc = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -4155,37 +4240,20 @@ async function enableDesignMode() {
   <link rel="stylesheet" href="${base}/styles/styles.css">
   <script src="${base}/scripts/aem.js" type="module"><\/script>
   <script src="${base}/scripts/scripts.js" type="module"><\/script>
+  <style>body { cursor: crosshair; } *:hover { cursor: crosshair; }</style>
 </head>
 <body>
   <header></header>
   <main>${html}</main>
   <footer></footer>
+  <script>${DESIGN_MODE_SCRIPT}<\/script>
 </body>
 </html>`;
-      // Wait for srcdoc to render before injecting handlers
-      previewFrame.addEventListener('load', () => injectDesignModeHandler(), { once: true });
-      return;
-    }
-    showToast('Could not load page content for design mode', 'warn');
-  }
-
-  // Same-origin — inject directly
-  injectDesignModeHandler();
 }
 
 function disableDesignMode() {
   designModeActive = false;
-  if (designOverlay) designOverlay.style.display = 'none';
-  // Remove highlight from iframe
-  try {
-    const doc = previewFrame?.contentDocument || previewFrame?.contentWindow?.document;
-    if (doc) {
-      doc.querySelectorAll('[data-ew-highlight]').forEach((el) => {
-        el.style.outline = '';
-        el.removeAttribute('data-ew-highlight');
-      });
-    }
-  } catch { /* cross-origin */ }
+  if (designOverlay) designOverlay.classList.remove('active');
 
   // Restore original iframe src if we switched to srcdoc for design mode
   if (previewFrame?.dataset.designSavedSrc) {
@@ -4195,100 +4263,29 @@ function disableDesignMode() {
   }
 }
 
-function injectDesignModeHandler() {
-  if (!previewFrame) return;
+// Listen for postMessage from design mode iframe
+window.addEventListener('message', (e) => {
+  if (!designModeActive) return;
+  const data = e.data;
+  if (!data || typeof data !== 'object') return;
 
-  // Use a transparent overlay that captures clicks and maps them to iframe elements
-  if (designOverlay) {
-    designOverlay.onclick = (e) => {
-      const rect = previewFrame.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      try {
-        const doc = previewFrame.contentDocument || previewFrame.contentWindow.document;
-        // Clear previous highlight
-        doc.querySelectorAll('[data-ew-highlight]').forEach((el) => {
-          el.style.outline = '';
-          el.removeAttribute('data-ew-highlight');
-        });
-        const el = doc.elementFromPoint(x, y);
-        if (el && el !== doc.body && el !== doc.documentElement) {
-          selectDesignElement(el);
-        }
-      } catch {
-        // Cross-origin iframe — try postMessage approach
-        showToast('Design mode requires same-origin preview (use srcdoc or localhost)', 'warn');
-      }
+  if (data.type === 'ew-design-select') {
+    designSelectedElement = {
+      label: data.label,
+      tag: data.tag,
+      className: data.className,
+      html: data.html,
+      textContent: data.textContent,
+      selector: data.selector,
     };
-
-    // Hover highlight via mousemove
-    designOverlay.onmousemove = (e) => {
-      const rect = previewFrame.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      try {
-        const doc = previewFrame.contentDocument || previewFrame.contentWindow.document;
-        doc.querySelectorAll('[data-ew-hover]').forEach((el) => {
-          el.style.outline = '';
-          el.removeAttribute('data-ew-hover');
-        });
-        const el = doc.elementFromPoint(x, y);
-        if (el && el !== doc.body && el !== doc.documentElement && !el.hasAttribute('data-ew-highlight')) {
-          el.style.outline = '2px solid rgba(0,122,255,0.4)';
-          el.setAttribute('data-ew-hover', '');
-        }
-      } catch { /* cross-origin */ }
-    };
+    if (designSelection) designSelection.style.display = '';
+    if (designSelectionLabel) designSelectionLabel.textContent = data.label;
   }
-}
-
-function selectDesignElement(el) {
-  // Highlight in iframe
-  el.style.outline = '3px solid #007AFF';
-  el.setAttribute('data-ew-highlight', '');
-
-  // Build a readable label
-  const tag = el.tagName.toLowerCase();
-  const cls = el.className ? `.${el.className.split(/\s+/).slice(0, 2).join('.')}` : '';
-  const text = (el.textContent || '').trim().slice(0, 40);
-  const label = `<${tag}${cls}>${text ? ` "${text}${el.textContent.trim().length > 40 ? '...' : ''}"` : ''}`;
-
-  // Get the outerHTML for context (limit size)
-  const html = el.outerHTML.slice(0, 2000);
-
-  designSelectedElement = {
-    label,
-    tag,
-    className: el.className,
-    html,
-    textContent: (el.textContent || '').trim().slice(0, 500),
-    selector: buildSelector(el),
-  };
-
-  // Show badge in input area
-  if (designSelection) designSelection.style.display = '';
-  if (designSelectionLabel) designSelectionLabel.textContent = label;
-}
-
-function buildSelector(el) {
-  if (el.id) return `#${el.id}`;
-  const tag = el.tagName.toLowerCase();
-  const cls = el.className ? `.${el.className.trim().split(/\s+/).join('.')}` : '';
-  return `${tag}${cls}`;
-}
+});
 
 function clearDesignSelection() {
   designSelectedElement = null;
   if (designSelection) designSelection.style.display = 'none';
-  try {
-    const doc = previewFrame?.contentDocument || previewFrame?.contentWindow?.document;
-    if (doc) {
-      doc.querySelectorAll('[data-ew-highlight]').forEach((el) => {
-        el.style.outline = '';
-        el.removeAttribute('data-ew-highlight');
-      });
-    }
-  } catch { /* cross-origin */ }
 }
 
 if (designSelectionClear) {

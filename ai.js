@@ -1316,6 +1316,31 @@ export const TOOL_AGENT_MAP = {
   check_citation_readability: 'LLM Optimizer',
 };
 
+/* ── Site-Type-Aware Tool Filtering ── */
+/* Only send tools relevant to the connected site type. This prevents the AI from
+   seeing (and incorrectly choosing) tools that will fail on the current site. */
+
+const DA_ONLY_TOOLS = new Set([
+  'edit_page_content', 'preview_page', 'publish_page', 'list_site_pages', 'delete_page',
+  'unpublish_preview', 'unpublish_live', 'purge_cache', 'sync_code',
+  'bulk_preview', 'bulk_publish', 'reindex_page', 'get_page_status',
+]);
+
+const JCR_ONLY_TOOLS = new Set([
+  'patch_aem_page_content', 'copy_aem_page', 'create_aem_launch', 'promote_aem_launch',
+]);
+
+function getToolsForSiteType() {
+  const siteType = window.__EW_SITE_TYPE || 'unknown';
+  if (siteType === 'da') {
+    return AEM_TOOLS.filter((t) => !JCR_ONLY_TOOLS.has(t.name));
+  }
+  if (siteType === 'aem-cs') {
+    return AEM_TOOLS.filter((t) => !DA_ONLY_TOOLS.has(t.name));
+  }
+  return AEM_TOOLS; // unknown — send all tools
+}
+
 /* ── Client-Side Tool Executor ── */
 /* All tools call real MCP endpoints. No simulated data. */
 
@@ -1420,13 +1445,34 @@ async function executeTool(name, input) {
         } catch { pagePath = '/index'; }
       }
 
-      // ── DA MCP read (primary when signed in) ── same as Claude.ai pattern
-      if (isSignedIn()) {
+      const currentSiteType = getSiteType();
+
+      // ── JCR path: AEM Content MCP (returns real ETag for patch operations) ──
+      if (currentSiteType === 'aem-cs' && isSignedIn() && window.__EW_AEM_HOST) {
         try {
-          const org = da.getOrg();
-          const repo = da.getRepo();
+          const host = window.__EW_AEM_HOST;
+          console.log(`[get_page_content] Reading via AEM Content MCP: ${host}${pagePath}`);
+          const result = await aemContent.getPage(host, pagePath);
+          const html = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+          const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
+          return JSON.stringify({
+            url: pageUrl,
+            source: 'AEM Content MCP',
+            etag: result?.etag || null,
+            content_length: html.length,
+            html: content,
+            hint: 'JCR page content. Use patch_aem_page_content with the etag to make changes.',
+          }, null, 2);
+        } catch (jcrErr) {
+          console.warn('[get_page_content] AEM Content MCP read failed, falling back:', jcrErr.message);
+        }
+      }
+
+      // ── DA path: DA MCP (no ETag needed, uses edit_page_content for writes) ──
+      if (currentSiteType !== 'aem-cs' && isSignedIn() && da.getOrg() && da.getRepo()) {
+        try {
           const daPath = pagePath.replace(/\.html$/, '');
-          console.log(`[get_page_content] Reading via DA MCP: ${org}/${repo}${daPath}`);
+          console.log(`[get_page_content] Reading via DA MCP: ${da.getOrg()}/${da.getRepo()}${daPath}`);
           const result = await da.getPage(`${daPath}.html`);
           const html = typeof result === 'string' ? result : JSON.stringify(result);
           const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
@@ -1435,20 +1481,20 @@ async function executeTool(name, input) {
             source: 'DA MCP',
             content_length: html.length,
             html: content,
-            hint: 'Content read via DA MCP. Use edit_page_content to make changes.',
+            hint: 'DA page content. Use edit_page_content to make changes.',
           }, null, 2);
         } catch (daErr) {
           console.warn('[get_page_content] DA MCP read failed, falling back to fetch:', daErr.message);
         }
       }
 
-      // ── .plain.html fetch fallback ──
+      // ── Fallback: .plain.html fetch from CDN ──
       const plainUrl = pageUrl.endsWith('.plain.html') ? pageUrl : pageUrl.replace(/\/?$/, '.plain.html');
       try {
         const resp = await fetch(plainUrl);
         if (resp.ok) {
           const html = await resp.text();
-          const etag = resp.headers.get('etag') || `W/"${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}"`;
+          const etag = resp.headers.get('etag') || null;
           const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
           return JSON.stringify({
             url: pageUrl,
@@ -1456,7 +1502,7 @@ async function executeTool(name, input) {
             etag,
             content_length: html.length,
             html: content,
-            hint: 'Use edit_page_content to make changes.',
+            hint: etag ? 'Use patch_aem_page_content with the etag to make changes.' : 'Read-only: no ETag available. Sign in with Adobe IMS for write access.',
           }, null, 2);
         }
         return JSON.stringify({ error: `HTTP ${resp.status} fetching ${plainUrl}` });
@@ -1547,8 +1593,8 @@ async function executeTool(name, input) {
     /* ─── DA Editing Agent (real DA endpoints) ─── */
 
     case 'edit_page_content': {
-      const pagePath = input.page_path.replace(/\.html$/, '');
-      const htmlPath = pagePath.endsWith('.html') ? pagePath : `${pagePath}.html`;
+      const pagePath = sanitizePath(input.page_path);
+      const htmlPath = `${pagePath}.html`;
       const org = da.getOrg();
       const repo = da.getRepo();
       const branch = da.getBranch();
@@ -1661,7 +1707,7 @@ async function executeTool(name, input) {
 
     case 'preview_page': {
       { const noSite = requireDaSite(); if (noSite) return noSite; }
-      const pagePath = input.page_path.replace(/\.html$/, '');
+      const pagePath = sanitizePath(input.page_path);
       const org = da.getOrg();
       const repo = da.getRepo();
       const branch = da.getBranch();
@@ -1692,7 +1738,7 @@ async function executeTool(name, input) {
 
     case 'publish_page': {
       { const noSite = requireDaSite(); if (noSite) return noSite; }
-      const pagePath = input.page_path.replace(/\.html$/, '');
+      const pagePath = sanitizePath(input.page_path);
       const org = da.getOrg();
       const repo = da.getRepo();
       const branch = da.getBranch();
@@ -1863,7 +1909,7 @@ async function executeTool(name, input) {
 
     case 'list_site_pages': {
       { const noSite = requireDaSite(); if (noSite) return noSite; }
-      const listPath = input.path || '/';
+      const listPath = sanitizePath(input.path || '/');
 
       try {
         const items = await da.listPages(listPath);
@@ -3580,8 +3626,8 @@ Use these when users ask about:
 15. For journey conflict analysis (scheduling, audience overlap), call analyze_journey_conflicts.
 16. For support tickets, call create_support_ticket to create and get_ticket_status to check updates.
 17. IMPORTANT: After creating or patching pages, ALWAYS share the Universal Editor and DA edit links in your response so the user can open and edit the page visually.
-18. **CONTENT EDITING LOOP**: When the user wants to edit page content, **check the TOOL ROUTING section** in the Connected AEM Environment block below to determine the correct tools. For **DA sites**: use edit_page_content, preview_page, publish_page. For **AEM CS (JCR) sites**: use get-aem-page-content → patch-aem-page-content. The tool routing section is authoritative — always follow it over these general guidelines.
-19. When users say "edit the page", "change the headline", "update the hero", "create a landing page" — check the TOOL ROUTING section first. For DA sites: use DA tools (read first, then write). For JCR sites: use AEM Content MCP tools (get ETag first, then patch).
+18. **CONTENT EDITING LOOP**: When the user wants to edit page content, **check the TOOL ROUTING section** in the Connected AEM Environment block below to determine the correct tools. For **DA sites**: get_page_content → edit_page_content → preview_page. For **AEM CS (JCR) sites**: get_page_content (returns ETag) → patch_aem_page_content. The tool routing section is authoritative — always follow it.
+19. When users say "edit the page", "change the headline", "update the hero", "create a landing page" — check the TOOL ROUTING section first. For DA sites: read with get_page_content, write with edit_page_content. For JCR sites: read with get_page_content (get ETag), write with patch_aem_page_content.
 20. NEVER call edit_page_content without first reading the page with get_page_content (unless creating a brand new page that doesn't exist yet).
 21. For documentation questions ("how do I...", "what is...", "show me docs on..."), call search_experience_league. For release notes ("what's new", "latest features"), call get_product_release_notes.
 22. For site health, performance, or SEO questions, call get_site_audit for scores and get_site_opportunities for recommendations. Use Spacecat tools BEFORE giving optimization advice.
@@ -3772,15 +3818,28 @@ Library: \`https://main--sta-xwalk-boilerplate--aemysites.aem.page/tools/sidekic
 Senior AEM architect who understands marketing KPIs. Technical precision meets business value. Every sentence earns its place.`;
 
 /* ── Build System Prompt Parts ── */
+/* Returns an array of { type: 'text', text, cache_control? } blocks for the Claude API.
+   Static layers get cache_control: { type: 'ephemeral' } so Claude can cache them
+   across requests (~35KB saved per round-trip). Dynamic layers change per request. */
 function buildSystemParts(context = {}) {
-  const parts = [AEM_SYSTEM_PROMPT, buildKnowledgePrompt(), buildPlaybookPrompt(), buildCustomerContext(), buildKnownSitesPrompt()];
+  // Static layers — cacheable across requests
+  const blocks = [
+    { type: 'text', text: AEM_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: buildKnowledgePrompt() + '\n' + buildPlaybookPrompt(), cache_control: { type: 'ephemeral' } },
+  ];
 
+  // Semi-static layers — customer profiles and known sites (change rarely)
+  const semiStatic = [buildCustomerContext(), buildKnownSitesPrompt()].filter(Boolean).join('\n');
+  if (semiStatic) blocks.push({ type: 'text', text: semiStatic });
+
+  // Dynamic layers — change per request
+  const dynamic = [];
   if (context.pageHTML) {
-    parts.push(`\n\nCurrent page HTML (from iframe preview):\n\`\`\`html\n${context.pageHTML.slice(0, 15000)}\n\`\`\``);
+    dynamic.push(`\n\nCurrent page HTML (from iframe preview):\n\`\`\`html\n${context.pageHTML.slice(0, 15000)}\n\`\`\``);
   }
-  if (context.pageUrl) parts.push(`\nCurrent page URL: ${context.pageUrl}`);
-  if (context.customerName) parts.push(`\nCustomer: ${context.customerName}`);
-  if (context.siteContext) parts.push(context.siteContext);
+  if (context.pageUrl) dynamic.push(`\nCurrent page URL: ${context.pageUrl}`);
+  if (context.customerName) dynamic.push(`\nCustomer: ${context.customerName}`);
+  if (context.siteContext) dynamic.push(context.siteContext);
 
   if (context.org && context.org.orgId && context.org.repo) {
     const o = context.org;
@@ -3795,26 +3854,25 @@ function buildSystemParts(context = {}) {
       toolRouting = `- **AEM Author**: ${aemHost}
 
 ### TOOL ROUTING (MANDATORY)
-This is an **AEM CS (JCR)** site. You MUST use AEM Content MCP tools:
-- Read pages: \`get-aem-page-content\`
-- Write pages: \`patch-aem-page-content\` (always get-aem-page-content first for ETag)
-- List pages: \`get-aem-pages\`
-- Content Fragments: \`get-aem-fragment-variation\`, \`patch-aem-fragment-variation\`
+This is an **AEM CS (JCR)** site. You MUST use these tools:
+- Read pages: \`get_page_content\` (returns JCR page content with ETag)
+- Write pages: \`patch_aem_page_content\` (always call get_page_content first for a fresh ETag)
+- List pages: \`get_aem_site_pages\`
+- Copy pages: \`copy_aem_page\`
 
-**DO NOT** use DA tools (edit_page_content, preview_page, list_site_pages) — they will fail on this site.
-**DO NOT** attempt the Experience Production Agent or DA editing agent.`;
+**DO NOT** use DA tools (edit_page_content, preview_page, list_site_pages) — they are not available for this site.`;
     } else if (isDa) {
       toolRouting = `- **DA Path**: admin.da.live/source/${o.daOrg}/${o.daRepo}
 
 ### TOOL ROUTING (MANDATORY)
-This is a **DA (Document Authoring)** site. You MUST use DA tools:
-- Read pages: \`list_site_pages\`, fetch page HTML from preview URL
-- Write pages: \`edit_page_content\` (writes via GitHub API to the DA-backed repo)
-- Preview: \`preview_page\` (triggers preview pipeline)
+This is a **DA (Document Authoring)** site. You MUST use these tools:
+- Read pages: \`get_page_content\` (reads via DA MCP)
+- Write pages: \`edit_page_content\` (writes HTML to DA-backed repo, auto-triggers preview)
+- List pages: \`list_site_pages\`
+- Preview: \`preview_page\`
 - Publish: \`publish_page\`
 
-**DO NOT** use AEM Content MCP tools (get-aem-page-content, patch-aem-page-content) — they will fail on this site.
-Use the GitHub Contents API write path (edit_page_content tool) for all content changes.`;
+**DO NOT** use AEM Content MCP tools (patch_aem_page_content, copy_aem_page) — they are not available for this site.`;
     } else {
       toolRouting = `- **DA Path**: admin.da.live/source/${o.daOrg}/${o.daRepo}
 
@@ -3822,7 +3880,7 @@ Use the GitHub Contents API write path (edit_page_content tool) for all content 
 Site type could not be determined from fstab.yaml. Try DA tools first (edit_page_content). If DA fails, inform the user that the site type is unknown and ask how they'd like to proceed.`;
     }
 
-    parts.push(`\n## Connected AEM Environment (ACTIVE — use this for ALL operations)
+    dynamic.push(`\n## Connected AEM Environment (ACTIVE — use this for ALL operations)
 - **Organization**: ${o.name} (${o.orgId})
 - **Repository**: ${o.repo} (branch: ${o.branch})
 - **Site type**: ${isJcr ? 'AEM CS (JCR/Universal Editor)' : isDa ? 'DA (Document Authoring)' : 'Unknown (fstab not found)'}
@@ -3833,11 +3891,21 @@ ${toolRouting}
 IMPORTANT: You are connected to **${o.orgId}/${o.repo}** (branch: ${o.branch}). ALL content reads and writes MUST target this repository. The preview URL is ${o.previewOrigin}. Follow the TOOL ROUTING section above — using the wrong tool stack will cause failures.`);
   }
 
-  return parts.join('\n');
+  // Add dynamic content as the final block (not cached)
+  if (dynamic.length > 0) {
+    blocks.push({ type: 'text', text: dynamic.join('\n') });
+  }
+
+  return blocks;
 }
 
 /* ── Non-Streaming Chat (legacy, used by analyzeBrief etc.) ── */
-export async function chat(userMessage, context = {}) {
+const MAX_CHAT_DEPTH = 8;
+export async function chat(userMessage, context = {}, _depth = 0) {
+  if (_depth >= MAX_CHAT_DEPTH) {
+    console.warn(`[AI] chat() reached max recursion depth (${MAX_CHAT_DEPTH})`);
+    return { text: '[Tool loop limit reached. Please try a simpler request.]', usage: {} };
+  }
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('Claude API key not configured');
 
@@ -3859,7 +3927,7 @@ export async function chat(userMessage, context = {}) {
       max_tokens: 8192,
       system,
       messages,
-      tools: AEM_TOOLS,
+      tools: getToolsForSiteType(),
     }),
   });
 
@@ -3883,8 +3951,8 @@ export async function chat(userMessage, context = {}) {
     }
     allMessages.push({ role: 'user', content: toolResults });
 
-    // Recursive call for multi-turn tool use
-    return chat(allMessages, context);
+    // Recursive call for multi-turn tool use (with depth guard)
+    return chat(allMessages, context, _depth + 1);
   }
 
   const textBlock = data.content.find((b) => b.type === 'text');
@@ -3965,8 +4033,23 @@ Use EDS block table format where appropriate.`;
  * 6. The AI's follow-up response streams to onChunk
  *
  * This loop continues until the AI finishes without calling tools.
+ * Supports abort via abortCurrentChat() — cancels in-flight request and tool execution.
  */
+let _currentAbort = null;
+
+export function abortCurrentChat() {
+  if (_currentAbort) {
+    _currentAbort.abort();
+    _currentAbort = null;
+  }
+}
+
 export async function streamChat(userMessage, context, onChunk, onToolCall, onToolResult) {
+  // Abort any previous in-flight chat
+  abortCurrentChat();
+  const abortCtrl = new AbortController();
+  _currentAbort = abortCtrl;
+
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('Claude API key not configured');
 
@@ -3978,9 +4061,13 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   let fullText = '';
   const MAX_TOOL_ROUNDS = 8;
 
+  try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    if (abortCtrl.signal.aborted) break;
+
     const resp = await fetch(CLAUDE_API, {
       method: 'POST',
+      signal: abortCtrl.signal,
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
@@ -3993,7 +4080,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
         stream: true,
         system,
         messages,
-        tools: AEM_TOOLS,
+        tools: getToolsForSiteType(),
       }),
     });
 
@@ -4015,12 +4102,16 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     const toolUseBlocks = contentBlocks.filter((b) => b.type === 'tool_use');
     if (toolUseBlocks.length === 0) break;
 
+    // Check abort before executing tools (prevents ghost writes)
+    if (abortCtrl.signal.aborted) break;
+
     // Add the full assistant response (text + tool_use blocks) to messages
     messages.push({ role: 'assistant', content: contentBlocks });
 
     // Execute all tools in parallel (saves 500-3000ms on multi-tool turns)
     // Use allSettled so one failing tool doesn't kill the others
     const settled = await Promise.allSettled(toolUseBlocks.map(async (toolBlock) => {
+      if (abortCtrl.signal.aborted) throw new Error('Aborted');
       if (onToolCall) onToolCall(toolBlock.name, toolBlock.input);
       const result = await executeTool(toolBlock.name, toolBlock.input);
       if (onToolResult) onToolResult(toolBlock.name, result);
@@ -4036,6 +4127,15 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
 
     // Add tool results as user message and continue the loop
     messages.push({ role: 'user', content: toolResultContent });
+  }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      console.log('[AI] Chat aborted by user');
+      return fullText;
+    }
+    throw err;
+  } finally {
+    if (_currentAbort === abortCtrl) _currentAbort = null;
   }
 
   return fullText;

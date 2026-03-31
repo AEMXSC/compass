@@ -4344,15 +4344,21 @@ textarea:focus-visible,
 }
 
 /* ── Design Mode Overlay ── */
+/* Visual indicator only — the iframe handles its own events via postMessage.
+   pointer-events: none ensures scroll/click pass through to the iframe. */
 .design-overlay {
   position: absolute;
   inset: 0;
   z-index: 10;
-  cursor: crosshair;
+  pointer-events: none;
+  display: none;
+  border: 2px solid var(--accent, #007AFF);
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.15);
 }
 
 .design-overlay.active {
-  display: block !important;
+  display: block;
 }
 
 /* ── Design Selection Badge (in input area) ── */
