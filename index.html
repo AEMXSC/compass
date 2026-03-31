@@ -13,7 +13,7 @@
   <!-- Adobe Clean font (non-blocking — loaded via preload instead of CSS @import) -->
   <link rel="preload" href="https://use.typekit.net/mge7bvf.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
   <noscript><link rel="stylesheet" href="https://use.typekit.net/mge7bvf.css"></noscript>
-  <link rel="stylesheet" href="app.css?v=50">
+  <link rel="stylesheet" href="app.css?v=51">
 </head>
 <body>
   <div class="workspace">
@@ -116,16 +116,25 @@
                   Logout
                 </button>
               </div>
-              <!-- Disconnected state (shown when no PAT) -->
+              <!-- Disconnected state -->
               <div id="githubDisconnectedState">
                 <div class="github-connect-header">Connect to GitHub</div>
-                <p class="github-connect-desc">Paste a Personal Access Token to enable content editing and user identity.</p>
-                <div class="github-connect-input-row">
-                  <input type="password" id="githubMenuTokenInput" class="github-connect-input" placeholder="ghp_...">
-                  <button class="github-connect-btn" id="githubMenuConnectBtn">Connect</button>
-                </div>
+                <p class="github-connect-desc">Sign in to enable content editing and user identity.</p>
+                <button class="github-oauth-btn" id="githubOAuthBtn">
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                  Sign in with GitHub
+                </button>
                 <div class="github-connect-status" id="githubMenuStatus"></div>
-                <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" class="github-connect-link">Create a PAT on GitHub</a>
+                <!-- PAT fallback (toggled on click) -->
+                <div class="github-pat-toggle">
+                  <a href="#" id="githubPatToggle" class="github-connect-link">Or paste a token manually</a>
+                </div>
+                <div id="githubPatFallback" style="display:none">
+                  <div class="github-connect-input-row">
+                    <input type="password" id="githubMenuTokenInput" class="github-connect-input" placeholder="ghp_...">
+                    <button class="github-connect-btn" id="githubMenuConnectBtn">Connect</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -667,6 +676,6 @@
   <script async src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e" crossorigin="anonymous" onload="if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'"></script>
   <script async src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
 
-  <script src="app.js?v=50" type="module"></script>
+  <script src="app.js?v=51" type="module"></script>
 </body>
 </html>

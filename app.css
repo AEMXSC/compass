@@ -836,6 +836,37 @@ textarea:focus-visible,
   text-decoration: underline;
 }
 
+.github-oauth-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 16px;
+  background: #24292f;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.github-oauth-btn:hover {
+  background: #32383f;
+}
+
+.github-oauth-btn svg {
+  flex-shrink: 0;
+}
+
+.github-pat-toggle {
+  text-align: center;
+  margin-top: 10px;
+}
+
 .auth-status {
   font-size: 10px;
   color: var(--text-muted);

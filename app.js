@@ -3673,6 +3673,29 @@ async function validateAndStoreGitHubToken(token) {
   }
 }
 
+const COMPASS_WORKER = 'https://compass-ims-proxy.compass-xsc.workers.dev';
+
+// Handle OAuth redirect — check for #github_token= in URL fragment on page load.
+// Fragments never hit servers/proxies/Referer headers, so the token stays private.
+(function handleGitHubOAuthRedirect() {
+  const hash = window.location.hash;
+  if (!hash.includes('github_token=')) return;
+  const params = new URLSearchParams(hash.substring(1)); // strip leading #
+  const token = params.get('github_token');
+  if (token) {
+    // Clean the URL immediately (remove token from address bar)
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    // Validate and store async
+    validateAndStoreGitHubToken(token).then((result) => {
+      if (result.ok) {
+        console.log(`[GH] OAuth sign-in: ${result.login}`);
+      } else {
+        console.warn('[GH] OAuth token invalid:', result.error);
+      }
+    });
+  }
+})();
+
 // Load cached GitHub profile on startup
 (function loadCachedGhProfile() {
   try {
@@ -3725,6 +3748,19 @@ document.getElementById('githubMenuConnectBtn')?.addEventListener('click', async
 // Enter key on token input
 document.getElementById('githubMenuTokenInput')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); document.getElementById('githubMenuConnectBtn')?.click(); }
+});
+
+// OAuth "Sign in with GitHub" button
+document.getElementById('githubOAuthBtn')?.addEventListener('click', () => {
+  const returnTo = encodeURIComponent(window.location.origin + window.location.pathname);
+  window.location.href = `${COMPASS_WORKER}/github/login?return_to=${returnTo}`;
+});
+
+// PAT fallback toggle
+document.getElementById('githubPatToggle')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  const fallback = document.getElementById('githubPatFallback');
+  if (fallback) fallback.style.display = fallback.style.display === 'none' ? 'block' : 'none';
 });
 
 // Helper: programmatically send a chat message

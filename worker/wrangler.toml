@@ -3,9 +3,14 @@ main = "ims-token-proxy.js"
 compatibility_date = "2024-01-01"
 
 # Deploy:  npx wrangler deploy
-# Secrets: npx wrangler secret put IMS_CLIENT_ID
-#          npx wrangler secret put IMS_CLIENT_SECRET
 #
-# The secrets come from Adobe Developer Console (OAuth Web App credential).
-# Redirect URI in Developer Console must be:
-#   https://compass-ims-proxy.compass-xsc.workers.dev/callback
+# Adobe IMS Secrets:
+#   npx wrangler secret put IMS_CLIENT_ID
+#   npx wrangler secret put IMS_CLIENT_SECRET
+#
+# GitHub OAuth App Secrets:
+#   npx wrangler secret put GITHUB_CLIENT_ID
+#   npx wrangler secret put GITHUB_CLIENT_SECRET
+#
+# GitHub OAuth App settings (github.com/settings/developers):
+#   Callback URL: https://compass-ims-proxy.compass-xsc.workers.dev/github/callback
