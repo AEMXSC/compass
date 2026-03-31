@@ -3620,39 +3620,11 @@ document.addEventListener('click', (e) => {
   if (menu?.classList.contains('visible') && container && !container.contains(e.target)) {
     menu.classList.remove('visible');
   }
-  // Also close GitHub menu when clicking outside
-  const ghContainer = document.getElementById('githubContainer');
-  const ghMenu = document.getElementById('githubMenu');
-  if (ghMenu?.classList.contains('visible') && ghContainer && !ghContainer.contains(e.target)) {
-    ghMenu.classList.remove('visible');
-  }
 });
 
-/* ── GitHub Connection Menu ── */
+/* ── GitHub PAT Validation (used by Settings panel) ── */
 
 let ghProfile = null; // cached GitHub user profile
-
-function updateGitHubUI() {
-  const btn = document.getElementById('githubBtn');
-  const connState = document.getElementById('githubConnectedState');
-  const discState = document.getElementById('githubDisconnectedState');
-  if (!btn) return;
-
-  const connected = hasGitHubToken();
-  btn.classList.toggle('connected', connected);
-
-  if (connState) connState.style.display = connected ? 'block' : 'none';
-  if (discState) discState.style.display = connected ? 'none' : 'block';
-
-  if (connected && ghProfile) {
-    const avatarEl = document.getElementById('githubAvatar');
-    const nameEl = document.getElementById('githubName');
-    const loginEl = document.getElementById('githubLogin');
-    if (avatarEl && ghProfile.avatar_url) avatarEl.src = ghProfile.avatar_url;
-    if (nameEl) nameEl.textContent = ghProfile.name || ghProfile.login || '';
-    if (loginEl) loginEl.textContent = `@${ghProfile.login || ''}`;
-  }
-}
 
 async function validateAndStoreGitHubToken(token) {
   try {
@@ -3663,10 +3635,8 @@ async function validateAndStoreGitHubToken(token) {
     ghProfile = await resp.json();
     setGitHubToken(token);
     localStorage.setItem('ew-github-profile', JSON.stringify(ghProfile));
-    // Also update IMS profile so auth avatar shows GitHub identity
     await fetchUserProfile();
     updateAuthUI();
-    updateGitHubUI();
     return { ok: true, login: ghProfile.login };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -3679,108 +3649,7 @@ async function validateAndStoreGitHubToken(token) {
     const cached = localStorage.getItem('ew-github-profile');
     if (cached) ghProfile = JSON.parse(cached);
   } catch { /* ignore */ }
-  updateGitHubUI();
 })();
-
-// Toggle GitHub menu
-document.getElementById('githubBtn')?.addEventListener('click', () => {
-  const menu = document.getElementById('githubMenu');
-  if (menu) menu.classList.toggle('visible');
-  // Close auth menu if open
-  document.getElementById('userMenu')?.classList.remove('visible');
-});
-
-// Connect button in disconnected state
-document.getElementById('githubMenuConnectBtn')?.addEventListener('click', async () => {
-  const input = document.getElementById('githubMenuTokenInput');
-  const status = document.getElementById('githubMenuStatus');
-  const btn = document.getElementById('githubMenuConnectBtn');
-  const token = input?.value?.trim();
-  if (!token) return;
-
-  btn.disabled = true;
-  btn.textContent = '...';
-  status.textContent = 'Validating...';
-  status.className = 'github-connect-status';
-
-  const result = await validateAndStoreGitHubToken(token);
-  btn.disabled = false;
-  btn.textContent = 'Connect';
-
-  if (result.ok) {
-    status.textContent = `Connected as ${result.login}`;
-    status.className = 'github-connect-status success';
-    // Brief delay then switch to connected view
-    setTimeout(() => {
-      updateGitHubUI();
-      input.value = '';
-      status.textContent = '';
-    }, 800);
-  } else {
-    status.textContent = result.error;
-    status.className = 'github-connect-status error';
-  }
-});
-
-// Enter key on token input
-document.getElementById('githubMenuTokenInput')?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('githubMenuConnectBtn')?.click(); }
-});
-
-// Helper: programmatically send a chat message
-function sendChatMessage(text) {
-  if (!chatInput) return;
-  chatInput.value = text;
-  handleUserInput();
-}
-
-// GitHub menu actions
-document.getElementById('githubSyncBtn')?.addEventListener('click', () => {
-  document.getElementById('githubMenu')?.classList.remove('visible');
-  sendChatMessage('Sync the current site content from GitHub');
-});
-
-document.getElementById('githubPushBtn')?.addEventListener('click', () => {
-  document.getElementById('githubMenu')?.classList.remove('visible');
-  sendChatMessage('Push all pending content changes to GitHub');
-});
-
-document.getElementById('githubBranchBtn')?.addEventListener('click', () => {
-  document.getElementById('githubMenu')?.classList.remove('visible');
-  sendChatMessage('Show me the available branches and let me switch');
-});
-
-document.getElementById('githubReconnectBtn')?.addEventListener('click', async () => {
-  document.getElementById('githubMenu')?.classList.remove('visible');
-  const token = getGitHubToken();
-  if (token) {
-    const result = await validateAndStoreGitHubToken(token);
-    if (result.ok) {
-      addMessage('assistant', md(`Reconnected to GitHub as **${result.login}**`));
-    } else {
-      addMessage('assistant', md(`Reconnect failed: ${result.error}. Try updating your token.`));
-    }
-  }
-});
-
-document.getElementById('githubSwitchSiteBtn')?.addEventListener('click', () => {
-  document.getElementById('githubMenu')?.classList.remove('visible');
-  switchView('home');
-});
-
-document.getElementById('githubLogoutBtn')?.addEventListener('click', () => {
-  document.getElementById('githubMenu')?.classList.remove('visible');
-  setGitHubToken('');
-  localStorage.removeItem('ew-github-profile');
-  ghProfile = null;
-  updateGitHubUI();
-  updateAuthUI();
-  // Clear settings panel GitHub token display
-  const ghInput = document.getElementById('githubTokenInput');
-  const ghStatus = document.getElementById('githubTokenStatus');
-  if (ghInput) ghInput.value = '';
-  if (ghStatus) { ghStatus.textContent = ''; ghStatus.className = 'settings-token-status'; }
-});
 
 if (settingsBtn) {
   settingsBtn.addEventListener('click', toggleSettings);
