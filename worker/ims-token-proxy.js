@@ -66,9 +66,6 @@ async function route(request) {
   if (url.pathname === '/token' && request.method === 'POST') {
     return handleTokenProxy(request);
   }
-  if (request.method === 'POST') {
-    return handleTokenProxy(request);
-  }
 
   return new Response('Compass Auth Gateway', { status: 200 });
 }
@@ -79,7 +76,7 @@ async function handleAuth(request) {
   const origin = request.headers.get('Origin') || '';
 
   if (!ALLOWED_ORIGINS.includes(origin)) {
-    return new Response('Forbidden', { status: 403, headers: corsHeaders(origin) });
+    return new Response('Forbidden', { status: 403 });
   }
 
   // Check secrets
@@ -221,7 +218,7 @@ async function handleGitHubCallback(request) {
 
     if (data.error) {
       console.error('GitHub OAuth error:', data.error, data.error_description);
-      return new Response(`GitHub error: ${data.error_description || data.error}`, { status: 400 });
+      return new Response(`GitHub error: ${data.error_description || data.error}`, { status: 400, headers: { 'Content-Type': 'text/plain' } });
     }
 
     if (!data.access_token) {
