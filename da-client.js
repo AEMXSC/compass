@@ -11,8 +11,8 @@ import { fetchWithToken, getToken } from './ims.js';
 import * as mcp from './da-mcp-client.js';
 
 const DA_ADMIN = 'https://admin.da.live';
-let DA_ORG = 'AEMXSC';
-let DA_REPO = 'xscteamsite';
+let DA_ORG = '';
+let DA_REPO = '';
 let DA_BRANCH = 'main';
 
 /* MCP availability flag — starts null (unknown), set on first attempt */

@@ -1363,7 +1363,7 @@ function sanitizePath(p) {
 }
 
 async function executeTool(name, input) {
-  const profile = getActiveProfile();
+  const profile = getActiveProfile() || {};
 
   switch (name) {
 
@@ -3762,7 +3762,7 @@ function buildSystemParts(context = {}) {
   if (context.customerName) parts.push(`\nCustomer: ${context.customerName}`);
   if (context.siteContext) parts.push(context.siteContext);
 
-  if (context.org) {
+  if (context.org && context.org.orgId && context.org.repo) {
     const o = context.org;
     parts.push(`\n## Connected AEM Environment (ACTIVE — use this for ALL operations)
 - **Organization**: ${o.name} (${o.orgId})

@@ -523,7 +523,7 @@ function getAllProfiles() {
 /* ── Profile Management ── */
 
 export function getActiveProfileId() {
-  return localStorage.getItem(STORAGE_KEY) || 'aem-xsc';
+  return localStorage.getItem(STORAGE_KEY) || null;
 }
 
 export function setActiveProfile(profileId) {
@@ -533,8 +533,10 @@ export function setActiveProfile(profileId) {
 }
 
 export function getActiveProfile() {
+  const id = getActiveProfileId();
+  if (!id) return null;
   const all = getAllProfiles();
-  return all[getActiveProfileId()] || PROFILES['aem-xsc'];
+  return all[id] || null;
 }
 
 export function listProfiles() {
@@ -550,6 +552,16 @@ export function listProfiles() {
 /* ── AEM_ORG compat — builds the old AEM_ORG shape from active profile ── */
 export function getOrgConfig() {
   const p = getActiveProfile();
+  if (!p) {
+    return {
+      name: '', orgId: '', repo: '', branch: 'main',
+      get previewOrigin() { return ''; },
+      get liveOrigin() { return ''; },
+      get daOrg() { return ''; },
+      get daRepo() { return ''; },
+      tier: '', env: '', services: [], entitlements: [], mcpCapabilities: [],
+    };
+  }
   return {
     name: p.name,
     orgId: p.orgId,
@@ -570,6 +582,7 @@ export function getOrgConfig() {
 /* ── System Prompt Builder — the core of Differentiator #1 ── */
 export function buildCustomerContext() {
   const p = getActiveProfile();
+  if (!p) return '\n## No customer profile active. Site context comes from the connected repository.';
   const parts = [];
 
   parts.push(`\n## Customer Profile: ${p.name}`);

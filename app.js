@@ -293,7 +293,7 @@ function toggleSettings() {
   // Populate MCP connectors list
   const connBox = document.getElementById('settingsConnectors');
   if (connBox && settingsPanel.classList.contains('visible')) {
-    const profile = getActiveProfile();
+    const profile = getActiveProfile() || {};
     const connectors = profile.connectors || [];
     if (connectors.length === 0) { connBox.innerHTML = '<div style="font-size:11px;color:var(--text-muted)">No connectors configured</div>'; return; }
     const liveCount = connectors.filter((c) => c.status === 'live').length;
@@ -636,7 +636,7 @@ function saveBrandPolicies() {
   localStorage.setItem(BRAND_STORAGE_KEY, JSON.stringify(activeBrandPolicies));
   renderBrandPolicies();
   // Also inject into active profile's brandVoice for AI context
-  const profile = getActiveProfile();
+  const profile = getActiveProfile() || {};
   if (profile) {
     profile.brandPolicies = activeBrandPolicies;
   }
@@ -719,7 +719,7 @@ if (brandExtractBtn) {
       }
     } else {
       // Demo mode: generate sample policies from the profile's brandVoice
-      const profile = getActiveProfile();
+      const profile = getActiveProfile() || {};
       const bv = profile.brandVoice || {};
       activeBrandPolicies = [
         { category: 'Tone', rule: `Brand voice must be: ${bv.tone || 'professional and confident'}` },
@@ -754,7 +754,7 @@ if (brandExtractBtn) {
 function initBrandGovernance() {
   renderBrandPolicies();
   // Pre-populate MCP endpoint from profile entitlements if available
-  const profile = getActiveProfile();
+  const profile = getActiveProfile() || {};
   if (profile?.brandMcpEndpoint) {
     const mcpInput = document.getElementById('brandMcpInput');
     if (mcpInput) mcpInput.value = profile.brandMcpEndpoint;
@@ -1855,13 +1855,13 @@ async function runRealBrief() {
     const file = e.target.files[0];
     if (!file) return;
 
-    const profile = getActiveProfile();
-    addMessage('user', `Upload ${file.name} and create landing page`);
+    const profile = getActiveProfile() || {};
+    addMessage('user', escapeHtml(`Upload ${file.name} and create landing page`));
     addRawHTML(`
       <div class="upload-indicator">
         <span class="file-icon">📄</span>
         <div>
-          <div style="font-weight:500">${file.name}</div>
+          <div style="font-weight:500">${escapeHtml(file.name)}</div>
           <div style="font-size:10px;color:var(--text-muted)">${(file.size / 1024 / 1024).toFixed(1)} MB — uploaded</div>
         </div>
       </div>
@@ -2125,7 +2125,7 @@ Provide a detailed answer referencing projects, tasks, approvals, timesheets, an
 /* No native agent does: Acrobat → Discovery → AEM Content → CJA → Workfront in one conversation */
 
 async function runOrchestration() {
-  const profile = getActiveProfile();
+  const profile = getActiveProfile() || {};
   addMessage('user', 'Run full cross-product orchestration');
 
   // Step 1: Brief Analysis (Acrobat MCP)
@@ -2328,7 +2328,7 @@ function updateOrchestrationStep(el, state) {
 async function runServicesPanel() {
   addMessage('user', 'Show connected MCP services and entitlements');
 
-  const profile = getActiveProfile();
+  const profile = getActiveProfile() || {};
   const caps = profile.mcpCapabilities || AEM_ORG.mcpCapabilities;
   let html = '<strong>Adobe MCP Service Matrix</strong>';
   html += '<table class="gov-results" style="margin-top:10px"><tr><th>Capability</th><th>MCP Server</th><th>Status</th></tr>';
@@ -3016,8 +3016,9 @@ document.querySelectorAll('.resources-tab').forEach((tab) => {
 /* ── Connect site: load preview + resources ── */
 function connectSite() {
   const origin = AEM_ORG.previewOrigin;
-  const profile = getActiveProfile();
   // Update home badge
+  const badge = document.getElementById('homeSiteBadge');
+  if (badge) badge.style.display = '';
   if (homeSiteName) homeSiteName.textContent = AEM_ORG.name;
   if (homeSiteUrl) {
     homeSiteUrl.textContent = origin.replace(/^https?:\/\//, '');
@@ -4576,7 +4577,7 @@ function switchProfile(profileId) {
 
 function buildOrgSelector() {
   const profiles = listProfiles();
-  const activeId = getActiveProfile().id;
+  const activeId = getActiveProfile()?.id || null;
 
   const container = document.getElementById('orgSelector');
   if (!container) return;
@@ -4601,7 +4602,7 @@ function buildOrgSelector() {
       del.textContent = '\u2715';
       del.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (getActiveProfile().id === p.id) switchProfile('aem-xsc');
+        if (getActiveProfile()?.id === p.id) switchProfile('aem-xsc');
         deleteCustomProfile(p.id);
         buildOrgSelector();
       });
@@ -4857,14 +4858,16 @@ async function init() {
   const wasCallback = await handlePkceCallback();
   if (wasCallback) console.log('[EW] PKCE callback handled — signed in');
 
-  // Configure DA client from dynamic org config
-  da.configure({ org: AEM_ORG.orgId, repo: AEM_ORG.repo, branch: AEM_ORG.branch });
+  // Configure DA client from dynamic org config (only if a site is set)
+  if (AEM_ORG.orgId && AEM_ORG.repo) {
+    da.configure({ org: AEM_ORG.orgId, repo: AEM_ORG.repo, branch: AEM_ORG.branch });
+  }
 
   // Set org context in UI from active profile
   const customerNameEl = document.querySelector('.customer-name');
   const customerMetaEl = document.querySelector('.customer-meta');
-  if (customerNameEl) customerNameEl.textContent = AEM_ORG.name;
-  if (customerMetaEl) customerMetaEl.innerHTML = `&bull; ${AEM_ORG.tier} &bull; ${AEM_ORG.env}`;
+  if (customerNameEl) customerNameEl.textContent = AEM_ORG.name || '';
+  if (customerMetaEl) customerMetaEl.innerHTML = AEM_ORG.tier ? `&bull; ${AEM_ORG.tier} &bull; ${AEM_ORG.env}` : '';
 
   // Build org selector and profile generator
   buildOrgSelector();
@@ -4892,17 +4895,17 @@ async function init() {
   // NO auto sign-in. User clicks "Sign In" button when ready.
   // This prevents any redirect to da.live.
 
-  // Auto-connect default site in background (stays on Home view)
-  connectSite();
-
-  // Welcome message
-  addMessage('assistant', md(`**Connected to ${AEM_ORG.name}** (${AEM_ORG.orgId}/${AEM_ORG.repo})\nSite loaded. You can:\n- **Prompt to edit**: "Change the hero headline"\n- **Set up experiments**: "A/B test the hero on the homepage"\n- **Generate variations**: "Create 3 hero variations targeting millennials"\n- **Add forms**: "Add a contact form to /contact"\n- **Switch site**: Click the site URL in the toolbar to connect a different repo`));
-
-  // Pre-fetch page context when iframe finishes loading (not after arbitrary delay)
-  previewFrame.addEventListener('load', () => ensurePageContext(), { once: true });
+  // Auto-connect site if a profile/site is already set
+  if (AEM_ORG.orgId && AEM_ORG.repo) {
+    connectSite();
+    addMessage('assistant', md(`**Connected to ${AEM_ORG.name}** (${AEM_ORG.orgId}/${AEM_ORG.repo})\nSite loaded. You can:\n- **Prompt to edit**: "Change the hero headline"\n- **Set up experiments**: "A/B test the hero on the homepage"\n- **Generate variations**: "Create 3 hero variations targeting millennials"\n- **Add forms**: "Add a contact form to /contact"\n- **Switch site**: Click the site URL in the toolbar to connect a different repo`));
+    previewFrame.addEventListener('load', () => ensurePageContext(), { once: true });
+  } else {
+    addMessage('assistant', md(`**Welcome to Compass**\nConnect a site using the **org/repo** input on the home screen to get started.\n\nExample: \`AEMXSC/lifepoint\``));
+  }
 
   if (ai.hasApiKey()) {
-    console.log(`Claude API key found — live AI mode for ${AEM_ORG.name}`);
+    console.log(`Claude API key found — live AI mode${AEM_ORG.name ? ` for ${AEM_ORG.name}` : ''}`);
   }
 }
 
