@@ -11,7 +11,7 @@
 import { buildCustomerContext, getActiveProfile } from './customer-profiles.js';
 import { KNOWN_SITES, resolveSite, listKnownSites, buildKnownSitesPrompt } from './known-sites.js';
 import * as da from './da-client.js';
-import { isSignedIn } from './ims.js';
+import { isSignedIn, getToken, signIn } from './ims.js';
 import { hasGitHubToken, writeContent as ghWriteContent, triggerPreview as ghTriggerPreview, getRepoInfo, listBranches as ghListBranches } from './github-content.js';
 import * as aemContent from './aem-content-mcp-client.js';
 import * as govMcp from './governance-mcp-client.js';
@@ -1368,6 +1368,20 @@ function getDmDeliveryHost() {
   return null;
 }
 
+/** Ensure IMS auth is available — auto-refresh if expired/missing. */
+async function ensureAuth() {
+  if (isSignedIn()) return true;
+  console.log('[AI] IMS token missing — auto-refreshing...');
+  try {
+    const ok = await signIn();
+    if (ok) console.log('[AI] IMS token refreshed successfully');
+    return ok;
+  } catch (e) {
+    console.warn('[AI] IMS auto-refresh failed:', e.message);
+    return false;
+  }
+}
+
 /** Standardized error for tools when user is not signed in. */
 function authRequiredError(toolName) {
   return JSON.stringify({
@@ -1448,7 +1462,7 @@ async function executeTool(name, input) {
       const currentSiteType = getSiteType();
 
       // ── JCR path: AEM Content MCP (returns real ETag for patch operations) ──
-      if (currentSiteType === 'aem-cs' && isSignedIn() && window.__EW_AEM_HOST) {
+      if (currentSiteType === 'aem-cs' && (await ensureAuth()) && window.__EW_AEM_HOST) {
         try {
           const host = window.__EW_AEM_HOST;
           console.log(`[get_page_content] Reading via AEM Content MCP: ${host}${pagePath}`);
@@ -1469,7 +1483,7 @@ async function executeTool(name, input) {
       }
 
       // ── DA path: DA MCP (no ETag needed, uses edit_page_content for writes) ──
-      if (currentSiteType !== 'aem-cs' && isSignedIn() && da.getOrg() && da.getRepo()) {
+      if (currentSiteType !== 'aem-cs' && (await ensureAuth()) && da.getOrg() && da.getRepo()) {
         try {
           const daPath = pagePath.replace(/\.html$/, '');
           console.log(`[get_page_content] Reading via DA MCP: ${da.getOrg()}/${da.getRepo()}${daPath}`);
@@ -1512,7 +1526,7 @@ async function executeTool(name, input) {
     }
 
     case 'copy_aem_page': {
-      if (!isSignedIn()) return authRequiredError('copy_aem_page');
+      if (!(await ensureAuth())) return authRequiredError('copy_aem_page');
       try {
         const host = window.__EW_AEM_HOST || null;
         const result = await aemContent.copyPage(host, input.source_path, input.destination_path, input.title);
@@ -1532,7 +1546,7 @@ async function executeTool(name, input) {
     }
 
     case 'patch_aem_page_content': {
-      if (!isSignedIn()) return authRequiredError('patch_aem_page_content');
+      if (!(await ensureAuth())) return authRequiredError('patch_aem_page_content');
       const fields = Object.keys(input.updates || {});
       try {
         const host = window.__EW_AEM_HOST || null;
@@ -1552,7 +1566,7 @@ async function executeTool(name, input) {
     }
 
     case 'create_aem_launch': {
-      if (!isSignedIn()) return authRequiredError('create_aem_launch');
+      if (!(await ensureAuth())) return authRequiredError('create_aem_launch');
       try {
         const host = window.__EW_AEM_HOST || null;
         const result = await aemContent.createLaunch(host, [input.page_path], input.launch_name);
@@ -1572,7 +1586,7 @@ async function executeTool(name, input) {
     }
 
     case 'promote_aem_launch': {
-      if (!isSignedIn()) return authRequiredError('promote_aem_launch');
+      if (!(await ensureAuth())) return authRequiredError('promote_aem_launch');
       try {
         const host = window.__EW_AEM_HOST || null;
         const result = await aemContent.promoteLaunch(host, input.launch_id);
@@ -1608,9 +1622,8 @@ async function executeTool(name, input) {
       const daUrl = `https://da.live/edit#/${org}/${repo}${daEditPath}`;
 
       // ── DA MCP write (primary — native path for DA-backed sites) ──
-      // Uses the DA MCP server at mcp.adobeaemcloud.com/adobe/mcp/da
-      // Requires IMS Bearer token (user must be signed in).
-      if (isSignedIn()) {
+      // Requires IMS Bearer token. Auto-refresh if token missing/expired.
+      if (await ensureAuth()) {
         try {
           console.log('[edit_page_content] Writing via DA MCP...');
           const writeResult = await da.updatePage(htmlPath, input.html);
@@ -1677,7 +1690,7 @@ async function executeTool(name, input) {
           let previewStatus = 'skipped';
           if (input.trigger_preview !== false) {
             try {
-              if (isSignedIn()) {
+              if (getToken()) {
                 // Use DA client's previewPage which sends IMS Bearer token
                 const previewResp = await da.previewPage(pagePath);
                 previewStatus = previewResp.ok ? 'success' : `pending (${previewResp.status})`;
@@ -2023,7 +2036,7 @@ async function executeTool(name, input) {
     /* ─── Discovery Agent ─── */
 
     case 'search_dam_assets': {
-      if (!isSignedIn()) return authRequiredError('search_dam_assets');
+      if (!(await ensureAuth())) return authRequiredError('search_dam_assets');
       const query = input.query || '';
       const type = input.asset_type || 'image';
       const limit = input.limit || 6;
@@ -2050,7 +2063,7 @@ async function executeTool(name, input) {
     /* ─── Governance Agent ─── */
 
     case 'run_governance_check': {
-      if (!isSignedIn()) return authRequiredError('run_governance_check');
+      if (!(await ensureAuth())) return authRequiredError('run_governance_check');
       try {
         const host = window.__EW_AEM_HOST || null;
         const result = await govMcp.checkPagePolicy(host, input.page_path);
@@ -2068,7 +2081,7 @@ async function executeTool(name, input) {
     /* ─── Audience Agent ─── */
 
     case 'get_audience_segments': {
-      if (!isSignedIn()) return authRequiredError('get_audience_segments');
+      if (!(await ensureAuth())) return authRequiredError('get_audience_segments');
       try {
         const result = await marketingMcp.callTool('get_audience_segments', {
           action: input.action || 'list',
@@ -2087,7 +2100,7 @@ async function executeTool(name, input) {
     /* ─── Content Optimization Agent ─── */
 
     case 'create_content_variant': {
-      if (!isSignedIn()) return authRequiredError('create_content_variant');
+      if (!(await ensureAuth())) return authRequiredError('create_content_variant');
       try {
         const result = await contentUpdaterMcp.callTool('create_content_variant', {
           page_path: input.page_path,
@@ -2107,7 +2120,7 @@ async function executeTool(name, input) {
     /* ─── Data Insights Agent (CJA) ─── */
 
     case 'get_analytics_insights': {
-      if (!isSignedIn()) return authRequiredError('get_analytics_insights');
+      if (!(await ensureAuth())) return authRequiredError('get_analytics_insights');
       try {
         const result = await cjaMcp.callTool('get_analytics_insights', {
           query: input.query,
@@ -2128,7 +2141,7 @@ async function executeTool(name, input) {
     /* ─── Journey Agent (AJO) ─── */
 
     case 'get_journey_status': {
-      if (!isSignedIn()) return authRequiredError('get_journey_status');
+      if (!(await ensureAuth())) return authRequiredError('get_journey_status');
       try {
         const result = await marketingMcp.callTool('get_journey_status', {
           action: input.action || 'list',
@@ -2270,7 +2283,7 @@ async function executeTool(name, input) {
     /* ─── Target Agent (A/B Testing & Personalization) ─── */
 
     case 'create_ab_test': {
-      if (!isSignedIn()) return authRequiredError('create_ab_test');
+      if (!(await ensureAuth())) return authRequiredError('create_ab_test');
       try {
         const result = await marketingMcp.callTool('create_ab_test', {
           test_name: input.test_name,
@@ -2290,7 +2303,7 @@ async function executeTool(name, input) {
     }
 
     case 'get_personalization_offers': {
-      if (!isSignedIn()) return authRequiredError('get_personalization_offers');
+      if (!(await ensureAuth())) return authRequiredError('get_personalization_offers');
       try {
         const result = await marketingMcp.callTool('get_personalization_offers', {
           page_path: input.page_path,
@@ -2310,7 +2323,7 @@ async function executeTool(name, input) {
     /* ─── AEP Real-time Profile Agent ─── */
 
     case 'get_customer_profile': {
-      if (!isSignedIn()) return authRequiredError('get_customer_profile');
+      if (!(await ensureAuth())) return authRequiredError('get_customer_profile');
       try {
         const result = await marketingMcp.callTool('get_customer_profile', {
           identity: input.identity,
@@ -2330,7 +2343,7 @@ async function executeTool(name, input) {
     /* ─── Firefly Agent (Generative AI) ─── */
 
     case 'generate_image_variations': {
-      if (!isSignedIn()) return authRequiredError('generate_image_variations');
+      if (!(await ensureAuth())) return authRequiredError('generate_image_variations');
       try {
         const result = await contentUpdaterMcp.callTool('generate_image_variations', {
           prompt: input.prompt,
@@ -2352,7 +2365,7 @@ async function executeTool(name, input) {
     /* ─── Development Agent (Cloud Manager) ─── */
 
     case 'get_pipeline_status': {
-      if (!isSignedIn()) return authRequiredError('get_pipeline_status');
+      if (!(await ensureAuth())) return authRequiredError('get_pipeline_status');
       try {
         const result = await developmentMcp.callTool('get_pipeline_status', {
           environment: input.environment || 'prod',
@@ -2373,7 +2386,7 @@ async function executeTool(name, input) {
     /* ─── Acrobat MCP (PDF Services) ─── */
 
     case 'extract_pdf_content': {
-      if (!isSignedIn()) return authRequiredError('extract_pdf_content');
+      if (!(await ensureAuth())) return authRequiredError('extract_pdf_content');
       try {
         const result = await acrobatMcp.callTool('extract_pdf_content', {
           file_name: input.file_name,
@@ -2394,7 +2407,7 @@ async function executeTool(name, input) {
     /* ─── Development Agent: Pipeline Failure Analysis ─── */
 
     case 'analyze_pipeline_failure': {
-      if (!isSignedIn()) return authRequiredError('analyze_pipeline_failure');
+      if (!(await ensureAuth())) return authRequiredError('analyze_pipeline_failure');
       try {
         const result = await developmentMcp.callTool('analyze_pipeline_failure', {
           pipeline_id: input.pipeline_id,
@@ -2414,7 +2427,7 @@ async function executeTool(name, input) {
     /* ─── Experience Production Agent: Translate Page ─── */
 
     case 'translate_page': {
-      if (!isSignedIn()) return authRequiredError('translate_page');
+      if (!(await ensureAuth())) return authRequiredError('translate_page');
       try {
         const result = await contentUpdaterMcp.callTool('translate_page', {
           page_url: input.page_url,
@@ -2435,7 +2448,7 @@ async function executeTool(name, input) {
     /* ─── Experience Production Agent: Create Form ─── */
 
     case 'create_form': {
-      if (!isSignedIn()) return authRequiredError('create_form');
+      if (!(await ensureAuth())) return authRequiredError('create_form');
       try {
         const result = await contentUpdaterMcp.callTool('create_form', {
           form_type: input.form_type,
@@ -2457,7 +2470,7 @@ async function executeTool(name, input) {
     /* ─── Experience Production Agent: Modernize Content ─── */
 
     case 'modernize_content': {
-      if (!isSignedIn()) return authRequiredError('modernize_content');
+      if (!(await ensureAuth())) return authRequiredError('modernize_content');
       try {
         const result = await contentUpdaterMcp.callTool('modernize_content', {
           site_url: input.site_url,
@@ -2534,7 +2547,7 @@ async function executeTool(name, input) {
     /* ─── Governance Agent: Asset Expiry ─── */
 
     case 'check_asset_expiry': {
-      if (!isSignedIn()) return authRequiredError('check_asset_expiry');
+      if (!(await ensureAuth())) return authRequiredError('check_asset_expiry');
       try {
         const host = window.__EW_AEM_HOST || null;
         const result = await discoveryMcp.checkAssetExpiry(host, {
@@ -2555,7 +2568,7 @@ async function executeTool(name, input) {
     /* ─── Governance Agent: Content Audit ─── */
 
     case 'audit_content': {
-      if (!isSignedIn()) return authRequiredError('audit_content');
+      if (!(await ensureAuth())) return authRequiredError('audit_content');
       try {
         const host = window.__EW_AEM_HOST || null;
         const result = await discoveryMcp.auditContent(host, {
@@ -2681,7 +2694,7 @@ async function executeTool(name, input) {
     /* ─── Discovery Agent: Add to Collection ─── */
 
     case 'add_to_collection': {
-      if (!isSignedIn()) return authRequiredError('add_to_collection');
+      if (!(await ensureAuth())) return authRequiredError('add_to_collection');
       try {
         const host = window.__EW_AEM_HOST || null;
         const result = await discoveryMcp.addToCollection(host, input.collection_name, input.asset_paths, {
@@ -2700,7 +2713,7 @@ async function executeTool(name, input) {
     /* ─── AEM Assets Direct API ─── */
 
     case 'browse_dam_folder': {
-      if (!isSignedIn()) return authRequiredError('browse_dam_folder');
+      if (!(await ensureAuth())) return authRequiredError('browse_dam_folder');
       try {
         const result = await aemAssets.listFolder(sanitizePath(input.path || '/'));
         return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
@@ -2710,7 +2723,7 @@ async function executeTool(name, input) {
     }
 
     case 'get_asset_metadata': {
-      if (!isSignedIn()) return authRequiredError('get_asset_metadata');
+      if (!(await ensureAuth())) return authRequiredError('get_asset_metadata');
       try {
         const result = await aemAssets.getMetadata(sanitizePath(input.path));
         return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
@@ -2720,7 +2733,7 @@ async function executeTool(name, input) {
     }
 
     case 'update_asset_metadata': {
-      if (!isSignedIn()) return authRequiredError('update_asset_metadata');
+      if (!(await ensureAuth())) return authRequiredError('update_asset_metadata');
       try {
         const result = await aemAssets.updateMetadata(sanitizePath(input.path), input.properties);
         return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
@@ -2730,7 +2743,7 @@ async function executeTool(name, input) {
     }
 
     case 'upload_asset': {
-      if (!isSignedIn()) return authRequiredError('upload_asset');
+      if (!(await ensureAuth())) return authRequiredError('upload_asset');
       try {
         // Fetch the source file first
         const fileResp = await fetch(input.source_url);
@@ -2746,7 +2759,7 @@ async function executeTool(name, input) {
     }
 
     case 'delete_asset': {
-      if (!isSignedIn()) return authRequiredError('delete_asset');
+      if (!(await ensureAuth())) return authRequiredError('delete_asset');
       try {
         const result = await aemAssets.deleteAsset(sanitizePath(input.path));
         return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
@@ -2756,7 +2769,7 @@ async function executeTool(name, input) {
     }
 
     case 'move_asset': {
-      if (!isSignedIn()) return authRequiredError('move_asset');
+      if (!(await ensureAuth())) return authRequiredError('move_asset');
       try {
         const result = await aemAssets.moveAsset(sanitizePath(input.source), sanitizePath(input.destination));
         return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
@@ -2766,7 +2779,7 @@ async function executeTool(name, input) {
     }
 
     case 'copy_asset': {
-      if (!isSignedIn()) return authRequiredError('copy_asset');
+      if (!(await ensureAuth())) return authRequiredError('copy_asset');
       try {
         const result = await aemAssets.copyAsset(sanitizePath(input.source), sanitizePath(input.destination));
         return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
@@ -2776,7 +2789,7 @@ async function executeTool(name, input) {
     }
 
     case 'create_dam_folder': {
-      if (!isSignedIn()) return authRequiredError('create_dam_folder');
+      if (!(await ensureAuth())) return authRequiredError('create_dam_folder');
       try {
         const result = await aemAssets.createFolder(sanitizePath(input.parent), input.name, input.title);
         return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
@@ -2786,7 +2799,7 @@ async function executeTool(name, input) {
     }
 
     case 'get_asset_renditions': {
-      if (!isSignedIn()) return authRequiredError('get_asset_renditions');
+      if (!(await ensureAuth())) return authRequiredError('get_asset_renditions');
       try {
         const result = await aemAssets.getRenditions(sanitizePath(input.path));
         return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Assets API' }, null, 2);
@@ -2985,7 +2998,7 @@ async function executeTool(name, input) {
     /* ─── Spacecat / AEM Sites Optimizer MCP ─── */
 
     case 'get_site_opportunities': {
-      if (!isSignedIn()) return authRequiredError('get_site_opportunities');
+      if (!(await ensureAuth())) return authRequiredError('get_site_opportunities');
       const siteUrl = input.site_url || `https://${profile.branch || 'main'}--${profile.repo || 'site'}--${(profile.orgId || 'org').toLowerCase()}.aem.live`;
       try {
         const result = await spacecatMcp.getSiteOpportunities(siteUrl, {
@@ -3004,7 +3017,7 @@ async function executeTool(name, input) {
     }
 
     case 'get_site_audit': {
-      if (!isSignedIn()) return authRequiredError('get_site_audit');
+      if (!(await ensureAuth())) return authRequiredError('get_site_audit');
       const siteUrl = input.site_url || `https://${profile.branch || 'main'}--${profile.repo || 'site'}--${(profile.orgId || 'org').toLowerCase()}.aem.live`;
       try {
         const result = await spacecatMcp.getSiteAudit(siteUrl, {
@@ -3199,7 +3212,7 @@ async function executeTool(name, input) {
     /* ─── Forms Agent ─── */
 
     case 'generate_form': {
-      if (!isSignedIn()) return authRequiredError('generate_form');
+      if (!(await ensureAuth())) return authRequiredError('generate_form');
       try {
         const result = await contentUpdaterMcp.callTool('generate_form', {
           description: input.description,
