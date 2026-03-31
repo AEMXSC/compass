@@ -83,6 +83,25 @@ export const KNOWN_SITES = {
     aliases: ['wknd', 'wknd adventures', 'adventure site', 'wknd site'],
     blocks: ['hero', 'cards', 'columns', 'carousel'],
   },
+
+  'wknd-universal': {
+    name: 'WKND Universal',
+    siteId: 'wknd-universal',
+    org: 'aem-showcase',
+    repo: 'wknd-universal',
+    branch: 'main',
+    get previewOrigin() { return `https://${this.branch}--${this.repo}--${this.org}.aem.page`; },
+    get liveOrigin() { return `https://${this.branch}--${this.repo}--${this.org}.aem.live`; },
+    description: 'WKND Universal Editor demo — primary showcase site for xwalk/JCR on AEM CS',
+    vertical: 'Media / Lifestyle',
+    aemHost: 'author-p153659-e1614585.adobeaemcloud.com',
+    pages: [
+      { path: '/index', title: 'Homepage', description: 'Hero, featured articles' },
+      { path: '/language-masters/en', title: 'English (Language Master)', description: 'English language root' },
+    ],
+    aliases: ['wknd-universal', 'wknd universal', 'universal editor demo', 'ue demo'],
+    blocks: ['hero', 'cards', 'columns', 'carousel', 'tabs'],
+  },
 };
 
 /**
@@ -93,21 +112,31 @@ export function resolveSite(text) {
   if (!text) return null;
   const lower = text.toLowerCase().trim();
 
-  // Direct ID match
+  // Direct ID match (exact key in registry)
   if (KNOWN_SITES[lower]) return KNOWN_SITES[lower];
 
-  // Alias match — check all sites
+  // Exact alias match — prevents "wknd-universal" matching "wknd"
   for (const site of Object.values(KNOWN_SITES)) {
-    if (site.aliases.some((a) => lower.includes(a) || a.includes(lower))) {
-      return site;
-    }
+    if (site.aliases.some((a) => a === lower)) return site;
   }
 
-  // Partial name match
+  // Exact siteId match
   for (const site of Object.values(KNOWN_SITES)) {
-    if (site.name.toLowerCase().includes(lower) || lower.includes(site.name.toLowerCase())) {
-      return site;
-    }
+    if (site.siteId === lower) return site;
+  }
+
+  // Multi-word alias match — only match if the FULL alias appears as a word boundary
+  // e.g. "frescopa coffee" matches input "frescopa", but "wknd" does NOT match "wknd-universal"
+  for (const site of Object.values(KNOWN_SITES)) {
+    if (site.aliases.some((a) => {
+      if (a.length < 4) return false; // skip short aliases for fuzzy match
+      return lower === a || (a.includes(' ') && lower.includes(a));
+    })) return site;
+  }
+
+  // Exact name match
+  for (const site of Object.values(KNOWN_SITES)) {
+    if (site.name.toLowerCase() === lower) return site;
   }
 
   return null;
