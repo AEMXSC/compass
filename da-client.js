@@ -34,6 +34,11 @@ export function getBasePath() {
   return `${DA_ADMIN}/source/${DA_ORG}/${DA_REPO}`;
 }
 
+/** Throw immediately if no site is connected — prevents writes to empty paths */
+function requireSite() {
+  if (!DA_ORG || !DA_REPO) throw new Error('No site connected. Connect a site first before reading or writing content.');
+}
+
 /**
  * Check if MCP is available. Caches the result after first probe.
  */
@@ -52,6 +57,7 @@ async function checkMcp() {
 /* ─── Content operations — MCP first, fallback to direct ─── */
 
 export async function listPages(path = '/') {
+  requireSite();
   if (await checkMcp()) {
     try {
       return await mcp.listSources(DA_ORG, DA_REPO, path);
@@ -67,6 +73,7 @@ export async function listPages(path = '/') {
 }
 
 export async function getPage(path) {
+  requireSite();
   if (await checkMcp()) {
     try {
       return await mcp.getSource(DA_ORG, DA_REPO, path);
@@ -84,6 +91,7 @@ export async function getPage(path) {
 }
 
 export async function createPage(path, html) {
+  requireSite();
   if (await checkMcp()) {
     try {
       return await mcp.createSource(DA_ORG, DA_REPO, path, html);
@@ -106,6 +114,7 @@ export async function createPage(path, html) {
 }
 
 export async function updatePage(path, html) {
+  requireSite();
   if (await checkMcp()) {
     try {
       return await mcp.updateSource(DA_ORG, DA_REPO, path, html);
@@ -118,6 +127,7 @@ export async function updatePage(path, html) {
 }
 
 export async function deletePage(path) {
+  requireSite();
   if (await checkMcp()) {
     try {
       return await mcp.deleteSource(DA_ORG, DA_REPO, path);
@@ -135,12 +145,14 @@ export async function deletePage(path) {
 /* ─── Admin API — admin.hlx.page ─── */
 
 export async function previewPage(path) {
+  requireSite();
   const url = `https://admin.hlx.page/preview/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
   const resp = await fetchWithToken(url, { method: 'POST' });
   return resp;
 }
 
 export async function publishPage(path) {
+  requireSite();
   const url = `https://admin.hlx.page/live/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
   const resp = await fetchWithToken(url, { method: 'POST' });
   return resp;
@@ -151,6 +163,7 @@ export async function publishPage(path) {
  * Returns preview/live status, URLs, last modified, permissions.
  */
 export async function getStatus(path) {
+  requireSite();
   const url = `https://admin.hlx.page/status/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Status check failed: ${resp.status}`);
@@ -159,6 +172,7 @@ export async function getStatus(path) {
 
 /** Unpublish from preview (.aem.page) */
 export async function unpublishPreview(path) {
+  requireSite();
   const url = `https://admin.hlx.page/preview/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
   const resp = await fetchWithToken(url, { method: 'DELETE' });
   return resp;
@@ -166,6 +180,7 @@ export async function unpublishPreview(path) {
 
 /** Unpublish from live (.aem.live) */
 export async function unpublishLive(path) {
+  requireSite();
   const url = `https://admin.hlx.page/live/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
   const resp = await fetchWithToken(url, { method: 'DELETE' });
   return resp;
@@ -173,6 +188,7 @@ export async function unpublishLive(path) {
 
 /** Purge CDN cache for a path */
 export async function purgeCache(path) {
+  requireSite();
   const url = `https://admin.hlx.page/cache/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
   const resp = await fetchWithToken(url, { method: 'POST' });
   return resp;
@@ -180,6 +196,7 @@ export async function purgeCache(path) {
 
 /** Sync code from GitHub to CDN */
 export async function syncCode() {
+  requireSite();
   const url = `https://admin.hlx.page/code/${DA_ORG}/${DA_REPO}/${DA_BRANCH}`;
   const resp = await fetchWithToken(url, { method: 'POST' });
   return resp;
@@ -187,6 +204,7 @@ export async function syncCode() {
 
 /** Bulk preview — preview all pages under a path (use "/*" for entire site) */
 export async function bulkPreview(paths) {
+  requireSite();
   const url = `https://admin.hlx.page/preview/${DA_ORG}/${DA_REPO}/${DA_BRANCH}/*`;
   const resp = await fetchWithToken(url, {
     method: 'POST',
@@ -198,6 +216,7 @@ export async function bulkPreview(paths) {
 
 /** Bulk publish — publish all pages under a path */
 export async function bulkPublish(paths) {
+  requireSite();
   const url = `https://admin.hlx.page/live/${DA_ORG}/${DA_REPO}/${DA_BRANCH}/*`;
   const resp = await fetchWithToken(url, {
     method: 'POST',

@@ -10,9 +10,9 @@
  */
 
 import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js?v=46';
-import * as ai from './ai.js?v=47';
-import { TOOL_AGENT_MAP } from './ai.js?v=47';
-import * as da from './da-client.js?v=47';
+import * as ai from './ai.js?v=56';
+import { TOOL_AGENT_MAP } from './ai.js?v=56';
+import * as da from './da-client.js?v=56';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
 import { detectSiteMention, resolveSite } from './known-sites.js';
