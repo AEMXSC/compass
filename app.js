@@ -3691,8 +3691,10 @@ const COMPASS_WORKER = 'https://compass-ims-proxy.compass-xsc.workers.dev';
         console.log(`[GH] OAuth sign-in: ${result.login}`);
       } else {
         console.warn('[GH] OAuth token invalid:', result.error);
+        const status = document.getElementById('githubMenuStatus');
+        if (status) { status.textContent = 'Sign-in failed — try again'; status.className = 'github-connect-status error'; }
       }
-    });
+    }).catch((err) => console.error('[GH] OAuth redirect error:', err));
   }
 })();
 
@@ -3806,7 +3808,7 @@ document.getElementById('githubSwitchSiteBtn')?.addEventListener('click', () => 
 
 document.getElementById('githubLogoutBtn')?.addEventListener('click', () => {
   document.getElementById('githubMenu')?.classList.remove('visible');
-  setGitHubToken('');
+  localStorage.removeItem('ew-github-token');
   localStorage.removeItem('ew-github-profile');
   ghProfile = null;
   updateGitHubUI();

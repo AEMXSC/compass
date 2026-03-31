@@ -38,9 +38,9 @@ const ALLOWED_RETURN_URLS = [
 let cachedToken = null;
 let tokenExpiry = 0;
 
-// CSRF state store — short-lived, in-memory (fine for single Worker instance)
-// Map<state, { returnTo, expires }>
-const pendingStates = new Map();
+// CSRF state uses HMAC-signed tokens (stateless — works across all Worker isolates).
+// State format: base64url(JSON({ returnTo, exp, nonce })) + '.' + base64url(HMAC-SHA256)
+const STATE_TTL_MS = 600000; // 10 minutes
 
 /* ─── Router ─── */
 
@@ -146,6 +146,9 @@ async function handleGitHubLogin(request) {
   if (typeof GITHUB_CLIENT_ID === 'undefined' || !GITHUB_CLIENT_ID) {
     return new Response('GITHUB_CLIENT_ID not configured', { status: 500 });
   }
+  if (typeof GITHUB_CLIENT_SECRET === 'undefined' || !GITHUB_CLIENT_SECRET) {
+    return new Response('GITHUB_CLIENT_SECRET not configured', { status: 500 });
+  }
 
   // Validate return_to URL
   const returnTo = url.searchParams.get('return_to') || ALLOWED_RETURN_URLS[0];
@@ -153,14 +156,8 @@ async function handleGitHubLogin(request) {
     return new Response('Invalid return_to URL', { status: 400 });
   }
 
-  // Generate CSRF state token
-  const state = crypto.randomUUID();
-  pendingStates.set(state, { returnTo, expires: Date.now() + 600000 }); // 10 min TTL
-
-  // Clean up expired states
-  for (const [key, val] of pendingStates) {
-    if (val.expires < Date.now()) pendingStates.delete(key);
-  }
+  // Generate HMAC-signed state (stateless — no in-memory storage needed)
+  const state = await signState({ returnTo, exp: Date.now() + STATE_TTL_MS, nonce: crypto.randomUUID() });
 
   const callbackUrl = new URL(request.url);
   callbackUrl.pathname = '/github/callback';
@@ -187,20 +184,18 @@ async function handleGitHubCallback(request) {
     return new Response('Missing code or state parameter', { status: 400 });
   }
 
-  // Verify CSRF state
-  const pending = pendingStates.get(state);
-  if (!pending || pending.expires < Date.now()) {
-    pendingStates.delete(state);
-    return new Response('Invalid or expired state. Please try signing in again.', { status: 403 });
-  }
-  const { returnTo } = pending;
-  pendingStates.delete(state);
-
   // Check GitHub secrets
   if (typeof GITHUB_CLIENT_ID === 'undefined' || !GITHUB_CLIENT_ID ||
       typeof GITHUB_CLIENT_SECRET === 'undefined' || !GITHUB_CLIENT_SECRET) {
     return new Response('GitHub OAuth not configured', { status: 500 });
   }
+
+  // Verify HMAC-signed state (stateless — works across all Worker isolates)
+  const payload = await verifyState(state);
+  if (!payload) {
+    return new Response('Invalid or expired state. Please try signing in again.', { status: 403 });
+  }
+  const { returnTo } = payload;
 
   // Exchange code for access token
   try {
@@ -305,4 +300,44 @@ function jsonResponse(data, status, origin) {
       ...corsHeaders(origin),
     },
   });
+}
+
+/* ─── HMAC-signed CSRF State (stateless) ─── */
+
+function base64url(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64urlDecode(str) {
+  const padded = str.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice(0, (4 - str.length % 4) % 4);
+  const binary = atob(padded);
+  return new Uint8Array([...binary].map((c) => c.charCodeAt(0)));
+}
+
+async function getHmacKey() {
+  const enc = new TextEncoder();
+  return crypto.subtle.importKey('raw', enc.encode(GITHUB_CLIENT_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+}
+
+async function signState(payload) {
+  const data = base64url(new TextEncoder().encode(JSON.stringify(payload)));
+  const key = await getHmacKey();
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data));
+  return `${data}.${base64url(sig)}`;
+}
+
+async function verifyState(state) {
+  try {
+    const [data, sig] = state.split('.');
+    if (!data || !sig) return null;
+    const key = await getHmacKey();
+    const valid = await crypto.subtle.verify('HMAC', key, base64urlDecode(sig), new TextEncoder().encode(data));
+    if (!valid) return null;
+    const payload = JSON.parse(new TextDecoder().decode(base64urlDecode(data)));
+    if (payload.exp < Date.now()) return null; // expired
+    return payload;
+  } catch {
+    return null;
+  }
 }
