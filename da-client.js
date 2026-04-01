@@ -92,38 +92,35 @@ export async function getPage(path) {
 
 export async function createPage(path, html) {
   requireSite();
-  if (await checkMcp()) {
-    try {
-      return await mcp.createSource(DA_ORG, DA_REPO, path, html);
-    } catch (err) {
-      console.warn('[DA] MCP createSource failed, falling back:', err.message);
-    }
-  }
-  // Direct fallback
+  // Direct PUT to DA Admin API — same approach as Experience Workspace.
+  // This is the most reliable write path. MCP adds latency and failure modes.
+  return directWrite(path, html);
+}
+
+export async function updatePage(path, html) {
+  requireSite();
+  // Direct PUT to DA Admin API — upsert (creates or overwrites).
+  return directWrite(path, html);
+}
+
+/** Direct PUT to admin.da.live/source — the reliable write path. */
+async function directWrite(path, html) {
   const url = `${getBasePath()}${path}`;
   const blob = new Blob([html], { type: 'text/html' });
   const formData = new FormData();
   formData.append('data', blob, path.split('/').pop());
 
+  console.log(`[DA] Direct write: PUT ${url} (${html.length} chars)`);
   const resp = await fetchWithToken(url, {
     method: 'PUT',
     body: formData,
   });
-  if (!resp.ok) throw new Error(`DA create failed: ${resp.status}`);
-  return resp;
-}
-
-export async function updatePage(path, html) {
-  requireSite();
-  if (await checkMcp()) {
-    try {
-      return await mcp.updateSource(DA_ORG, DA_REPO, path, html);
-    } catch (err) {
-      console.warn('[DA] MCP updateSource failed, falling back:', err.message);
-    }
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`DA write failed: ${resp.status} ${errText.slice(0, 200)}`);
   }
-  // Direct fallback
-  return createPage(path, html);
+  console.log(`[DA] Direct write succeeded: ${resp.status}`);
+  return resp;
 }
 
 export async function deletePage(path) {

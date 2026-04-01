@@ -1626,27 +1626,9 @@ async function executeTool(name, input) {
       console.log(`[edit_page_content] ── START ── org=${org} repo=${repo} path=${htmlPath} htmlLen=${input.html?.length || 0} auth=${isSignedIn()} ghToken=${hasGitHubToken()}`);
       if (await ensureAuth()) {
         try {
-          console.log(`[edit_page_content] Writing via DA MCP: ${da.getBasePath()}${htmlPath}`);
-          const writeResult = await da.updatePage(htmlPath, input.html);
-          console.log('[edit_page_content] DA MCP write returned:', JSON.stringify(writeResult)?.slice(0, 300));
-
-          // Verify the write landed by reading back
-          let verified = false;
-          try {
-            const readback = await da.getPage(htmlPath);
-            const readStr = typeof readback === 'string' ? readback : '';
-            // Check that at least some of the written content appears in the readback
-            const snippet = input.html.replace(/<[^>]+>/g, '').trim().slice(0, 50);
-            verified = snippet.length > 0 && readStr.includes(snippet);
-            console.log('[edit_page_content] Write verification:', verified ? 'CONFIRMED' : 'CONTENT MISMATCH');
-          } catch (verifyErr) {
-            console.warn('[edit_page_content] Could not verify write:', verifyErr.message);
-          }
-
-          if (!verified) {
-            console.warn('[edit_page_content] DA MCP write not verified — falling through to GitHub');
-            throw new Error('DA MCP write could not be verified (content mismatch on readback)');
-          }
+          console.log(`[edit_page_content] Writing via DA Admin API: ${da.getBasePath()}${htmlPath}`);
+          await da.updatePage(htmlPath, input.html);
+          // Direct PUT to admin.da.live — if it didn't throw, the write succeeded.
 
           let previewStatus = 'skipped';
           if (input.trigger_preview !== false) {
@@ -1667,9 +1649,8 @@ async function executeTool(name, input) {
             preview_url: previewUrl,
             da_edit_url: daUrl,
             preview_status: previewStatus,
-            verified: true,
-            source: 'DA MCP',
-            message: `Page ${pagePath} saved via DA MCP (verified). Preview refreshing.`,
+            source: 'DA Admin API',
+            message: `Page ${pagePath} saved via DA Admin API. Preview refreshing.`,
             _action: 'refresh_preview',
             _preview_path: pagePath,
           }, null, 2);
