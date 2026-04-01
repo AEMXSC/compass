@@ -2825,9 +2825,13 @@ function navigateToPage(path) {
     el.classList.toggle('active', el.dataset.path === path);
   });
 
-  // Cache clear for fresh context
+  // Pre-fetch page content in background so it's ready when the user chats.
+  // Same pattern as EW: "Source: Live document from editor" — zero latency on first prompt.
   cachedPageHTML = null;
   cachedPageUrl = null;
+  ensurePageContext().then(() => {
+    if (cachedPageHTML) console.log(`[NAV] Page content pre-cached: ${path} (${cachedPageHTML.length} chars)`);
+  }).catch(() => { /* non-blocking */ });
 }
 // Expose for ai.js tool handlers
 window.__EW_NAV = navigateToPage;

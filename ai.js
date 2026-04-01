@@ -3666,9 +3666,9 @@ Use these when users ask about:
 15. For journey conflict analysis (scheduling, audience overlap), call analyze_journey_conflicts.
 16. For support tickets, call create_support_ticket to create and get_ticket_status to check updates.
 17. IMPORTANT: After creating or patching pages, ALWAYS share the Universal Editor and DA edit links in your response so the user can open and edit the page visually.
-18. **CONTENT EDITING LOOP**: When the user wants to edit page content, **check the TOOL ROUTING section** in the Connected AEM Environment block below to determine the correct tools. For **DA sites**: get_page_content → edit_page_content → preview_page. For **AEM CS (JCR) sites**: get_page_content (returns ETag) → patch_aem_page_content. The tool routing section is authoritative — always follow it.
-19. When users say "edit the page", "change the headline", "update the hero", "create a landing page" — check the TOOL ROUTING section first. For DA sites: read with get_page_content, write with edit_page_content. For JCR sites: read with get_page_content (get ETag), write with patch_aem_page_content.
-20. NEVER call edit_page_content without first reading the page with get_page_content (unless creating a brand new page that doesn't exist yet).
+18. **CONTENT EDITING LOOP**: Check the TOOL ROUTING section below for the correct tools. **IMPORTANT**: If "Current page HTML" is already provided in the system context below, you ALREADY have the page content — skip the read step and go straight to the write tool. This saves a round-trip and matches the Experience Workspace pattern. For **DA sites**: edit_page_content (you already have the HTML — modify it and write back). For **JCR sites**: you still need get_page_content first to get a fresh ETag, then patch_aem_page_content.
+19. When users say "edit the page", "change the headline", "update the hero" — if you already have the page HTML in context, parse it, make the requested change, and call the write tool directly. Only call get_page_content if you don't have the HTML yet or need a fresh ETag for JCR.
+20. NEVER call edit_page_content without knowing the current page content (either from context or from get_page_content). For brand new pages, generate the HTML from scratch.
 21. For documentation questions ("how do I...", "what is...", "show me docs on..."), call search_experience_league. For release notes ("what's new", "latest features"), call get_product_release_notes.
 22. For site health, performance, or SEO questions, call get_site_audit for scores and get_site_opportunities for recommendations. Use Spacecat tools BEFORE giving optimization advice.
 23. When users mention broken backlinks, 404s, or redirect chains, call get_site_audit with audit_type=broken-backlinks or get_site_opportunities with category=broken-backlinks.
@@ -3875,7 +3875,17 @@ function buildSystemParts(context = {}) {
   // Dynamic layers — change per request
   const dynamic = [];
   if (context.pageHTML) {
-    dynamic.push(`\n\nCurrent page HTML (from iframe preview):\n\`\`\`html\n${context.pageHTML.slice(0, 15000)}\n\`\`\``);
+    const pagePath = context.pageUrl ? new URL(context.pageUrl).pathname : 'unknown';
+    dynamic.push(`\n\n## Current Page Content (LIVE — pre-loaded from editor)
+**Path**: ${pagePath}
+**Size**: ${context.pageHTML.length} chars
+**Source**: Live document from preview (pre-cached on navigation)
+
+You ALREADY have this page content. For DA edits, modify the HTML below and call edit_page_content directly — no need to call get_page_content first.
+
+\`\`\`html
+${context.pageHTML.slice(0, 15000)}
+\`\`\``);
   }
   if (context.pageUrl) dynamic.push(`\nCurrent page URL: ${context.pageUrl}`);
   if (context.customerName) dynamic.push(`\nCustomer: ${context.customerName}`);
