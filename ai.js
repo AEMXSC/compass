@@ -1530,12 +1530,18 @@ async function executeTool(name, input) {
       try {
         const host = window.__EW_AEM_HOST || null;
         const result = await aemContent.copyPage(host, input.source_path, input.destination_path, input.title);
+        // Construct UE edit URL (don't rely on MCP to return it)
+        const orgCtx = window.__EW_ORG || {};
+        const previewOrigin = orgCtx.previewOrigin || '';
+        const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.destination_path}` : null;
         return JSON.stringify({
           status: 'created',
           ...result,
           path: input.destination_path,
           title: input.title,
           copied_from: input.source_path,
+          edit_urls: { universal_editor: ueUrl },
+          preview_url: previewOrigin ? `${previewOrigin}${input.destination_path}` : null,
           message: `Page created at ${input.destination_path} from template ${input.source_path}`,
           _source: 'connected',
           source: 'AEM Content MCP',
@@ -1551,14 +1557,25 @@ async function executeTool(name, input) {
       try {
         const host = window.__EW_AEM_HOST || null;
         const result = await aemContent.updatePage(host, input.page_path, input.updates, input.etag);
+
+        // Construct UE edit URL and preview URL
+        const orgCtx = window.__EW_ORG || {};
+        const previewOrigin = orgCtx.previewOrigin || '';
+        const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.page_path}` : null;
+        const previewUrl = previewOrigin ? `${previewOrigin}${input.page_path}` : null;
+
         return JSON.stringify({
           status: 'updated',
           ...result,
           page_path: input.page_path,
           updated_fields: fields,
+          edit_urls: { universal_editor: ueUrl },
+          preview_url: previewUrl,
           message: `Updated ${fields.length} field(s) on ${input.page_path}`,
           _source: 'connected',
           source: 'AEM Content MCP',
+          _action: 'refresh_preview',
+          _preview_path: input.page_path,
         }, null, 2);
       } catch (err) {
         return mcpError('patch_aem_page_content', err);

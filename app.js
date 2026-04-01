@@ -1211,6 +1211,57 @@ const TOOL_RENDERERS = {
       </div>`;
   },
 
+  /* ─ AEM Content MCP: JCR Page Patch Card ─ */
+  patch_aem_page_content(result) {
+    if (result.status === 'error') {
+      return `
+        <div class="page-card page-card-error">
+          <div class="page-card-header">
+            <div class="page-card-icon">⚠</div>
+            <div class="page-card-meta">
+              <div class="page-card-title">AEM Patch Failed</div>
+              <div class="page-card-author">${result.error || 'Unknown error'}</div>
+            </div>
+          </div>
+        </div>`;
+    }
+    if (result.status !== 'updated') return null;
+    const path = result.page_path || '';
+    const fields = result.updated_fields || [];
+    const ueUrl = result.edit_urls?.universal_editor;
+    return `
+      <div class="page-card page-card-live">
+        <div class="page-card-header">
+          <div class="page-card-icon">✓</div>
+          <div class="page-card-meta">
+            <div class="page-card-title">${path} — Updated via AEM Content MCP</div>
+            <div class="page-card-author">${fields.length} field(s) updated · Preview refreshing</div>
+          </div>
+        </div>
+        ${result.preview_url ? `<a href="${result.preview_url}" target="_blank" rel="noopener" class="page-card-link">Open preview →</a>` : ''}
+        ${ueUrl ? `<a href="${ueUrl}" target="_blank" rel="noopener" class="page-card-link page-card-link-secondary">Edit in Universal Editor →</a>` : ''}
+      </div>`;
+  },
+
+  /* ─ AEM Content MCP: JCR Page Copy Card ─ */
+  copy_aem_page(result) {
+    if (result.status !== 'created') return null;
+    const path = result.path || '';
+    const ueUrl = result.edit_urls?.universal_editor;
+    return `
+      <div class="page-card page-card-live">
+        <div class="page-card-header">
+          <div class="page-card-icon">✓</div>
+          <div class="page-card-meta">
+            <div class="page-card-title">${path} — Page Created</div>
+            <div class="page-card-author">Copied from ${result.copied_from || 'template'}</div>
+          </div>
+        </div>
+        ${result.preview_url ? `<a href="${result.preview_url}" target="_blank" rel="noopener" class="page-card-link">Open preview →</a>` : ''}
+        ${ueUrl ? `<a href="${ueUrl}" target="_blank" rel="noopener" class="page-card-link page-card-link-secondary">Edit in Universal Editor →</a>` : ''}
+      </div>`;
+  },
+
   /* ─ Experimentation Agent: Experiment Setup Card ─ */
   setup_experiment(result) {
     if (result.status !== 'created' && result.status !== 'partial') return null;
