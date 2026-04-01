@@ -58,15 +58,8 @@ async function checkMcp() {
 
 export async function listPages(path = '/') {
   requireSite();
-  if (await checkMcp()) {
-    try {
-      return await mcp.listSources(DA_ORG, DA_REPO, path);
-    } catch (err) {
-      console.warn('[DA] MCP listSources failed, falling back:', err.message);
-    }
-  }
-  // Direct fallback
   const url = `${getBasePath()}${path}`;
+  console.log(`[DA] Direct list: GET ${url}`);
   const resp = await fetchWithToken(url);
   if (!resp.ok) throw new Error(`DA list failed: ${resp.status}`);
   return resp.json();
@@ -74,15 +67,8 @@ export async function listPages(path = '/') {
 
 export async function getPage(path) {
   requireSite();
-  if (await checkMcp()) {
-    try {
-      return await mcp.getSource(DA_ORG, DA_REPO, path);
-    } catch (err) {
-      console.warn('[DA] MCP getSource failed, falling back:', err.message);
-    }
-  }
-  // Direct fallback
   const url = `${getBasePath()}${path}`;
+  console.log(`[DA] Direct read: GET ${url}`);
   const resp = await fetchWithToken(url);
   if (!resp.ok) throw new Error(`DA get failed: ${resp.status}`);
   const contentType = resp.headers.get('content-type');
@@ -125,15 +111,8 @@ async function directWrite(path, html) {
 
 export async function deletePage(path) {
   requireSite();
-  if (await checkMcp()) {
-    try {
-      return await mcp.deleteSource(DA_ORG, DA_REPO, path);
-    } catch (err) {
-      console.warn('[DA] MCP deleteSource failed, falling back:', err.message);
-    }
-  }
-  // Direct fallback
   const url = `${getBasePath()}${path}`;
+  console.log(`[DA] Direct delete: DELETE ${url}`);
   const resp = await fetchWithToken(url, { method: 'DELETE' });
   if (!resp.ok) throw new Error(`DA delete failed: ${resp.status}`);
   return resp;
