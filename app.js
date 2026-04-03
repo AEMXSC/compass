@@ -809,6 +809,19 @@ let cachedPageHTML = null;
 let cachedPageUrl = null;
 
 async function fetchPageHTML(url) {
+  // Method 0: DA Admin API (authenticated, no CORS issues — most reliable for DA sites)
+  if (isSignedIn() && da.getOrg() && da.getRepo()) {
+    try {
+      const u = new URL(url);
+      const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
+      const result = await da.getPage(`${path}.html`);
+      if (typeof result === 'string' && result.length > 0) {
+        console.log(`[fetchPageHTML] DA Admin API: ${path} (${result.length} chars)`);
+        return result;
+      }
+    } catch (e) { console.warn('[fetchPageHTML] DA Admin API failed:', e.message); }
+  }
+
   // Method 1: AEM EDS .plain.html endpoint (same-origin or CORS-friendly)
   const plainUrl = url.replace(/\/?$/, '.plain.html');
   try {
