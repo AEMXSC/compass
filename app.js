@@ -1693,34 +1693,42 @@ async function handleRealChat(text, file) {
         }, 1500);
       }
 
-      // Content saved — poll preview until CDN catches up, then refresh iframe.
-      // Faster than the old fixed 3.5s delay — typically refreshes in 0.5-1.5s.
+      // Content saved — optimistic preview (like EW's instant Y.js updates).
+      // Render the new HTML immediately via srcdoc, then swap to real CDN once ready.
       if (result._action === 'refresh_preview' && result._preview_path) {
         const path = result._preview_path;
-        showToast(`Page ${path} saved — refreshing preview...`, 'success');
         const previewUrl = AEM_ORG.previewOrigin + path;
+        activeResourcePath = path;
 
-        // Poll .plain.html until CDN catches up (max 5 attempts, 600ms apart)
-        let attempts = 0;
-        const pollRefresh = async () => {
-          attempts++;
+        // Step 1: Optimistic render — show new content instantly via DA Admin API
+        if (previewFrame && isSignedIn() && da.getOrg()) {
           try {
-            await fetch(`${previewUrl}.plain.html?t=${Date.now()}`, { cache: 'no-store' });
-          } catch { /* ignore */ }
-
-          if (attempts >= 5 || !previewFrame) {
-            if (previewFrame) {
-              previewFrame.src = 'about:blank';
-              setTimeout(() => { previewFrame.src = previewUrl; }, 150);
+            const htmlPath = (path === '/' ? '/index' : path) + '.html';
+            const freshHTML = await da.getPage(htmlPath);
+            if (typeof freshHTML === 'string' && freshHTML.length > 0) {
+              const base = AEM_ORG.previewOrigin;
+              previewFrame.srcdoc = `<!DOCTYPE html><html><head>
+                <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+                <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
+                <script src="${base}/scripts/aem.js" type="module"><\/script>
+                <script src="${base}/scripts/scripts.js" type="module"><\/script>
+              </head><body><header></header><main>${freshHTML}</main><footer></footer></body></html>`;
+              cachedPageHTML = freshHTML;
+              cachedPageUrl = previewUrl;
+              showToast(`Page ${path} saved — preview updated`, 'success');
             }
-            activeResourcePath = path;
-            cachedPageHTML = null;
-            cachedPageUrl = null;
-            return;
+          } catch (e) {
+            console.warn('[Preview] Optimistic render failed:', e.message);
           }
-          setTimeout(pollRefresh, 600);
-        };
-        setTimeout(pollRefresh, 500);
+        }
+
+        // Step 2: Swap to real CDN URL after propagation (background, non-blocking)
+        setTimeout(() => {
+          if (previewFrame && previewFrame.srcdoc) {
+            previewFrame.removeAttribute('srcdoc');
+            previewFrame.src = previewUrl;
+          }
+        }, 5000);
       }
 
       // Auth required — no write happened, tell the user clearly
