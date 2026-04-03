@@ -56,6 +56,40 @@ const homePromptInput = document.getElementById('homePromptInput');
 /* ── State ── */
 let conversationHistory = [];
 let isLiveMode = false;
+
+/* ── Project Memory (persists across sessions, keyed by org/repo) ── */
+/* Matches da-agent's persistent memory — context survives page reloads. */
+const PROJECT_MEMORY_KEY = 'ew-project-memory';
+
+function getProjectMemory() {
+  const orgId = AEM_ORG?.orgId || '';
+  const repo = AEM_ORG?.repo || '';
+  if (!orgId || !repo) return null;
+  try {
+    const all = JSON.parse(localStorage.getItem(PROJECT_MEMORY_KEY) || '{}');
+    return all[`${orgId}/${repo}`] || null;
+  } catch { return null; }
+}
+
+function saveProjectMemory(data) {
+  const orgId = AEM_ORG?.orgId || '';
+  const repo = AEM_ORG?.repo || '';
+  if (!orgId || !repo) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(PROJECT_MEMORY_KEY) || '{}');
+    all[`${orgId}/${repo}`] = {
+      ...data,
+      updatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(PROJECT_MEMORY_KEY, JSON.stringify(all));
+  } catch (e) { console.warn('[Memory] Save failed:', e.message); }
+}
+
+function updateProjectMemory(patch) {
+  const existing = getProjectMemory() || {};
+  saveProjectMemory({ ...existing, ...patch });
+}
+
 let pendingFile = null; // { name, type, size, content (text or base64), mediaType }
 let currentView = 'home'; // 'home' | 'editor'
 let sitePages = []; // loaded from query-index.json
@@ -829,6 +863,9 @@ function getPageContext() {
   if (cachedPageHTML) {
     ctx.pageHTML = cachedPageHTML;
   }
+  // Attach project memory (persistent across sessions)
+  const mem = getProjectMemory();
+  if (mem) ctx.projectMemory = mem;
   return ctx;
 }
 
@@ -1534,6 +1571,16 @@ async function handleRealChat(text, file) {
 
   conversationHistory.push({ role: 'user', content: messageContent });
 
+  // Track prompt in project memory (for learning frequent patterns)
+  if (text && text.length > 5 && text.length < 200) {
+    try {
+      const mem = getProjectMemory() || {};
+      const prompts = mem.lastPrompts || [];
+      prompts.unshift(text);
+      updateProjectMemory({ lastPrompts: prompts.slice(0, 20) });
+    } catch { /* non-blocking */ }
+  }
+
   await ensurePageContext();
   const ctx = getPageContext();
 
@@ -1612,28 +1659,43 @@ async function handleRealChat(text, file) {
     try {
       const result = JSON.parse(resultStr);
 
-      // GitHub write — content committed, refresh from aem.page after CDN propagation
+      // GitHub write — content committed, refresh after CDN propagation
       if (result._action === 'local_write' && result._preview_path) {
         const path = result._preview_path;
         setTimeout(() => {
           navigateToPage(path);
           showToast(`Page ${path} saved via GitHub — preview refreshed`, 'success');
-        }, 2500);
+        }, 1500);
       }
 
-      // DA MCP write — content saved to DA, refresh after admin preview propagates
+      // Content saved — poll preview until CDN catches up, then refresh iframe.
+      // Faster than the old fixed 3.5s delay — typically refreshes in 0.5-1.5s.
       if (result._action === 'refresh_preview' && result._preview_path) {
         const path = result._preview_path;
         showToast(`Page ${path} saved — refreshing preview...`, 'success');
-        // Force iframe reload even if same URL — bust cache with timestamp
-        setTimeout(() => {
-          if (previewFrame) {
-            const url = AEM_ORG.previewOrigin + path;
-            previewFrame.src = 'about:blank';
-            setTimeout(() => { previewFrame.src = url; }, 200);
+        const previewUrl = AEM_ORG.previewOrigin + path;
+
+        // Poll .plain.html until CDN catches up (max 5 attempts, 600ms apart)
+        let attempts = 0;
+        const pollRefresh = async () => {
+          attempts++;
+          try {
+            await fetch(`${previewUrl}.plain.html?t=${Date.now()}`, { cache: 'no-store' });
+          } catch { /* ignore */ }
+
+          if (attempts >= 5 || !previewFrame) {
+            if (previewFrame) {
+              previewFrame.src = 'about:blank';
+              setTimeout(() => { previewFrame.src = previewUrl; }, 150);
+            }
+            activeResourcePath = path;
+            cachedPageHTML = null;
+            cachedPageUrl = null;
+            return;
           }
-          activeResourcePath = path;
-        }, 3500);
+          setTimeout(pollRefresh, 600);
+        };
+        setTimeout(pollRefresh, 500);
       }
 
       // Auth required — no write happened, tell the user clearly
@@ -3405,6 +3467,17 @@ async function connectCustomSite(input) {
 
   // Clear conversation for fresh start
   conversationHistory = [];
+
+  // Save + restore project memory
+  const mem = getProjectMemory();
+  updateProjectMemory({
+    lastConnected: new Date().toISOString(),
+    org, repo, branch: branch || 'main',
+    siteType: window.__EW_SITE_TYPE || 'unknown',
+  });
+  if (mem?.lastPrompts?.length) {
+    console.log(`[Memory] Restored project memory for ${org}/${repo}:`, mem);
+  }
 
   } catch (err) {
     console.error('[EW] connectCustomSite error:', err);

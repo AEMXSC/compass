@@ -3941,6 +3941,17 @@ ${toolRouting}
 IMPORTANT: You are connected to **${o.orgId}/${o.repo}** (branch: ${o.branch}). ALL content reads and writes MUST target this repository. The preview URL is ${o.previewOrigin}. Follow the TOOL ROUTING section above — using the wrong tool stack will cause failures.`);
   }
 
+  // Project memory — persistent context across sessions (like da-agent's /.da/ memory)
+  if (context.projectMemory) {
+    const mem = context.projectMemory;
+    let memText = '\n## Project Memory (persistent across sessions)';
+    if (mem.lastPrompts?.length) {
+      memText += `\nRecent prompts from this user on this project:\n${mem.lastPrompts.slice(0, 5).map((p) => `- "${p}"`).join('\n')}`;
+    }
+    if (mem.lastConnected) memText += `\nLast session: ${mem.lastConnected}`;
+    dynamic.push(memText);
+  }
+
   // Add dynamic content as the final block (not cached)
   if (dynamic.length > 0) {
     blocks.push({ type: 'text', text: dynamic.join('\n') });
