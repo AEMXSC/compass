@@ -850,17 +850,29 @@ async function fetchPageHTML(url) {
 }
 
 function getPageContext() {
-  const ctx = { customerName: AEM_ORG.name, pageUrl: PREVIEW_URL, org: AEM_ORG };
+  const ctx = {
+    // ── Unified page context (piped automatically, like da-agent) ──
+    customerName: AEM_ORG.name,
+    pageUrl: PREVIEW_URL,
+    pagePath: activeResourcePath || '/',
+    org: AEM_ORG,
+    siteType: window.__EW_SITE_TYPE || 'unknown',
+    aemHost: window.__EW_AEM_HOST || null,
+    view: currentPreviewView || 'preview',
+    authState: {
+      ims: typeof isSignedIn === 'function' ? isSignedIn() : false,
+      github: typeof hasGitHubToken === 'function' ? hasGitHubToken() : false,
+    },
+  };
   // Try iframe DOM first (same-origin)
   try {
     const iframeDoc = previewFrame.contentDocument || previewFrame.contentWindow?.document;
     if (iframeDoc?.body) {
       ctx.pageHTML = iframeDoc.documentElement.outerHTML;
-      return ctx;
     }
   } catch { /* cross-origin */ }
   // Use cached fetched HTML
-  if (cachedPageHTML) {
+  if (!ctx.pageHTML && cachedPageHTML) {
     ctx.pageHTML = cachedPageHTML;
   }
   // Attach project memory (persistent across sessions)

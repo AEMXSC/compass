@@ -3873,37 +3873,55 @@ function buildSystemParts(context = {}) {
   if (semiStatic) blocks.push({ type: 'text', text: semiStatic });
 
   // Dynamic layers — change per request
+  // Build one unified context block (like da-agent pipes org/site/path/view)
   const dynamic = [];
-  if (context.pageHTML) {
-    const pagePath = context.pageUrl ? new URL(context.pageUrl).pathname : 'unknown';
-    dynamic.push(`\n\n## Current Page Content (LIVE — pre-loaded from editor)
-**Path**: ${pagePath}
-**Size**: ${context.pageHTML.length} chars
-**Source**: Live document from preview (pre-cached on navigation)
-
-You ALREADY have this page content. For DA edits, modify the HTML below and call edit_page_content directly — no need to call get_page_content first.
-
-\`\`\`html
-${context.pageHTML.slice(0, 15000)}
-\`\`\``);
-  }
-  if (context.pageUrl) dynamic.push(`\nCurrent page URL: ${context.pageUrl}`);
-  if (context.customerName) dynamic.push(`\nCustomer: ${context.customerName}`);
-  if (context.siteContext) dynamic.push(context.siteContext);
 
   if (context.org && context.org.orgId && context.org.repo) {
     const o = context.org;
-    const siteType = window.__EW_SITE_TYPE || 'unknown';
-    const aemHost = window.__EW_AEM_HOST || null;
+    const siteType = context.siteType || window.__EW_SITE_TYPE || 'unknown';
+    const aemHost = context.aemHost || window.__EW_AEM_HOST || null;
     const isJcr = siteType === 'aem-cs';
     const isDa = siteType === 'da';
+    const pagePath = context.pagePath || '/';
+    const view = context.view || 'preview';
+    const auth = context.authState || {};
+
+    // ── Unified page context (matches da-agent's automatic context injection) ──
+    let pageContext = `\n## Active Page Context
+| Field | Value |
+|-------|-------|
+| **Org** | ${o.orgId} |
+| **Repo** | ${o.repo} |
+| **Branch** | ${o.branch} |
+| **Path** | ${pagePath} |
+| **Site type** | ${isJcr ? 'AEM CS (JCR)' : isDa ? 'DA' : 'Unknown'} |
+| **View** | ${view} |
+| **Preview URL** | ${o.previewOrigin}${pagePath} |
+| **Auth** | IMS: ${auth.ims ? '✓' : '✗'} · GitHub: ${auth.github ? '✓' : '✗'} |`;
+
+    if (aemHost) pageContext += `\n| **AEM Author** | ${aemHost} |`;
+    if (isDa) pageContext += `\n| **DA Admin** | admin.da.live/source/${o.daOrg}/${o.daRepo} |`;
+    if (context.customerName) pageContext += `\n| **Customer** | ${context.customerName} |`;
+
+    // ── Page HTML (pre-loaded — skip the read call for DA edits) ──
+    if (context.pageHTML) {
+      pageContext += `\n\n### Page Content (LIVE — pre-loaded, ${context.pageHTML.length} chars)
+You ALREADY have this page content. For DA edits, modify the HTML and call edit_page_content directly — no read call needed.
+
+\`\`\`html
+${context.pageHTML.slice(0, 15000)}
+\`\`\``;
+    } else {
+      pageContext += `\n\n*Page content not pre-loaded. Call get_page_content to read it.*`;
+    }
+
+    dynamic.push(pageContext);
+    if (context.siteContext) dynamic.push(context.siteContext);
 
     // Build tool routing instructions based on detected site type
     let toolRouting = '';
     if (isJcr && aemHost) {
-      toolRouting = `- **AEM Author**: ${aemHost}
-
-### TOOL ROUTING (MANDATORY)
+      toolRouting = `### TOOL ROUTING (MANDATORY)
 This is an **AEM CS (JCR)** site. You MUST use these tools:
 - Read pages: \`get_page_content\` (returns JCR page content with ETag)
 - Write pages: \`patch_aem_page_content\` (always call get_page_content first for a fresh ETag)
@@ -3912,11 +3930,9 @@ This is an **AEM CS (JCR)** site. You MUST use these tools:
 
 **DO NOT** use DA tools (edit_page_content, preview_page, list_site_pages) — they are not available for this site.`;
     } else if (isDa) {
-      toolRouting = `- **DA Path**: admin.da.live/source/${o.daOrg}/${o.daRepo}
-
-### TOOL ROUTING (MANDATORY)
+      toolRouting = `### TOOL ROUTING (MANDATORY)
 This is a **DA (Document Authoring)** site. You MUST use these tools:
-- Read pages: \`get_page_content\` (reads via DA MCP)
+- Read pages: \`get_page_content\` (reads via DA Admin API)
 - Write pages: \`edit_page_content\` (writes HTML to DA-backed repo, auto-triggers preview)
 - List pages: \`list_site_pages\`
 - Preview: \`preview_page\`
@@ -3924,21 +3940,11 @@ This is a **DA (Document Authoring)** site. You MUST use these tools:
 
 **DO NOT** use AEM Content MCP tools (patch_aem_page_content, copy_aem_page) — they are not available for this site.`;
     } else {
-      toolRouting = `- **DA Path**: admin.da.live/source/${o.daOrg}/${o.daRepo}
-
-### TOOL ROUTING
-Site type could not be determined from fstab.yaml. Try DA tools first (edit_page_content). If DA fails, inform the user that the site type is unknown and ask how they'd like to proceed.`;
+      toolRouting = `### TOOL ROUTING
+Site type could not be determined. Try DA tools first (edit_page_content). If DA fails, inform the user and ask how to proceed.`;
     }
 
-    dynamic.push(`\n## Connected AEM Environment (ACTIVE — use this for ALL operations)
-- **Organization**: ${o.name} (${o.orgId})
-- **Repository**: ${o.repo} (branch: ${o.branch})
-- **Site type**: ${isJcr ? 'AEM CS (JCR/Universal Editor)' : isDa ? 'DA (Document Authoring)' : 'Unknown (fstab not found)'}
-- **Preview**: ${o.previewOrigin}
-- **Live**: ${o.liveOrigin}
-${toolRouting}
-
-IMPORTANT: You are connected to **${o.orgId}/${o.repo}** (branch: ${o.branch}). ALL content reads and writes MUST target this repository. The preview URL is ${o.previewOrigin}. Follow the TOOL ROUTING section above — using the wrong tool stack will cause failures.`);
+    dynamic.push(`\n${toolRouting}\n\nIMPORTANT: Follow the TOOL ROUTING above. Using the wrong tool stack will cause failures.`);
   }
 
   // Project memory — persistent context across sessions (like da-agent's /.da/ memory)
