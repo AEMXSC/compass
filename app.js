@@ -3490,41 +3490,70 @@ async function connectCustomSite(input) {
 
   switchView('editor');
 
-  // For JCR sites where iframe can't load (X-Frame-Options), render via AEM Content MCP
+  // For JCR sites where iframe can't load (X-Frame-Options), fetch rendered HTML
+  // from the publish tier and render as srcdoc with <base> pointing to publish.
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
     const contentPathMatch = input.match(/(\/content\/[^\s?#]*)/);
     const jcrPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '/content';
     activeResourcePath = jcrPath;
 
-    // Show placeholder while loading
+    // Show loading state
     if (previewFrame) {
       previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
-        <div style="text-align:center"><p>Loading JCR content via AEM Content MCP...</p><p style="font-size:12px">${jcrPath}</p></div></body></html>`;
+        <div style="text-align:center"><p>Loading JCR page preview...</p><p style="font-size:12px">${jcrPath}</p></div></body></html>`;
     }
 
-    // Fetch page content from AEM Content MCP and render as srcdoc
+    // Fetch fully rendered HTML from AEM publish tier and render as srcdoc
     (async () => {
+      const authorHost = parsed.aemHost; // e.g. author-p153659-e1614585.adobeaemcloud.com
+      const publishHost = authorHost.replace('author-', 'publish-');
+      const pageUrl = `https://${publishHost}${jcrPath}.html`;
+
       try {
-        if (!isSignedIn()) await signIn();
-        const host = window.__EW_AEM_HOST;
-        if (host) {
-          const aemContentMod = await import('./aem-content-mcp-client.js');
-          const result = await aemContentMod.getPage(host, jcrPath);
-          const html = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-          if (html && previewFrame) {
-            previewFrame.srcdoc = `<!DOCTYPE html><html><head>
-              <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-              <style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;color:#333;line-height:1.6}img{max-width:100%;height:auto}h1,h2,h3{color:#1a1a1a}</style>
-            </head><body>${html}</body></html>`;
+        console.log(`[EW] JCR preview: fetching from publish tier: ${pageUrl}`);
+        const resp = await fetch(pageUrl);
+        if (resp.ok) {
+          let html = await resp.text();
+          // Inject <base> so relative URLs (images, CSS, JS) resolve to the publish tier
+          const baseTag = `<base href="https://${publishHost}/">`;
+          html = html.replace(/<head>/, `<head>${baseTag}`);
+          // Remove X-Frame-Options meta if present, and UE instrumentation scripts
+          html = html.replace(/<script[^>]*universal-editor[^>]*>[\s\S]*?<\/script>/gi, '');
+          html = html.replace(/<script[^>]*editor-support[^>]*>[\s\S]*?<\/script>/gi, '');
+
+          if (previewFrame) {
+            previewFrame.srcdoc = html;
             cachedPageHTML = html;
-            console.log('[EW] JCR preview rendered via AEM Content MCP:', jcrPath, html.length, 'chars');
+            console.log(`[EW] JCR preview rendered from publish tier: ${jcrPath} (${html.length} chars)`);
           }
+        } else {
+          throw new Error(`Publish tier returned ${resp.status}`);
         }
       } catch (e) {
-        console.warn('[EW] JCR preview fetch failed:', e.message);
-        if (previewFrame) {
-          previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
-            <div style="text-align:center"><p>JCR preview unavailable</p><p style="font-size:12px">Use the <strong>UE</strong> button in the toolbar to open Universal Editor</p><p style="font-size:11px;color:#555">${e.message}</p></div></body></html>`;
+        console.warn(`[EW] Publish tier fetch failed: ${e.message}. Trying AEM Content MCP...`);
+        // Fallback: try AEM Content MCP for structured content
+        try {
+          if (!isSignedIn()) await signIn();
+          const host = window.__EW_AEM_HOST;
+          if (host) {
+            const aemContentMod = await import('./aem-content-mcp-client.js');
+            const result = await aemContentMod.getPage(host, jcrPath);
+            const mcpHtml = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+            if (mcpHtml && previewFrame) {
+              previewFrame.srcdoc = `<!DOCTYPE html><html><head>
+                <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;color:#333;line-height:1.6}img{max-width:100%;height:auto}h1,h2,h3{color:#1a1a1a}</style>
+              </head><body>${mcpHtml}</body></html>`;
+              cachedPageHTML = mcpHtml;
+              console.log('[EW] JCR preview rendered via AEM Content MCP:', jcrPath);
+            }
+          }
+        } catch (mcpErr) {
+          console.warn('[EW] JCR preview: all methods failed:', mcpErr.message);
+          if (previewFrame) {
+            previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
+              <div style="text-align:center"><p>JCR preview unavailable</p><p style="font-size:12px">Use the <strong>UE</strong> button to open Universal Editor</p><p style="font-size:11px;color:#555">${e.message}</p></div></body></html>`;
+          }
         }
       }
     })();
