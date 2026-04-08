@@ -1649,18 +1649,17 @@ async function executeTool(name, input) {
       const host = window.__EW_AEM_HOST || null;
 
       // Try patch — on 412 conflict (stale ETag), auto-retry with fresh ETag
+      let lastEtag = input.etag;
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          const etag = attempt === 0 ? input.etag : null;
           if (attempt > 0) {
-            // Re-read page to get fresh ETag
+            // Re-read page to get fresh ETag after conflict
             console.log(`[patch] ETag conflict — re-reading page for fresh ETag (attempt ${attempt + 1})`);
             const freshPage = await aemContent.getPage(host, input.page_path);
-            const freshEtag = freshPage?.etag;
-            if (!freshEtag) throw new Error('Could not get fresh ETag after conflict');
-            var retryEtag = freshEtag;
+            lastEtag = freshPage?.etag;
+            if (!lastEtag) throw new Error('Could not get fresh ETag after conflict');
           }
-          const result = await aemContent.updatePage(host, input.page_path, input.updates, attempt === 0 ? input.etag : retryEtag);
+          const result = await aemContent.updatePage(host, input.page_path, input.updates, lastEtag);
 
           const orgCtx = window.__EW_ORG || {};
           const previewOrigin = orgCtx.previewOrigin || '';
