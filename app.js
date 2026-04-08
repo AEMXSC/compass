@@ -1661,7 +1661,7 @@ async function handleRealChat(text, file) {
     scrollChat();
   }
 
-  function onToolResult(toolName, resultStr) {
+  async function onToolResult(toolName, resultStr) {
     const stepEl = document.querySelector(`#tool-call-${toolCount}`);
     if (stepEl) {
       stepEl.classList.replace('active', 'done');
