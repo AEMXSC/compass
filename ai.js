@@ -1299,7 +1299,7 @@ export const TOOL_AGENT_MAP = {
   // AEM Content MCP
   get_aem_sites: 'AEM Content MCP',
   get_aem_site_pages: 'AEM Content MCP',
-  get_page_content: 'AEM Content MCP',
+  get_page_content: 'Content Reader',
   copy_aem_page: 'AEM Content MCP',
   patch_aem_page_content: 'AEM Content MCP',
   create_aem_launch: 'AEM Content MCP',
@@ -3899,9 +3899,13 @@ Use these when users ask about:
 15. For journey conflict analysis (scheduling, audience overlap), call analyze_journey_conflicts.
 16. For support tickets, call create_support_ticket to create and get_ticket_status to check updates.
 17. IMPORTANT: After creating or patching pages, ALWAYS share the Universal Editor and DA edit links in your response so the user can open and edit the page visually.
-18. **CONTENT EDITING LOOP**: Check the TOOL ROUTING section below for the correct tools. **IMPORTANT**: If "Current page HTML" is already provided in the system context below, you ALREADY have the page content — skip the read step and go straight to the write tool. This saves a round-trip and matches the Experience Workspace pattern. For **DA sites**: edit_page_content (you already have the HTML — modify it and write back). For **JCR sites**: you still need get_page_content first to get a fresh ETag, then patch_aem_page_content.
-19. When users say "edit the page", "change the headline", "update the hero" — if you already have the page HTML in context, parse it, make the requested change, and call the write tool directly. Only call get_page_content if you don't have the HTML yet or need a fresh ETag for JCR.
-20. NEVER call edit_page_content without knowing the current page content (either from context or from get_page_content). For brand new pages, generate the HTML from scratch.
+18. **CONTENT EDITING LOOP — SPEED IS CRITICAL**:
+  - **Editing existing pages (DA)**: You ALREADY have page HTML in the system context. Parse it, make the change, call edit_page_content DIRECTLY. Do NOT call get_page_content or list_site_pages first — the content is already here.
+  - **Editing existing pages (JCR)**: Call get_page_content once for a fresh ETag, then patch_aem_page_content.
+  - **Creating NEW pages**: Generate the HTML from scratch based on the user's request and the existing page as a style reference (already in context). Call edit_page_content ONCE. Do NOT list pages or read other pages first — you have the site's HTML structure in context.
+  - **NEVER make redundant calls**: If you have the content, don't re-read it. If you're creating a new page, don't list existing pages. Every extra tool call adds 2-3 seconds.
+19. **PARALLEL TOOL CALLS**: When you need multiple independent pieces of information, request all tools in a SINGLE response. The system executes them in parallel. Example: if you need both get_page_content AND search_dam_assets, return both tool_use blocks together — they'll run simultaneously instead of sequentially.
+20. **MINIMIZE TOOL CALLS**: Aim for 1 tool call for edits, 1-2 for page creation. The fastest edit is: read context → modify HTML → call edit_page_content. No list, no search, no extra reads.
 21. For documentation questions ("how do I...", "what is...", "show me docs on..."), call search_experience_league. For release notes ("what's new", "latest features"), call get_product_release_notes.
 22. For site health, performance, or SEO questions, call get_site_audit for scores and get_site_opportunities for recommendations. Use Spacecat tools BEFORE giving optimization advice.
 23. When users mention broken backlinks, 404s, or redirect chains, call get_site_audit with audit_type=broken-backlinks or get_site_opportunities with category=broken-backlinks.
