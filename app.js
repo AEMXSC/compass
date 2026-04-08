@@ -4840,8 +4840,21 @@ const editInUEBtn = document.getElementById('editInUEBtn');
 if (editInUEBtn) {
   editInUEBtn.addEventListener('click', () => {
     const path = activeResourcePath || '/';
-    const ueUrl = `https://experience.adobe.com/#/@${AEM_ORG.orgId}/aem/editor/canvas/${AEM_ORG.previewOrigin}${path}`;
-    window.open(ueUrl, '_blank');
+    const aemHost = window.__EW_AEM_HOST;
+    const siteType = window.__EW_SITE_TYPE;
+
+    if (siteType === 'aem-cs' && aemHost) {
+      // JCR/xwalk: open author-hosted Universal Editor with content path
+      // Format: https://{author-host}/ui#/@{ims-org}/aem/universal-editor/canvas/{author-host}{content-path}
+      const host = aemHost.replace(/^https?:\/\//, '');
+      const contentPath = path.startsWith('/content') ? path : `/content${path}`;
+      const ueUrl = `https://${host}/ui#/aem/universal-editor/canvas/${host}${contentPath}`;
+      window.open(ueUrl, '_blank');
+    } else {
+      // DA/EDS: open experience.adobe.com UE with preview URL
+      const ueUrl = `https://experience.adobe.com/#/@${AEM_ORG.orgId}/aem/editor/canvas/${AEM_ORG.previewOrigin}${path}`;
+      window.open(ueUrl, '_blank');
+    }
   });
 }
 
