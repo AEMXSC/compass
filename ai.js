@@ -1494,6 +1494,8 @@ function sanitizePath(p) {
   if (!clean.startsWith('/')) clean = '/' + clean;
   // Strip traversal sequences and encoded dots
   clean = clean.replace(/\.\.[\\/]/g, '').replace(/%2e/gi, '');
+  // Normalize root path: / → /index (so .html appends correctly as /index.html)
+  if (clean === '/') clean = '/index';
   return clean;
 }
 
