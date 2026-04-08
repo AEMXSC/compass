@@ -3383,17 +3383,18 @@ async function connectCustomSite(input) {
   // Use the author URL for preview, or fall back to EDS URL if it works.
   let previewOrigin = edsPreviewOrigin;
   if (parsed.jcr && parsed.aemHost) {
-    // Try EDS URL first — some xwalk sites DO have EDS delivery
+    // Probe the EDS URL — some xwalk sites DO have EDS delivery, most don't.
+    // Use cors mode so we can check resp.ok (no-cors returns opaque = always "success").
     let edsWorks = false;
     try {
-      const probe = await fetch(edsPreviewOrigin, { mode: 'no-cors' });
-      edsWorks = true;
-    } catch { /* EDS URL doesn't resolve */ }
+      const probe = await fetch(edsPreviewOrigin + '/', { mode: 'cors' });
+      edsWorks = probe.ok;
+    } catch { /* DNS failure, CORS block, etc. */ }
 
     if (!edsWorks) {
-      // Use the author URL as preview origin for JCR sites
+      // EDS preview doesn't exist — use author URL for JCR preview
       previewOrigin = `https://${parsed.aemHost}`;
-      console.log(`[EW] JCR site: EDS preview unavailable, using author URL for preview: ${previewOrigin}`);
+      console.log(`[EW] JCR site: EDS preview unavailable, using author URL: ${previewOrigin}`);
     }
   }
 
