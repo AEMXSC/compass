@@ -1494,8 +1494,6 @@ function sanitizePath(p) {
   if (!clean.startsWith('/')) clean = '/' + clean;
   // Strip traversal sequences and encoded dots
   clean = clean.replace(/\.\.[\\/]/g, '').replace(/%2e/gi, '');
-  // Normalize root path: / → /index (so .html appends correctly as /index.html)
-  if (clean === '/') clean = '/index';
   return clean;
 }
 
@@ -1858,7 +1856,8 @@ async function executeTool(name, input) {
 
     case 'edit_page_content': {
       const pagePath = sanitizePath(input.page_path);
-      const htmlPath = `${pagePath}.html`;
+      // Root path needs /index.html for DA write, but pagePath stays / for preview URLs
+      const htmlPath = (pagePath === '/' ? '/index' : pagePath) + '.html';
       const org = da.getOrg();
       const repo = da.getRepo();
       const branch = da.getBranch();
