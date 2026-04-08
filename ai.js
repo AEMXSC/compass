@@ -1294,85 +1294,122 @@ const AEM_TOOLS = [
   },
 ];
 
-/* ── Tool → Agent Name Mapping (for UI badges) ── */
+/* ── Tool → Official Adobe Agent Mapping (for UI badges) ── */
+/* Header = official agent name. Sub-tasks = individual tool calls shown underneath. */
 export const TOOL_AGENT_MAP = {
-  // AEM Content MCP
-  get_aem_sites: 'AEM Content MCP',
-  get_aem_site_pages: 'AEM Content MCP',
-  get_page_content: 'Content Reader',
-  copy_aem_page: 'AEM Content MCP',
-  patch_aem_page_content: 'AEM Content MCP',
-  create_aem_launch: 'AEM Content MCP',
-  promote_aem_launch: 'AEM Content MCP',
-  create_aem_page: 'AEM Content MCP',
-  list_aem_pages: 'AEM Content MCP',
-  delete_aem_page: 'AEM Content MCP',
-  get_content_fragment: 'AEM Content MCP',
-  create_content_fragment: 'AEM Content MCP',
-  update_content_fragment: 'AEM Content MCP',
-  // DA Editing Agent (real DA endpoints)
-  edit_page_content: 'DA Editing Agent',
-  preview_page: 'DA Editing Agent',
-  publish_page: 'DA Editing Agent',
+  // ── Experience Production Agent (content create, edit, translate, forms, modernize) ──
+  edit_page_content: 'Experience Production Agent',
+  get_page_content: 'Experience Production Agent',
+  list_site_pages: 'Experience Production Agent',
+  delete_page: 'Experience Production Agent',
+  preview_page: 'Experience Production Agent',
+  publish_page: 'Experience Production Agent',
+  extract_brief_content: 'Experience Production Agent',
+  translate_page: 'Experience Production Agent',
+  create_form: 'Experience Production Agent',
+  modernize_content: 'Experience Production Agent',
+  copy_aem_page: 'Experience Production Agent',
+  patch_aem_page_content: 'Experience Production Agent',
+  create_aem_page: 'Experience Production Agent',
+  list_aem_pages: 'Experience Production Agent',
+  delete_aem_page: 'Experience Production Agent',
+  create_aem_launch: 'Experience Production Agent',
+  promote_aem_launch: 'Experience Production Agent',
+  get_content_fragment: 'Experience Production Agent',
+  create_content_fragment: 'Experience Production Agent',
+  update_content_fragment: 'Experience Production Agent',
+
+  // ── Discovery Agent (asset search, DAM browse, collections) ──
+  search_dam_assets: 'Discovery Agent',
+  browse_dam_folder: 'Discovery Agent',
+  get_asset_metadata: 'Discovery Agent',
+  update_asset_metadata: 'Discovery Agent',
+  upload_asset: 'Discovery Agent',
+  delete_asset: 'Discovery Agent',
+  move_asset: 'Discovery Agent',
+  copy_asset: 'Discovery Agent',
+  create_dam_folder: 'Discovery Agent',
+  get_asset_renditions: 'Discovery Agent',
+  add_to_collection: 'Discovery Agent',
+
+  // ── Governance Agent (brand, compliance, content audit) ──
+  run_governance_check: 'Governance Agent',
+  get_brand_guidelines: 'Governance Agent',
+  check_asset_expiry: 'Governance Agent',
+  audit_content: 'Governance Agent',
+
+  // ── Content Optimization Agent (variations, images, renditions) ──
+  create_content_variant: 'Content Optimization Agent',
+  generate_image_variations: 'Content Optimization Agent',
+  transform_image: 'Content Optimization Agent',
+  create_image_renditions: 'Content Optimization Agent',
+
+  // ── Data Insights Agent (analytics, audiences, profiles) ──
+  get_analytics_insights: 'Data Insights Agent',
+  get_audience_segments: 'Data Insights Agent',
+  get_customer_profile: 'Data Insights Agent',
+
+  // ── Journey Agent (journeys, destinations, conflicts) ──
+  get_journey_status: 'Journey Agent',
+  analyze_journey_conflicts: 'Journey Agent',
+  list_destinations: 'Journey Agent',
+  list_destination_flow_runs: 'Journey Agent',
+  get_destination_health: 'Journey Agent',
+
+  // ── Workfront Agent (tasks, projects, approvals) ──
+  create_workfront_task: 'Workfront Agent',
+  list_workfront_projects: 'Workfront Agent',
+  get_workfront_project: 'Workfront Agent',
+  list_workfront_tasks: 'Workfront Agent',
+  update_workfront_task: 'Workfront Agent',
+  list_workfront_approvals: 'Workfront Agent',
+  ask_workfront: 'Workfront Agent',
+  get_project_health: 'Workfront Agent',
+  check_workfront_connection: 'Workfront Agent',
+
+  // ── Target Agent (A/B testing, personalization) ──
+  create_ab_test: 'Target Agent',
+  get_personalization_offers: 'Target Agent',
+  setup_experiment: 'Target Agent',
+  get_experiment_status: 'Target Agent',
+
+  // ── Development Agent (pipelines, code) ──
+  get_pipeline_status: 'Development Agent',
+  analyze_pipeline_failure: 'Development Agent',
+  sync_code: 'Development Agent',
+
+  // ── Sites Optimizer (SpaceCat — performance, SEO) ──
+  get_site_opportunities: 'Sites Optimizer',
+  get_site_audit: 'Sites Optimizer',
+
+  // ── Support Agent (tickets, docs, release notes) ──
+  create_support_ticket: 'Support Agent',
+  get_ticket_status: 'Support Agent',
+  search_experience_league: 'Support Agent',
+  get_product_release_notes: 'Support Agent',
+
+  // ── Acrobat Agent (PDF extraction) ──
+  extract_pdf_content: 'Acrobat Agent',
+
+  // ── Admin API (cache, preview, bulk ops) ──
   unpublish_preview: 'Admin API',
   unpublish_live: 'Admin API',
   purge_cache: 'Admin API',
-  sync_code: 'Admin API',
   bulk_preview: 'Admin API',
   bulk_publish: 'Admin API',
   reindex_page: 'Admin API',
   get_page_status: 'Admin API',
-  list_site_pages: 'DA Editing Agent',
-  delete_page: 'DA Editing Agent',
-  // Adobe AI Agents
-  search_dam_assets: 'Discovery Agent',
-  run_governance_check: 'Governance Agent',
-  get_audience_segments: 'Audience Agent',
-  create_content_variant: 'Content Optimization Agent',
-  get_analytics_insights: 'Data Insights Agent',
-  get_journey_status: 'Journey Agent',
-  create_workfront_task: 'Workfront WOA',
-  list_workfront_projects: 'Workfront API',
-  get_workfront_project: 'Workfront API',
-  list_workfront_tasks: 'Workfront API',
-  update_workfront_task: 'Workfront API',
-  list_workfront_approvals: 'Workfront API',
-  ask_workfront: 'Workfront WOA',
-  get_project_health: 'Workfront WOA',
-  check_workfront_connection: 'Workfront API',
-  extract_brief_content: 'Experience Production Agent',
-  // Target Agent
-  create_ab_test: 'Target Agent',
-  get_personalization_offers: 'Target Agent',
-  // AEP Real-time Profile
-  get_customer_profile: 'AEP Agent',
-  // Firefly
-  generate_image_variations: 'Firefly Agent',
-  // Development / Cloud Manager
-  get_pipeline_status: 'Development Agent',
-  analyze_pipeline_failure: 'Development Agent',
-  // Acrobat MCP
-  extract_pdf_content: 'Acrobat MCP',
-  // Experience Production Agent (extended)
-  translate_page: 'Experience Production Agent',
-  create_form: 'Experience Production Agent',
-  modernize_content: 'Experience Production Agent',
-  // Governance Agent (extended)
-  get_brand_guidelines: 'Governance Agent',
-  check_asset_expiry: 'Governance Agent',
-  audit_content: 'Governance Agent',
-  // Content Optimization Agent (extended)
-  transform_image: 'Content Optimization Agent',
-  create_image_renditions: 'Content Optimization Agent',
-  // Discovery Agent (extended)
-  add_to_collection: 'Discovery Agent',
-  // AEM Assets Direct API
-  browse_dam_folder: 'AEM Assets API',
-  get_asset_metadata: 'AEM Assets API',
-  update_asset_metadata: 'AEM Assets API',
-  upload_asset: 'AEM Assets API',
-  delete_asset: 'AEM Assets API',
-  move_asset: 'AEM Assets API',
+
+  // ── Site Management ──
+  get_aem_sites: 'Site Management',
+  get_aem_site_pages: 'Site Management',
+  switch_site: 'Site Management',
+  get_site_info: 'Site Management',
+
+  // ── Other ──
+  generate_form: 'Experience Production Agent',
+  generate_page_variations: 'Content Optimization Agent',
+  check_citation_readability: 'LLM Optimizer',
   copy_asset: 'AEM Assets API',
   create_dam_folder: 'AEM Assets API',
   get_asset_renditions: 'AEM Assets API',
