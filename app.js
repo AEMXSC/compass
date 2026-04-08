@@ -3294,7 +3294,7 @@ function parseConnectInput(input) {
   }
 
   // 4. /content/ path = JCR/UE site — auto-resolve from known sites or known AEM instances
-  //    Covers: author-p* URLs, UE editor URLs, bare /content/ paths
+  //    Covers: author-p* URLs, UE editor URLs (both experience.adobe.com and author-hosted /ui#/), bare /content/ paths
   const contentMatch = trimmed.match(/\/content\/([^/]+)/);
   const authorHostMatch = trimmed.match(/(author-p\d+-e\d+)\.adobeaemcloud\.com/);
   if (contentMatch || authorHostMatch) {
@@ -3489,7 +3489,48 @@ async function connectCustomSite(input) {
   await sleep(600);
 
   switchView('editor');
-  navigateToPage('/');
+
+  // For JCR sites where iframe can't load (X-Frame-Options), render via AEM Content MCP
+  if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
+    const contentPathMatch = input.match(/(\/content\/[^\s?#]*)/);
+    const jcrPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '/content';
+    activeResourcePath = jcrPath;
+
+    // Show placeholder while loading
+    if (previewFrame) {
+      previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
+        <div style="text-align:center"><p>Loading JCR content via AEM Content MCP...</p><p style="font-size:12px">${jcrPath}</p></div></body></html>`;
+    }
+
+    // Fetch page content from AEM Content MCP and render as srcdoc
+    (async () => {
+      try {
+        await ensureAuth();
+        const host = window.__EW_AEM_HOST;
+        if (host) {
+          const aemContentMod = await import('./aem-content-mcp-client.js');
+          const result = await aemContentMod.getPage(host, jcrPath);
+          const html = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+          if (html && previewFrame) {
+            previewFrame.srcdoc = `<!DOCTYPE html><html><head>
+              <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+              <style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;color:#333;line-height:1.6}img{max-width:100%;height:auto}h1,h2,h3{color:#1a1a1a}</style>
+            </head><body>${html}</body></html>`;
+            cachedPageHTML = html;
+            console.log('[EW] JCR preview rendered via AEM Content MCP:', jcrPath, html.length, 'chars');
+          }
+        }
+      } catch (e) {
+        console.warn('[EW] JCR preview fetch failed:', e.message);
+        if (previewFrame) {
+          previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
+            <div style="text-align:center"><p>JCR preview unavailable</p><p style="font-size:12px">Use the <strong>UE</strong> button in the toolbar to open Universal Editor</p><p style="font-size:11px;color:#555">${e.message}</p></div></body></html>`;
+        }
+      }
+    })();
+  } else {
+    navigateToPage('/');
+  }
   loadResources();
 
   // Populate branch select — real branches from GitHub API
