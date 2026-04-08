@@ -1751,8 +1751,8 @@ async function handleRealChat(text, file) {
       if (allDone) {
         const dot = group.querySelector('.tool-group-header .gen-dot');
         if (dot) dot.classList.replace('active', 'done');
-        // Auto-collapse completed agent groups after a short delay
-        setTimeout(() => { group.classList.add('collapsed'); scrollChat(); }, 800);
+        // Auto-collapse completed agent groups — give user time to see what happened
+        setTimeout(() => { group.classList.add('collapsed'); scrollChat(); }, 3000);
       }
     }
   }
