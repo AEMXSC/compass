@@ -3505,7 +3505,7 @@ async function connectCustomSite(input) {
     // Fetch page content from AEM Content MCP and render as srcdoc
     (async () => {
       try {
-        await ensureAuth();
+        if (!isSignedIn()) await signIn();
         const host = window.__EW_AEM_HOST;
         if (host) {
           const aemContentMod = await import('./aem-content-mcp-client.js');
