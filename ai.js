@@ -143,7 +143,7 @@ const AEM_TOOLS = [
           description: 'Content updates — keys are field names (hero_image, headline, body, cta_text, cta_url, metadata)',
         },
       },
-      required: ['page_path', 'updates'],
+      required: ['page_path', 'updates', 'etag'],
     },
   },
 
@@ -324,6 +324,85 @@ const AEM_TOOLS = [
         site_id: { type: 'string', description: 'Target site' },
       },
       required: ['launch_id'],
+    },
+  },
+
+  /* ─── JCR CRUD: Create, List, Delete (AEM Content MCP) ─── */
+
+  {
+    name: 'create_aem_page',
+    description: 'AEM Content MCP — Create a new JCR page from a template. Use this to create pages on AEM CS sites (not DA sites).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_path: { type: 'string', description: 'Path for the new page (e.g. /content/mysite/en/new-page)' },
+        title: { type: 'string', description: 'Page title' },
+        template: { type: 'string', description: 'Template path (e.g. /conf/mysite/settings/wcm/templates/page)' },
+      },
+      required: ['page_path', 'title'],
+    },
+  },
+  {
+    name: 'list_aem_pages',
+    description: 'AEM Content MCP — List child pages under a JCR path. Returns page titles, paths, and last-modified dates.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        parent_path: { type: 'string', description: 'Parent path to list children of (e.g. /content/mysite/en)' },
+      },
+      required: ['parent_path'],
+    },
+  },
+  {
+    name: 'delete_aem_page',
+    description: 'AEM Content MCP — Delete a JCR page. Destructive — use with caution. Consider creating a Launch first for safety.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_path: { type: 'string', description: 'Path of the page to delete' },
+      },
+      required: ['page_path'],
+    },
+  },
+
+  /* ─── Content Fragments (AEM Content MCP) ─── */
+
+  {
+    name: 'get_content_fragment',
+    description: 'AEM Content MCP — Read a Content Fragment by path. Returns fragment data, fields, and ETag for updates.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        fragment_path: { type: 'string', description: 'JCR path to the Content Fragment (e.g. /content/dam/mysite/fragments/hero-cf)' },
+      },
+      required: ['fragment_path'],
+    },
+  },
+  {
+    name: 'create_content_fragment',
+    description: 'AEM Content MCP — Create a new Content Fragment. Requires a CF model and parent folder path.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        parent_path: { type: 'string', description: 'Parent folder path (e.g. /content/dam/mysite/fragments)' },
+        title: { type: 'string', description: 'Fragment title' },
+        model: { type: 'string', description: 'CF model path (e.g. /conf/mysite/settings/dam/cfm/models/article)' },
+        data: { type: 'object', description: 'Fragment field values as key-value pairs' },
+      },
+      required: ['parent_path', 'title', 'model'],
+    },
+  },
+  {
+    name: 'update_content_fragment',
+    description: 'AEM Content MCP — Update fields on an existing Content Fragment. Include etag from get_content_fragment to avoid conflicts.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        fragment_path: { type: 'string', description: 'JCR path to the Content Fragment' },
+        data: { type: 'object', description: 'Field updates as key-value pairs' },
+        etag: { type: 'string', description: 'ETag from get_content_fragment — required for conflict prevention' },
+      },
+      required: ['fragment_path', 'data', 'etag'],
     },
   },
 
@@ -1224,6 +1303,12 @@ export const TOOL_AGENT_MAP = {
   patch_aem_page_content: 'AEM Content MCP',
   create_aem_launch: 'AEM Content MCP',
   promote_aem_launch: 'AEM Content MCP',
+  create_aem_page: 'AEM Content MCP',
+  list_aem_pages: 'AEM Content MCP',
+  delete_aem_page: 'AEM Content MCP',
+  get_content_fragment: 'AEM Content MCP',
+  create_content_fragment: 'AEM Content MCP',
+  update_content_fragment: 'AEM Content MCP',
   // DA Editing Agent (real DA endpoints)
   edit_page_content: 'DA Editing Agent',
   preview_page: 'DA Editing Agent',
@@ -1328,6 +1413,8 @@ const DA_ONLY_TOOLS = new Set([
 
 const JCR_ONLY_TOOLS = new Set([
   'patch_aem_page_content', 'copy_aem_page', 'create_aem_launch', 'promote_aem_launch',
+  'create_aem_page', 'list_aem_pages', 'delete_aem_page',
+  'get_content_fragment', 'create_content_fragment', 'update_content_fragment',
 ]);
 
 function getToolsForSiteType() {
@@ -1503,20 +1590,25 @@ async function executeTool(name, input) {
       }
 
       // ── Fallback: .plain.html fetch from CDN ──
+      // WARNING: CDN ETags are NOT JCR ETags. Never return them for JCR sites —
+      // passing a CDN ETag to patch_aem_page_content will cause 412 errors.
       const plainUrl = pageUrl.endsWith('.plain.html') ? pageUrl : pageUrl.replace(/\/?$/, '.plain.html');
       try {
         const resp = await fetch(plainUrl);
         if (resp.ok) {
           const html = await resp.text();
-          const etag = resp.headers.get('etag') || null;
+          const isJcrSite = currentSiteType === 'aem-cs';
+          const etag = isJcrSite ? null : (resp.headers.get('etag') || null);
           const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
           return JSON.stringify({
             url: pageUrl,
-            source: 'aem.page',
+            source: 'aem.page (CDN fallback)',
             etag,
             content_length: html.length,
             html: content,
-            hint: etag ? 'Use patch_aem_page_content with the etag to make changes.' : 'Read-only: no ETag available. Sign in with Adobe IMS for write access.',
+            hint: isJcrSite
+              ? 'CDN fallback — no JCR ETag available. Sign in with Adobe IMS and retry to get a valid ETag for patching.'
+              : (etag ? 'Use edit_page_content to make changes.' : 'Read-only: sign in for write access.'),
           }, null, 2);
         }
         return JSON.stringify({ error: `HTTP ${resp.status} fetching ${plainUrl}` });
@@ -1554,32 +1646,50 @@ async function executeTool(name, input) {
     case 'patch_aem_page_content': {
       if (!(await ensureAuth())) return authRequiredError('patch_aem_page_content');
       const fields = Object.keys(input.updates || {});
-      try {
-        const host = window.__EW_AEM_HOST || null;
-        const result = await aemContent.updatePage(host, input.page_path, input.updates, input.etag);
+      const host = window.__EW_AEM_HOST || null;
 
-        // Construct UE edit URL and preview URL
-        const orgCtx = window.__EW_ORG || {};
-        const previewOrigin = orgCtx.previewOrigin || '';
-        const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.page_path}` : null;
-        const previewUrl = previewOrigin ? `${previewOrigin}${input.page_path}` : null;
+      // Try patch — on 412 conflict (stale ETag), auto-retry with fresh ETag
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const etag = attempt === 0 ? input.etag : null;
+          if (attempt > 0) {
+            // Re-read page to get fresh ETag
+            console.log(`[patch] ETag conflict — re-reading page for fresh ETag (attempt ${attempt + 1})`);
+            const freshPage = await aemContent.getPage(host, input.page_path);
+            const freshEtag = freshPage?.etag;
+            if (!freshEtag) throw new Error('Could not get fresh ETag after conflict');
+            var retryEtag = freshEtag;
+          }
+          const result = await aemContent.updatePage(host, input.page_path, input.updates, attempt === 0 ? input.etag : retryEtag);
 
-        return JSON.stringify({
-          status: 'updated',
-          ...result,
-          page_path: input.page_path,
-          updated_fields: fields,
-          edit_urls: { universal_editor: ueUrl },
-          preview_url: previewUrl,
-          message: `Updated ${fields.length} field(s) on ${input.page_path}`,
-          _source: 'connected',
-          source: 'AEM Content MCP',
-          _action: 'refresh_preview',
-          _preview_path: input.page_path,
-        }, null, 2);
-      } catch (err) {
-        return mcpError('patch_aem_page_content', err);
+          const orgCtx = window.__EW_ORG || {};
+          const previewOrigin = orgCtx.previewOrigin || '';
+          const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.page_path}` : null;
+          const previewUrl = previewOrigin ? `${previewOrigin}${input.page_path}` : null;
+
+          return JSON.stringify({
+            status: 'updated',
+            ...result,
+            page_path: input.page_path,
+            updated_fields: fields,
+            edit_urls: { universal_editor: ueUrl },
+            preview_url: previewUrl,
+            retried: attempt > 0,
+            message: `Updated ${fields.length} field(s) on ${input.page_path}${attempt > 0 ? ' (retried with fresh ETag)' : ''}`,
+            _source: 'connected',
+            source: 'AEM Content MCP',
+            _action: 'refresh_preview',
+            _preview_path: input.page_path,
+          }, null, 2);
+        } catch (err) {
+          // Retry on 412 Precondition Failed (stale ETag)
+          if (attempt === 0 && (err.message?.includes('412') || err.message?.includes('conflict') || err.message?.includes('Precondition'))) {
+            continue;
+          }
+          return mcpError('patch_aem_page_content', err);
+        }
       }
+      return mcpError('patch_aem_page_content', new Error('Patch failed after retry'));
     }
 
     case 'create_aem_launch': {
@@ -1618,6 +1728,128 @@ async function executeTool(name, input) {
         }, null, 2);
       } catch (err) {
         return mcpError('promote_aem_launch', err);
+      }
+    }
+
+    /* ─── JCR CRUD: Create, List, Delete ─── */
+
+    case 'create_aem_page': {
+      if (!(await ensureAuth())) return authRequiredError('create_aem_page');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await aemContent.createPage(host, input.page_path, input.title, input.template);
+        const orgCtx = window.__EW_ORG || {};
+        const previewOrigin = orgCtx.previewOrigin || '';
+        const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.page_path}` : null;
+        return JSON.stringify({
+          status: 'created',
+          ...result,
+          page_path: input.page_path,
+          title: input.title,
+          edit_urls: { universal_editor: ueUrl },
+          preview_url: previewOrigin ? `${previewOrigin}${input.page_path}` : null,
+          message: `Page created at ${input.page_path}`,
+          _source: 'connected',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('create_aem_page', err);
+      }
+    }
+
+    case 'list_aem_pages': {
+      if (!(await ensureAuth())) return authRequiredError('list_aem_pages');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await aemContent.listPages(host, input.parent_path);
+        return JSON.stringify({
+          status: 'success',
+          parent_path: input.parent_path,
+          pages: Array.isArray(result) ? result : (result?.pages || []),
+          count: Array.isArray(result) ? result.length : (result?.pages?.length || 0),
+          _source: 'connected',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('list_aem_pages', err);
+      }
+    }
+
+    case 'delete_aem_page': {
+      if (!(await ensureAuth())) return authRequiredError('delete_aem_page');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await aemContent.deletePage(host, input.page_path);
+        return JSON.stringify({
+          status: 'deleted',
+          ...result,
+          page_path: input.page_path,
+          message: `Page ${input.page_path} deleted`,
+          _source: 'connected',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('delete_aem_page', err);
+      }
+    }
+
+    /* ─── Content Fragments (AEM Content MCP) ─── */
+
+    case 'get_content_fragment': {
+      if (!(await ensureAuth())) return authRequiredError('get_content_fragment');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await aemContent.getFragment(host, input.fragment_path);
+        return JSON.stringify({
+          status: 'success',
+          ...result,
+          fragment_path: input.fragment_path,
+          etag: result?.etag || null,
+          hint: 'Use update_content_fragment with the etag to modify this fragment.',
+          _source: 'connected',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('get_content_fragment', err);
+      }
+    }
+
+    case 'create_content_fragment': {
+      if (!(await ensureAuth())) return authRequiredError('create_content_fragment');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await aemContent.createFragment(host, input.parent_path, input.title, input.model, input.data || {});
+        return JSON.stringify({
+          status: 'created',
+          ...result,
+          parent_path: input.parent_path,
+          title: input.title,
+          model: input.model,
+          message: `Content Fragment "${input.title}" created at ${input.parent_path}`,
+          _source: 'connected',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('create_content_fragment', err);
+      }
+    }
+
+    case 'update_content_fragment': {
+      if (!(await ensureAuth())) return authRequiredError('update_content_fragment');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const result = await aemContent.updateFragment(host, input.fragment_path, input.data, input.etag);
+        return JSON.stringify({
+          status: 'updated',
+          ...result,
+          fragment_path: input.fragment_path,
+          updated_fields: Object.keys(input.data || {}),
+          message: `Content Fragment at ${input.fragment_path} updated`,
+          _source: 'connected',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('update_content_fragment', err);
       }
     }
 
@@ -3923,10 +4155,23 @@ ${context.pageHTML.slice(0, 15000)}
     if (isJcr && aemHost) {
       toolRouting = `### TOOL ROUTING (MANDATORY)
 This is an **AEM CS (JCR)** site. You MUST use these tools:
-- Read pages: \`get_page_content\` (returns JCR page content with ETag)
-- Write pages: \`patch_aem_page_content\` (always call get_page_content first for a fresh ETag)
-- List pages: \`get_aem_site_pages\`
-- Copy pages: \`copy_aem_page\`
+
+**Pages:**
+- Read: \`get_page_content\` (returns JCR content with ETag)
+- Create: \`create_aem_page\` (from template)
+- Update: \`patch_aem_page_content\` (requires ETag — call get_page_content first)
+- List: \`list_aem_pages\` (list children of a path)
+- Copy: \`copy_aem_page\`
+- Delete: \`delete_aem_page\`
+
+**Content Fragments:**
+- Read: \`get_content_fragment\` (returns fragment data with ETag)
+- Create: \`create_content_fragment\` (requires CF model path)
+- Update: \`update_content_fragment\` (requires ETag)
+
+**Launches:**
+- Create: \`create_aem_launch\`
+- Promote: \`promote_aem_launch\`
 
 **DO NOT** use DA tools (edit_page_content, preview_page, list_site_pages) — they are not available for this site.`;
     } else if (isDa) {
