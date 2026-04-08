@@ -3377,7 +3377,25 @@ async function connectCustomSite(input) {
     } catch { /* fallback to main */ }
   }
 
-  const previewOrigin = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
+  const edsPreviewOrigin = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
+
+  // For JCR sites, the .aem.page URL may not resolve (xwalk sites use different delivery).
+  // Use the author URL for preview, or fall back to EDS URL if it works.
+  let previewOrigin = edsPreviewOrigin;
+  if (parsed.jcr && parsed.aemHost) {
+    // Try EDS URL first — some xwalk sites DO have EDS delivery
+    let edsWorks = false;
+    try {
+      const probe = await fetch(edsPreviewOrigin, { mode: 'no-cors' });
+      edsWorks = true;
+    } catch { /* EDS URL doesn't resolve */ }
+
+    if (!edsWorks) {
+      // Use the author URL as preview origin for JCR sites
+      previewOrigin = `https://${parsed.aemHost}`;
+      console.log(`[EW] JCR site: EDS preview unavailable, using author URL for preview: ${previewOrigin}`);
+    }
+  }
 
   // Show loading state (if home view elements exist)
   if (statusEl) {
@@ -3390,8 +3408,7 @@ async function connectCustomSite(input) {
     btn.innerHTML = '<svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> Connecting...';
   }
 
-  // For JCR sites, skip preview URL validation — the .aem.page URL may not resolve
-  // (xwalk sites use different GitHub orgs for EDS delivery)
+  // For non-JCR sites, validate the EDS preview URL
   if (!parsed.jcr) {
     try {
       await fetch(previewOrigin, { mode: 'no-cors' });
@@ -3414,7 +3431,15 @@ async function connectCustomSite(input) {
     daOrg: org,
     daRepo: repo,
   };
-  PREVIEW_URL = previewOrigin + '/';
+  // For JCR author URLs, include the content path; for EDS, just root
+  if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
+    // Extract content path from original input (e.g. /content/wknd-universal/language-masters/en)
+    const contentPathMatch = input.match(/(\/content\/[^\s?#]*)/);
+    const contentPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '';
+    PREVIEW_URL = previewOrigin + (contentPath || '/');
+  } else {
+    PREVIEW_URL = previewOrigin + '/';
+  }
   customSiteConnected = true;
   window.__EW_ORG = AEM_ORG;
 
