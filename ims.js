@@ -1,26 +1,38 @@
 /*
- * IMS Authentication Module — S2S via CF Worker
+ * IMS Authentication Module — Dual Auth (imslib + S2S fallback)
  *
- * Sign-in flow:
- *   1. User clicks Sign In
- *   2. Compass calls CF Worker /auth
- *   3. Worker generates S2S token via client_credentials
- *   4. Compass stores token → signed in
+ * Priority 1: Adobe imslib.min.js (user-level IMS — works with AEM Content MCP)
+ * Priority 2: S2S via CF Worker (service account — works with DA Admin API)
  *
- * No redirects, no popups, no bookmarklets. One click.
+ * imslib gives real user identity, org switching, and full AEM API access.
+ * S2S is the fallback for demo environments where imslib redirect fails.
  */
 
+const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
 const IMS_WORKER = localStorage.getItem('ew-ims-proxy')
   || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+const IMS_CLIENT_ID = 'darkalley';
+const IMS_SCOPE = 'AdobeID,openid,gnav,read_organizations,additional_info.projectedProductContext,account_cluster.read';
+const IMS_TIMEOUT = 5000;
 
 const PROFILE_STORAGE_KEY = 'ew-ims-profile';
+const TOKEN_KEY = 'ew-ims-token';
+const EXPIRY_KEY = 'ew-ims-expiry';
 
 let profile = null;
+let imsLibLoaded = false;   // true if imslib initialized successfully
+let authMethod = 'none';    // 'imslib' | 's2s' | 'none'
 
 /* ─── Token access ─── */
 
 export function getToken() {
-  return localStorage.getItem('ew-ims-token') || null;
+  // imslib manages its own token — prefer it
+  if (imsLibLoaded && window.adobeIMS) {
+    const t = window.adobeIMS.getAccessToken();
+    if (t?.token) return t.token;
+  }
+  // Fallback to localStorage (S2S or relay token)
+  return localStorage.getItem(TOKEN_KEY) || null;
 }
 
 export function getProfile() {
@@ -33,41 +45,108 @@ export function getProfile() {
 }
 
 export function isSignedIn() { return !!getToken(); }
+export function getAuthMethod() { return authMethod; }
 
-/* ─── Sign in (one call to Worker) ─── */
+/* ─── imslib loader ─── */
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`head > script[src="${src}"]`)) { resolve(); return; }
+    const script = document.createElement('script');
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.append(script);
+  });
+}
+
+async function tryImsLib() {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      console.warn('[IMS] imslib timeout — falling back to S2S');
+      resolve(false);
+    }, IMS_TIMEOUT);
+
+    window.adobeid = {
+      client_id: IMS_CLIENT_ID,
+      scope: IMS_SCOPE,
+      locale: 'en_US',
+      autoValidateToken: true,
+      environment: 'prod',
+      useLocalStorage: true,
+      onReady: () => {
+        clearTimeout(timeout);
+        imsLibLoaded = true;
+        const accessToken = window.adobeIMS.getAccessToken();
+        if (accessToken?.token) {
+          authMethod = 'imslib';
+          console.log('[IMS] imslib: signed in with user-level token');
+          // Fetch profile
+          window.adobeIMS.getProfile().then((p) => {
+            if (p) {
+              profile = {
+                displayName: p.name || p.displayName || '',
+                email: p.email || '',
+                firstName: p.first_name || (p.name || '').split(' ')[0] || '',
+                lastName: p.last_name || (p.name || '').split(' ').slice(1).join(' ') || '',
+                userId: p.userId || '',
+                avatar: '',
+              };
+              localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+            }
+          }).catch(() => {});
+          resolve(true);
+        } else {
+          console.log('[IMS] imslib: loaded but no token (user not signed in)');
+          resolve(false);
+        }
+      },
+      onError: (e) => {
+        clearTimeout(timeout);
+        console.warn('[IMS] imslib error:', e);
+        resolve(false);
+      },
+    };
+
+    loadScript(IMS_LIB_URL).catch(() => {
+      clearTimeout(timeout);
+      console.warn('[IMS] imslib script failed to load');
+      resolve(false);
+    });
+  });
+}
+
+/* ─── Sign in ─── */
 
 export async function signIn() {
-  console.log('[IMS] Requesting S2S token from Worker...');
+  // Try imslib first (user-level auth)
+  if (imsLibLoaded && window.adobeIMS) {
+    console.log('[IMS] Signing in via imslib (redirect)...');
+    window.adobeIMS.signIn();
+    return true; // redirect happens — page will reload
+  }
 
+  // Fallback: S2S via CF Worker
+  console.log('[IMS] Signing in via S2S Worker...');
   try {
-    const resp = await fetch(`${IMS_WORKER}/auth`, {
-      credentials: 'omit',
-    });
-
+    const resp = await fetch(`${IMS_WORKER}/auth`, { credentials: 'omit' });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ error: resp.statusText }));
-      console.error('[IMS] Auth failed:', err);
       throw new Error(err.error || 'Auth request failed');
     }
-
     const data = await resp.json();
+    if (!data.access_token) throw new Error('No access token received');
 
-    if (!data.access_token) {
-      console.error('[IMS] No access_token in response');
-      throw new Error('No access token received');
-    }
-
-    localStorage.setItem('ew-ims-token', data.access_token);
+    localStorage.setItem(TOKEN_KEY, data.access_token);
     localStorage.setItem('ew-ims', 'true');
-    if (data.expires_at) {
-      localStorage.setItem('ew-ims-expiry', String(data.expires_at));
-    }
+    if (data.expires_at) localStorage.setItem(EXPIRY_KEY, String(data.expires_at));
 
-    console.log('[IMS] S2S token received, signed in');
+    authMethod = 's2s';
+    console.log('[IMS] S2S token received');
     window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
     return true;
   } catch (err) {
-    console.error('[IMS] Sign-in error:', err);
+    console.error('[IMS] Sign-in failed:', err.message);
     return false;
   }
 }
@@ -75,19 +154,25 @@ export async function signIn() {
 /* ─── Sign out ─── */
 
 export function signOut() {
-  localStorage.removeItem('ew-ims-token');
+  if (imsLibLoaded && window.adobeIMS) {
+    window.adobeIMS.signOut();
+  }
+  localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem('ew-ims');
-  localStorage.removeItem('ew-ims-expiry');
+  localStorage.removeItem(EXPIRY_KEY);
   localStorage.removeItem(PROFILE_STORAGE_KEY);
   profile = null;
+  authMethod = 'none';
   window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: false } }));
 }
 
 /* ─── Profile ─── */
 
 export async function fetchUserProfile() {
-  // S2S tokens are service accounts — no user profile.
-  // Use GitHub identity instead if available.
+  // If imslib gave us a profile, use it
+  if (profile?.displayName) return profile;
+
+  // Fallback: GitHub identity
   const ghToken = localStorage.getItem('ew-github-token');
   if (ghToken) {
     try {
@@ -105,12 +190,10 @@ export async function fetchUserProfile() {
           avatar: gh.avatar_url || '',
         };
         localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-        console.log('[IMS] Profile loaded from GitHub:', profile.displayName);
         return profile;
       }
     } catch { /* fall through */ }
   }
-
   return profile;
 }
 
@@ -129,8 +212,9 @@ function handleRelayMessage(event) {
   if (!trustedOrigins.includes(event.origin)) return;
   const { token } = event.data;
   if (!token) return;
-  localStorage.setItem('ew-ims-token', token);
+  localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem('ew-ims', 'true');
+  authMethod = 'relay';
   window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
 }
 window.addEventListener('message', handleRelayMessage);
@@ -160,41 +244,46 @@ export async function handlePkceCallback() { return false; }
 /* ─── Init ─── */
 
 export async function loadIms() {
-  // Check for token in hash (legacy BFF callback compat)
+  // Check for token in hash (imslib redirect callback)
   const hash = window.location.hash;
   if (hash.includes('access_token=')) {
     const tokenParams = new URLSearchParams(hash.slice(1));
     const token = tokenParams.get('access_token');
     if (token) {
-      localStorage.setItem('ew-ims-token', token);
+      localStorage.setItem(TOKEN_KEY, token);
       localStorage.setItem('ew-ims', 'true');
+      authMethod = 'redirect';
       history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }
-
-  // Clean error params
   if (hash.includes('error=')) {
     const errorParams = new URLSearchParams(hash.slice(1));
     console.error(`[IMS] Auth error: ${errorParams.get('error')}`);
     history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 
-  // Auto-refresh if token is expired (non-blocking — UI updates via ew-auth-change event)
-  const expiry = Number(localStorage.getItem('ew-ims-expiry') || 0);
-  if (isSignedIn() && expiry && Date.now() > expiry - 300000) {
-    console.log('[IMS] Token expired or expiring — refreshing in background...');
-    signIn().catch(() => {
-      console.warn('[IMS] Background token refresh failed — user may need to re-sign in');
-      window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: false } }));
-    });
+  // Try imslib first (non-blocking — user-level auth)
+  const imsOk = await tryImsLib();
+
+  // If imslib didn't yield a token, try S2S auto-refresh
+  if (!imsOk) {
+    const expiry = Number(localStorage.getItem(EXPIRY_KEY) || 0);
+    if (isSignedIn() && expiry && Date.now() > expiry - 300000) {
+      console.log('[IMS] S2S token expired — refreshing...');
+      await signIn();
+    } else if (!isSignedIn()) {
+      // Auto-sign-in with S2S for seamless demo experience
+      console.log('[IMS] No token — auto-signing in via S2S...');
+      await signIn();
+    }
   }
 
   if (isSignedIn()) {
-    console.log('[IMS] Signed in');
+    console.log(`[IMS] Ready: method=${authMethod}`);
     window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
   }
 
-  return { anonymous: !isSignedIn() };
+  return { anonymous: !isSignedIn(), method: authMethod };
 }
 
 export async function fetchWithToken(url, opts = {}) {
