@@ -1292,6 +1292,21 @@ const AEM_TOOLS = [
       },
     },
   },
+
+  /* ─── Web Fetch (general-purpose URL fetcher) ─── */
+
+  {
+    name: 'fetch_url',
+    description: 'Fetch any public URL and return the content. Use this to look up information from the web — LinkedIn profiles, company pages, documentation, image URLs, API endpoints, or any public resource. Returns HTML (cleaned text), JSON, or raw content depending on the URL. Useful when you need to find real data (headshots, logos, content) from external sources.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The URL to fetch' },
+        extract_text: { type: 'boolean', description: 'If true, strips HTML tags and returns clean text. Default: true for HTML pages.' },
+      },
+      required: ['url'],
+    },
+  },
 ];
 
 /* ── Tool → Official Adobe Agent Mapping (for UI badges) ── */
@@ -1437,6 +1452,8 @@ export const TOOL_AGENT_MAP = {
   get_destination_health: 'Destinations MCP',
   // LLM Optimizer
   check_citation_readability: 'LLM Optimizer',
+  // Web Fetch
+  fetch_url: 'Web Research',
 };
 
 /* ── Site-Type-Aware Tool Filtering ── */
@@ -3747,6 +3764,38 @@ async function executeTool(name, input) {
         }, null, 2);
       } catch (e) {
         return JSON.stringify({ error: `Analysis failed: ${e.message}`, _source: 'connected' });
+      }
+    }
+
+    case 'fetch_url': {
+      if (!input.url) return JSON.stringify({ error: 'URL is required' });
+      try {
+        const resp = await fetch(input.url, {
+          headers: { 'User-Agent': 'Compass/1.0 (Adobe XSC)' },
+        });
+        if (!resp.ok) return JSON.stringify({ error: `HTTP ${resp.status}`, url: input.url });
+        const contentType = resp.headers.get('content-type') || '';
+        let body;
+        if (contentType.includes('json')) {
+          body = await resp.json();
+          return JSON.stringify({ url: input.url, type: 'json', data: body }, null, 2);
+        }
+        const text = await resp.text();
+        const extractText = input.extract_text !== false;
+        if (extractText && contentType.includes('html')) {
+          // Strip HTML tags, scripts, styles — return clean text
+          const clean = text
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 15000);
+          return JSON.stringify({ url: input.url, type: 'text', content_length: clean.length, content: clean }, null, 2);
+        }
+        return JSON.stringify({ url: input.url, type: contentType, content_length: text.length, content: text.slice(0, 15000) }, null, 2);
+      } catch (e) {
+        return JSON.stringify({ error: `Fetch failed: ${e.message}`, url: input.url });
       }
     }
 
