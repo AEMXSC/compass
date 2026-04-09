@@ -1,2 +1,4 @@
 mountpoints:
-  /: https://content.da.live/aemxsc/compass
+  /:
+    url: https://content.da.live/AEMXSC/compass
+    type: markup
