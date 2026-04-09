@@ -3740,7 +3740,17 @@ async function executeTool(name, input) {
       } catch { /* cross-origin */ }
 
       try {
-        const result = await checkCitationReadability(pageUrl, renderedHTML);
+        // Build a fetch helper that uses DA Admin API (avoids CORS from github.io)
+        const fetchHTML = async (fetchUrl) => {
+          if (da.getOrg() && da.getRepo()) {
+            const u = new URL(fetchUrl);
+            const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
+            const html = await da.getPage(`${path}.html`);
+            if (typeof html === 'string' && html.length > 0) return html;
+          }
+          return '';
+        };
+        const result = await checkCitationReadability(pageUrl, renderedHTML, { fetchHTML });
         const formatted = formatResultForChat(result);
 
         // Store report HTML for "View Details" button

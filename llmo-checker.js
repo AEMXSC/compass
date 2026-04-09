@@ -82,7 +82,7 @@ function calculateOverlap(agentText, humanText) {
  * @param {string} [renderedHTML] - Pre-fetched rendered HTML (from iframe). If not provided, only agent view is analyzed.
  * @returns {Promise<object>} Analysis result with score, views, and recommendations
  */
-export async function checkCitationReadability(url, renderedHTML) {
+export async function checkCitationReadability(url, renderedHTML, { fetchHTML } = {}) {
   await ensureTurndown();
 
   const result = {
@@ -99,25 +99,37 @@ export async function checkCitationReadability(url, renderedHTML) {
 
   /* ── Step 1: Fetch as AI crawler (agent view) ── */
   let agentHTML = '';
-  try {
-    // For AEM EDS pages, .plain.html gives the pure server content
-    const isAEMPage = /\.(aem\.(page|live)|hlx\.(page|live))/.test(url);
-    const fetchUrl = isAEMPage
-      ? url.replace(/\/?(\?.*)?$/, '.plain.html$1')
-      : url;
+  const isAEMPage = /\.(aem\.(page|live)|hlx\.(page|live))/.test(url);
+  result.isEDS = isAEMPage;
 
-    result.isEDS = isAEMPage;
-
-    const resp = await fetch(fetchUrl, {
-      headers: { Accept: 'text/html' },
-    });
-
-    if (resp.ok) {
-      agentHTML = await resp.text();
-      result.agentView.available = true;
+  // Try custom fetch function first (e.g. DA Admin API — no CORS issues)
+  if (fetchHTML) {
+    try {
+      agentHTML = await fetchHTML(url) || '';
+      if (agentHTML) result.agentView.available = true;
+    } catch (e) {
+      console.warn('[LLMO] Custom fetch failed, trying direct:', e.message);
     }
-  } catch (e) {
-    result.agentView.error = `Fetch failed: ${e.message}`;
+  }
+
+  // Fallback: direct fetch via .plain.html
+  if (!agentHTML) {
+    try {
+      const fetchUrl = isAEMPage
+        ? url.replace(/\/?(\?.*)?$/, '.plain.html$1')
+        : url;
+
+      const resp = await fetch(fetchUrl, {
+        headers: { Accept: 'text/html' },
+      });
+
+      if (resp.ok) {
+        agentHTML = await resp.text();
+        result.agentView.available = true;
+      }
+    } catch (e) {
+      result.agentView.error = `Fetch failed: ${e.message}`;
+    }
   }
 
   /* ── Step 2: Process agent view ── */
