@@ -3547,10 +3547,32 @@ async function connectCustomSite(input) {
             }
           }
 
+          // If no CSS was inlined, add a clean fallback stylesheet
+          if (!html.includes('/* /content/')) {
+            const fallbackCss = `<style>
+              :root{--color-brand:#1473e6;--color-bg:#fff;--color-text:#2c2c2c;--font-sans:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+              *{margin:0;padding:0;box-sizing:border-box}
+              body{font-family:var(--font-sans);color:var(--color-text);background:var(--color-bg);line-height:1.6}
+              main{max-width:1200px;margin:0 auto}
+              img{max-width:100%;height:auto;display:block}
+              h1,h2,h3,h4,h5,h6{margin:0.5em 0;line-height:1.2}
+              h1{font-size:2.5rem} h2{font-size:2rem} h3{font-size:1.5rem}
+              p{margin:0.5em 0}
+              a{color:var(--color-brand);text-decoration:none}
+              a:hover{text-decoration:underline}
+              section,div>div{padding:1rem 2rem}
+              [class]{display:block}
+              nav,header,footer{padding:1rem 2rem;background:#f5f5f5}
+            </style>`;
+            html = html.replace(/<head>/, `<head>${fallbackCss}`);
+          }
+
           // <base> for images (publish tier serves images without auth)
           html = html.replace(/<head>/, `<head><base href="${publishBase}/">`);
-          // Strip scripts (won't work in srcdoc null-origin)
+          // Strip scripts and UE instrumentation (won't work in srcdoc null-origin)
           html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+          // Strip raw section metadata divs that show as text (xwalk component properties)
+          html = html.replace(/<div[^>]*data-aue-type="container"[^>]*>[\s\S]*?<\/div>/gi, '');
 
           if (previewFrame) {
             previewFrame.srcdoc = html;
