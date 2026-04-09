@@ -3497,6 +3497,10 @@ async function connectCustomSite(input) {
     const jcrPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '/content';
     activeResourcePath = jcrPath;
 
+    // Update preview URL bar
+    if (previewUrlText) previewUrlText.textContent = `${parsed.aemHost}${jcrPath}`;
+    if (previewDot) previewDot.classList.add('connected');
+
     // Show loading state
     if (previewFrame) {
       previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
@@ -3514,12 +3518,29 @@ async function connectCustomSite(input) {
         const resp = await fetch(pageUrl);
         if (resp.ok) {
           let html = await resp.text();
-          // Inject <base> so relative URLs (images, CSS, JS) resolve to the publish tier
-          const baseTag = `<base href="https://${publishHost}/">`;
-          html = html.replace(/<head>/, `<head>${baseTag}`);
-          // Remove X-Frame-Options meta if present, and UE instrumentation scripts
-          html = html.replace(/<script[^>]*universal-editor[^>]*>[\s\S]*?<\/script>/gi, '');
-          html = html.replace(/<script[^>]*editor-support[^>]*>[\s\S]*?<\/script>/gi, '');
+          const publishBase = `https://${publishHost}`;
+
+          // Inline CSS — srcdoc has null origin so <link> stylesheets are CORS-blocked.
+          // Fetch each stylesheet and replace <link> with inline <style>.
+          const cssLinks = [...html.matchAll(/<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*\/?>/gi)];
+          for (const match of cssLinks) {
+            const cssHref = match[1].startsWith('http') ? match[1] : `${publishBase}${match[1]}`;
+            try {
+              const cssResp = await fetch(cssHref);
+              if (cssResp.ok) {
+                let css = await cssResp.text();
+                // Fix relative url() references in CSS to point to publish host
+                css = css.replace(/url\(["']?\//g, `url("${publishBase}/`);
+                html = html.replace(match[0], `<style>/* ${match[1]} */\n${css}</style>`);
+                console.log(`[EW] Inlined CSS: ${match[1]} (${css.length} chars)`);
+              }
+            } catch { /* skip failed CSS */ }
+          }
+
+          // Inject <base> for remaining relative URLs (images)
+          html = html.replace(/<head>/, `<head><base href="${publishBase}/">`);
+          // Remove scripts (won't execute in null-origin srcdoc anyway)
+          html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 
           if (previewFrame) {
             previewFrame.srcdoc = html;
