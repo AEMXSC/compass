@@ -3507,45 +3507,55 @@ async function connectCustomSite(input) {
         <div style="text-align:center"><p>Loading JCR page preview...</p><p style="font-size:12px">${jcrPath}</p></div></body></html>`;
     }
 
-    // Fetch fully rendered HTML from AEM publish tier and render as srcdoc
+    // Fetch rendered HTML from publish tier, CSS from author tier (with auth)
     (async () => {
-      const authorHost = parsed.aemHost; // e.g. author-p153659-e1614585.adobeaemcloud.com
+      const authorHost = parsed.aemHost;
       const publishHost = authorHost.replace('author-', 'publish-');
+      const authorBase = `https://${authorHost}`;
+      const publishBase = `https://${publishHost}`;
       const pageUrl = `https://${publishHost}${jcrPath}.html`;
 
       try {
-        console.log(`[EW] JCR preview: fetching from publish tier: ${pageUrl}`);
+        console.log(`[EW] JCR preview: fetching HTML from publish: ${pageUrl}`);
         const resp = await fetch(pageUrl);
         if (resp.ok) {
           let html = await resp.text();
-          const publishBase = `https://${publishHost}`;
 
-          // Inline CSS — srcdoc has null origin so <link> stylesheets are CORS-blocked.
-          // Fetch each stylesheet and replace <link> with inline <style>.
+          // CSS: .resource/ paths only work on the author tier (404 on publish).
+          // Fetch CSS from author with IMS Bearer token, then inline as <style>.
+          if (!isSignedIn()) await signIn();
+          const token = getToken();
           const cssLinks = [...html.matchAll(/<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*\/?>/gi)];
           for (const match of cssLinks) {
-            const cssHref = match[1].startsWith('http') ? match[1] : `${publishBase}${match[1]}`;
+            // Resolve relative href to author host (where .resource/ paths work)
+            const cssHref = match[1].startsWith('http') ? match[1] : `${authorBase}${match[1]}`;
             try {
-              const cssResp = await fetch(cssHref);
+              const cssResp = await fetch(cssHref, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              });
               if (cssResp.ok) {
                 let css = await cssResp.text();
-                // Fix relative url() references in CSS to point to publish host
-                css = css.replace(/url\(["']?\//g, `url("${publishBase}/`);
+                // Fix relative url() references to point to author host
+                css = css.replace(/url\(\s*["']?\//g, `url("${authorBase}/`);
                 html = html.replace(match[0], `<style>/* ${match[1]} */\n${css}</style>`);
-                console.log(`[EW] Inlined CSS: ${match[1]} (${css.length} chars)`);
+                console.log(`[EW] Inlined CSS from author: ${match[1]} (${css.length} chars)`);
+              } else {
+                console.warn(`[EW] CSS fetch ${cssResp.status}: ${cssHref}`);
               }
-            } catch { /* skip failed CSS */ }
+            } catch (cssErr) {
+              console.warn(`[EW] CSS fetch failed: ${cssErr.message}`);
+            }
           }
 
-          // Inject <base> for remaining relative URLs (images)
+          // <base> for images (publish tier serves images without auth)
           html = html.replace(/<head>/, `<head><base href="${publishBase}/">`);
-          // Remove scripts (won't execute in null-origin srcdoc anyway)
+          // Strip scripts (won't work in srcdoc null-origin)
           html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 
           if (previewFrame) {
             previewFrame.srcdoc = html;
             cachedPageHTML = html;
-            console.log(`[EW] JCR preview rendered from publish tier: ${jcrPath} (${html.length} chars)`);
+            console.log(`[EW] JCR preview rendered: ${jcrPath} (${html.length} chars)`);
           }
         } else {
           throw new Error(`Publish tier returned ${resp.status}`);
