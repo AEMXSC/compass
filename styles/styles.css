@@ -1,0 +1,5 @@
+/*
+ * Compass SPA — EDS stylesheet entry point
+ * Imports the main Compass CSS from the repo root.
+ */
+@import url('../app.css');
