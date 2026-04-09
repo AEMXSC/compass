@@ -626,7 +626,7 @@ window.addEventListener('ew-auth-change', async (e) => {
 
     // Pre-warm DA MCP session so first edit is fast
     warmups.push(
-      da.isAuthenticated()
+      Promise.resolve(da.isAuthenticated())
         .then((ok) => console.log('[Auth] DA MCP ready:', ok))
         .catch(() => {})
     );
