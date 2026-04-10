@@ -137,18 +137,37 @@ async function tryImsLib() {
 /* ─── Sign in ─── */
 
 export async function signIn() {
-  // imslib's darkalley client redirects to da.live, not github.io — can't use modalMode.
-  // Instead: open da.live in popup. If user is already signed in at da.live,
-  // the bookmarklet auto-relays the token. If not, they sign in at da.live first.
-  if (imsLibLoaded) {
-    console.log('[IMS] Opening da.live for token relay...');
-    try {
-      await relaySignIn();
-      return true;
-    } catch (e) {
-      console.warn('[IMS] Relay sign-in failed:', e.message);
-      // Fall through to S2S
+  // User-level auth via CF Worker: opens Adobe sign-in in a popup,
+  // Worker's /ims/callback captures the token and postMessages it back.
+  {
+    console.log('[IMS] Opening Adobe sign-in popup via Worker...');
+    const returnTo = encodeURIComponent(window.location.href);
+    const loginUrl = `${IMS_WORKER}/ims/login?return_to=${returnTo}`;
+    const w = 500, h = 700;
+    const left = Math.round((screen.width - w) / 2);
+    const top = Math.round((screen.height - h) / 2);
+    const popup = window.open(loginUrl, 'adobeSignIn',
+      `width=${w},height=${h},left=${left},top=${top}`);
+    if (popup) {
+      // Token arrives via handleRelayMessage (postMessage listener already active)
+      return new Promise((resolve) => {
+        const checkClosed = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(checkClosed);
+            if (authMethod === 'relay') {
+              console.log('[IMS] User-level token received via popup');
+              resolve(true);
+            } else {
+              console.log('[IMS] Popup closed without token — keeping S2S');
+              resolve(false);
+            }
+          }
+        }, 500);
+        // Timeout after 3 minutes
+        setTimeout(() => { clearInterval(checkClosed); resolve(false); }, 180000);
+      });
     }
+    console.warn('[IMS] Popup blocked');
   }
 
   // Fallback: S2S via CF Worker
@@ -233,14 +252,21 @@ export function getBookmarkletCode() {
 
 function handleRelayMessage(event) {
   if (!event.data || event.data.type !== 'ew-ims-relay') return;
-  const trustedOrigins = ['https://da.live', 'https://www.da.live', window.location.origin];
-  if (!trustedOrigins.includes(event.origin)) return;
-  const { token } = event.data;
+  // Accept from da.live, Worker origin, or self
+  const workerOrigin = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev').replace(/\/$/, '');
+  const trustedOrigins = ['https://da.live', 'https://www.da.live', workerOrigin, window.location.origin];
+  if (!trustedOrigins.includes(event.origin)) {
+    // Also accept if origin is null (srcdoc/sandboxed popup) — token still validated by IMS
+    if (event.origin !== 'null') return;
+  }
+  const { token, expires_in: expiresIn } = event.data;
   if (!token) return;
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem('ew-ims', 'true');
+  if (expiresIn) localStorage.setItem(EXPIRY_KEY, String(Date.now() + Number(expiresIn)));
   authMethod = 'relay';
-  window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
+  console.log('[IMS] Token received via postMessage relay');
+  window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true, method: 'relay' } }));
 }
 window.addEventListener('message', handleRelayMessage);
 
@@ -269,14 +295,16 @@ export async function handlePkceCallback() { return false; }
 /* ─── Init ─── */
 
 export async function loadIms() {
-  // Check for token in hash (imslib redirect callback)
+  // Check for token in hash (imslib redirect or Worker callback)
   const hash = window.location.hash;
-  if (hash.includes('access_token=')) {
+  if (hash.includes('access_token=') || hash.includes('ims_token=')) {
     const tokenParams = new URLSearchParams(hash.slice(1));
-    const token = tokenParams.get('access_token');
+    const token = tokenParams.get('access_token') || tokenParams.get('ims_token');
+    const expiresIn = tokenParams.get('expires_in');
     if (token) {
       localStorage.setItem(TOKEN_KEY, token);
       localStorage.setItem('ew-ims', 'true');
+      if (expiresIn) localStorage.setItem(EXPIRY_KEY, String(Date.now() + Number(expiresIn)));
       authMethod = 'redirect';
       history.replaceState(null, '', window.location.pathname + window.location.search);
     }

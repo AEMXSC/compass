@@ -69,6 +69,12 @@ async function route(request) {
   if (url.pathname === '/proxy' && request.method === 'GET') {
     return handleAuthorProxy(request);
   }
+  if (url.pathname === '/ims/login' && request.method === 'GET') {
+    return handleImsLogin(request);
+  }
+  if (url.pathname === '/ims/callback' && request.method === 'GET') {
+    return handleImsCallback(request);
+  }
 
   return new Response('Compass Auth Gateway', { status: 200 });
 }
@@ -270,6 +276,84 @@ async function handleTokenProxy(request) {
       headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
     });
   }
+}
+
+/* ─── GET /ims/login — Redirect to Adobe IMS for user-level auth ─── */
+
+async function handleImsLogin(request) {
+  const url = new URL(request.url);
+  const returnTo = url.searchParams.get('return_to') || ALLOWED_RETURN_URLS[0];
+
+  if (!ALLOWED_RETURN_URLS.some((a) => returnTo.startsWith(a))) {
+    return new Response('Invalid return_to URL', { status: 400 });
+  }
+
+  // Build the callback URL on this Worker
+  const callbackUrl = `${url.origin}/ims/callback`;
+
+  // Use implicit flow (response_type=token) — token comes in the URL fragment
+  const params = new URLSearchParams({
+    client_id: IMS_CLIENT_ID,
+    scope: IMS_SCOPE,
+    response_type: 'token',
+    redirect_uri: callbackUrl,
+    state: encodeURIComponent(returnTo),
+    use_ms_for_expiry: 'true',
+  });
+
+  return Response.redirect(
+    `https://ims-na1.adobelogin.com/ims/authorize/v2?${params}`,
+    302,
+  );
+}
+
+/* ─── GET /ims/callback — Capture token from hash, relay back to Compass ─── */
+
+async function handleImsCallback(request) {
+  // The token is in the URL fragment (#access_token=...), which the server can't see.
+  // Serve a tiny HTML page that reads the fragment and postMessages it to the opener,
+  // then redirects back to Compass with the token.
+  const html = `<!DOCTYPE html>
+<html><head><title>Compass Auth</title></head>
+<body>
+<p>Signing in...</p>
+<script>
+(function() {
+  var hash = window.location.hash.substring(1);
+  var params = new URLSearchParams(hash);
+  var token = params.get('access_token');
+  var expiresIn = params.get('expires_in');
+  var state = params.get('state');
+  var returnTo = state ? decodeURIComponent(state) : '';
+
+  if (token) {
+    // Try postMessage to opener (popup flow)
+    if (window.opener) {
+      window.opener.postMessage({
+        type: 'ew-ims-relay',
+        token: token,
+        expires_in: expiresIn
+      }, '*');
+      document.body.innerHTML = '<p>Signed in! You can close this window.</p>';
+      setTimeout(function() { window.close(); }, 1000);
+    } else if (returnTo) {
+      // Redirect flow — append token as fragment
+      window.location.href = returnTo + '#ims_token=' + encodeURIComponent(token)
+        + '&expires_in=' + (expiresIn || '');
+    } else {
+      document.body.innerHTML = '<p>Token received but no return URL. Copy: <code>' + token.substring(0,20) + '...</code></p>';
+    }
+  } else {
+    document.body.innerHTML = '<p>Sign-in failed. No token received.</p>';
+  }
+})();
+</script>
+</body></html>`;
+
+  return new Response(html, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html' },
+  });
 }
 
 /* ─── GET /proxy — Fetch AEM author resources (CSS, images) with S2S auth ─── */
