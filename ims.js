@@ -74,6 +74,7 @@ async function tryImsLib() {
       autoValidateToken: true,
       environment: 'prod',
       useLocalStorage: true,
+      modalMode: true, // popup auth — avoids redirect, works cross-origin on github.io
       onReady: () => {
         clearTimeout(timeout);
         imsLibLoaded = true;
@@ -119,11 +120,39 @@ async function tryImsLib() {
 /* ─── Sign in ─── */
 
 export async function signIn() {
-  // Try imslib first (user-level auth)
+  // Try imslib popup first (user-level auth — works cross-origin on github.io)
   if (imsLibLoaded && window.adobeIMS) {
-    console.log('[IMS] Signing in via imslib (redirect)...');
-    window.adobeIMS.signIn();
-    return true; // redirect happens — page will reload
+    console.log('[IMS] Signing in via imslib popup...');
+    return new Promise((resolve) => {
+      // imslib with modalMode:true opens a popup and calls onAccessToken when done
+      const tokenCheck = setInterval(() => {
+        const t = window.adobeIMS.getAccessToken();
+        if (t?.token) {
+          clearInterval(tokenCheck);
+          authMethod = 'imslib';
+          console.log('[IMS] imslib popup: token received');
+          // Fetch profile after popup sign-in
+          window.adobeIMS.getProfile().then((p) => {
+            if (p) {
+              profile = {
+                displayName: p.name || p.displayName || '',
+                email: p.email || '',
+                firstName: p.first_name || (p.name || '').split(' ')[0] || '',
+                lastName: p.last_name || (p.name || '').split(' ').slice(1).join(' ') || '',
+                userId: p.userId || '',
+                avatar: '',
+              };
+              localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+            }
+          }).catch(() => {});
+          window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
+          resolve(true);
+        }
+      }, 500);
+      // Timeout after 2 minutes (popup might be closed without completing)
+      setTimeout(() => { clearInterval(tokenCheck); resolve(false); }, 120000);
+      window.adobeIMS.signIn();
+    });
   }
 
   // Fallback: S2S via CF Worker
