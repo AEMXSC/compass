@@ -297,11 +297,11 @@ async function handleImsLogin(request) {
   // If not registered, IMS will reject the redirect. In that case, use the
   // da.live relay approach instead.
   const callbackUrl = `${url.origin}/ims/callback`;
-  const DARKALLEY_CLIENT_ID = 'darkalley';
-  const USER_SCOPE = 'AdobeID,openid,gnav,read_organizations,additional_info.projectedProductContext,account_cluster.read';
+  const COMPASS_OAUTH_CLIENT_ID = '8477ad6112764435814b12d28a778647';
+  const USER_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext';
 
   const params = new URLSearchParams({
-    client_id: DARKALLEY_CLIENT_ID,
+    client_id: COMPASS_OAUTH_CLIENT_ID,
     scope: USER_SCOPE,
     response_type: 'token',
     redirect_uri: callbackUrl,
