@@ -13,7 +13,7 @@
 // Different query strings (e.g., './da-client.js' vs './da-client.js?v=57') create
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js';
 import * as ai from './ai.js';
 import { TOOL_AGENT_MAP } from './ai.js';
 import * as da from './da-client.js';
@@ -252,15 +252,14 @@ function updateAuthUI() {
       if (userName) userName.textContent = profile.displayName;
       if (userEmail) userEmail.textContent = profile.email || '';
     } else if (signedIn) {
-      // Signed in but no profile (S2S service account)
-      authBtn.textContent = '';
-      authBtn.classList.add('signed-in', 'avatar-mode');
-      authBtn.title = 'Signed in — Adobe S2S';
-      authBtn.innerHTML = '<span class="auth-avatar">A</span>';
+      // Signed in but no profile (S2S service account) — show "Sign In" to upgrade
+      authBtn.classList.remove('signed-in', 'avatar-mode');
+      authBtn.innerHTML = 'Sign In';
+      authBtn.title = 'Sign in with Adobe ID to unlock full MCP access (currently using service account)';
       // Populate dropdown with service account info
       if (userAvatar) userAvatar.textContent = 'A';
       if (userName) userName.textContent = 'AEM Service Account';
-      if (userEmail) userEmail.textContent = 'S2S · OAuth Server-to-Server';
+      if (userEmail) userEmail.textContent = 'S2S · Click Sign In to upgrade';
     } else {
       // Not signed in — show "Sign In" text button
       authBtn.classList.remove('signed-in', 'avatar-mode');
@@ -4061,11 +4060,12 @@ if (attachBtn) {
 
 if (authBtn) {
   authBtn.addEventListener('click', () => {
-    if (isSignedIn()) {
-      // Toggle user menu dropdown
+    if (isSignedIn() && getAuthMethod() !== 's2s') {
+      // User-level auth — toggle user menu dropdown
       const menu = document.getElementById('userMenu');
       if (menu) menu.classList.toggle('visible');
     } else {
+      // Not signed in OR S2S only — trigger imslib popup to get user-level token
       signIn();
     }
   });
