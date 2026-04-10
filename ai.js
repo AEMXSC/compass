@@ -366,6 +366,20 @@ const AEM_TOOLS = [
     },
   },
 
+  /* ─── Template Discovery ─── */
+
+  {
+    name: 'list_aem_templates',
+    description: 'AEM Content MCP — List available page templates for a site. Reads from /conf/{site}/settings/wcm/templates/. Call this before create_aem_page so the user can choose a template.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        site_name: { type: 'string', description: 'Site config name (e.g. "wknd" for /conf/wknd/...). If unknown, try listing /conf/ first.' },
+      },
+      required: ['site_name'],
+    },
+  },
+
   /* ─── Content Fragments (AEM Content MCP) ─── */
 
   {
@@ -1328,6 +1342,7 @@ export const TOOL_AGENT_MAP = {
   create_aem_page: 'Experience Production Agent',
   list_aem_pages: 'Experience Production Agent',
   delete_aem_page: 'Experience Production Agent',
+  list_aem_templates: 'Experience Production Agent',
   create_aem_launch: 'Experience Production Agent',
   promote_aem_launch: 'Experience Production Agent',
   get_content_fragment: 'Experience Production Agent',
@@ -1844,6 +1859,55 @@ async function executeTool(name, input) {
         }, null, 2);
       } catch (err) {
         return mcpError('delete_aem_page', err);
+      }
+    }
+
+    /* ─── Template Discovery ─── */
+
+    case 'list_aem_templates': {
+      if (!(await ensureAuth())) return authRequiredError('list_aem_templates');
+      try {
+        const host = window.__EW_AEM_HOST || null;
+        const siteName = input.site_name;
+        const templatePath = `/conf/${siteName}/settings/wcm/templates`;
+
+        // List templates from the site's /conf/{site}/settings/wcm/templates/ path
+        const result = await aemContent.listPages(host, templatePath);
+        const templates = Array.isArray(result) ? result : (result?.pages || result?.children || []);
+
+        // If no templates found at site level, try global
+        if (templates.length === 0) {
+          const globalResult = await aemContent.listPages(host, '/conf/global/settings/wcm/templates');
+          const globalTemplates = Array.isArray(globalResult) ? globalResult : (globalResult?.pages || globalResult?.children || []);
+          return JSON.stringify({
+            status: 'success',
+            site_name: siteName,
+            searched_path: templatePath,
+            note: `No templates at site level. Found ${globalTemplates.length} global templates.`,
+            templates: globalTemplates.map((t) => ({
+              path: t.path || t,
+              title: t.title || t.name || '',
+              description: t.description || '',
+            })),
+            source: 'AEM Content MCP',
+          }, null, 2);
+        }
+
+        return JSON.stringify({
+          status: 'success',
+          site_name: siteName,
+          template_path: templatePath,
+          templates: templates.map((t) => ({
+            path: t.path || t,
+            title: t.title || t.name || '',
+            description: t.description || '',
+          })),
+          count: templates.length,
+          hint: 'Pass the template path to create_aem_page to create a page with this layout.',
+          source: 'AEM Content MCP',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('list_aem_templates', err);
       }
     }
 
@@ -4259,7 +4323,8 @@ This is an **AEM CS (JCR)** site. You MUST use these tools:
 
 **Pages:**
 - Read: \`get_page_content\` (returns JCR content with ETag)
-- Create: \`create_aem_page\` (from template)
+- Discover templates: \`list_aem_templates\` (ALWAYS call first before creating a page — let user pick a template)
+- Create: \`create_aem_page\` (from template — requires template path from list_aem_templates)
 - Update: \`patch_aem_page_content\` (requires ETag — call get_page_content first)
 - List: \`list_aem_pages\` (list children of a path)
 - Copy: \`copy_aem_page\`
