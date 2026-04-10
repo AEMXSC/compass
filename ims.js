@@ -137,12 +137,18 @@ async function tryImsLib() {
 /* ─── Sign in ─── */
 
 export async function signIn() {
-  // Try imslib popup first (user-level auth — works cross-origin on github.io)
-  // onAccessToken callback in the config handles the token after popup completes
-  if (imsLibLoaded && window.adobeIMS) {
-    console.log('[IMS] Signing in via imslib popup...');
-    window.adobeIMS.signIn();
-    return true; // onAccessToken callback will fire when popup completes
+  // imslib's darkalley client redirects to da.live, not github.io — can't use modalMode.
+  // Instead: open da.live in popup. If user is already signed in at da.live,
+  // the bookmarklet auto-relays the token. If not, they sign in at da.live first.
+  if (imsLibLoaded) {
+    console.log('[IMS] Opening da.live for token relay...');
+    try {
+      await relaySignIn();
+      return true;
+    } catch (e) {
+      console.warn('[IMS] Relay sign-in failed:', e.message);
+      // Fall through to S2S
+    }
   }
 
   // Fallback: S2S via CF Worker

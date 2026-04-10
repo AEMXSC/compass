@@ -15,7 +15,7 @@
  */
 
 const IMS_TOKEN_URL = 'https://ims-na1.adobelogin.com/ims/token/v3';
-const IMS_SCOPE = 'aem.frontend.all,openid,AdobeID,read_organizations,additional_info.projectedProductContext';
+const IMS_SCOPE = 'aem.frontend.all,openid,AdobeID,read_organizations,additional_info.projectedProductContext,aem_mcp';
 
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
