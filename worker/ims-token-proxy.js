@@ -280,6 +280,9 @@ async function handleTokenProxy(request) {
 
 /* ─── GET /ims/login — Redirect to Adobe IMS for user-level auth ─── */
 
+const COMPASS_OAUTH_CLIENT_ID = '8477ad6112764435814b12d28a778647';
+const COMPASS_OAUTH_USER_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext';
+
 async function handleImsLogin(request) {
   const url = new URL(request.url);
   const returnTo = url.searchParams.get('return_to') || ALLOWED_RETURN_URLS[0];
@@ -288,25 +291,15 @@ async function handleImsLogin(request) {
     return new Response('Invalid return_to URL', { status: 400 });
   }
 
-  // Use darkalley client (supports implicit flow) with redirect_uri pointing to
-  // this Worker's /ims/callback. The Worker callback page reads the token from the
-  // hash fragment and postMessages it back to the opener (Compass).
-  //
-  // NOTE: For this to work, the Worker's /ims/callback URL must be registered as
-  // a valid redirect_uri for the darkalley client in Adobe Developer Console.
-  // If not registered, IMS will reject the redirect. In that case, use the
-  // da.live relay approach instead.
   const callbackUrl = `${url.origin}/ims/callback`;
-  const COMPASS_OAUTH_CLIENT_ID = '8477ad6112764435814b12d28a778647';
-  const USER_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext';
 
+  // OAuth Web App uses authorization_code flow (not implicit)
   const params = new URLSearchParams({
     client_id: COMPASS_OAUTH_CLIENT_ID,
-    scope: USER_SCOPE,
-    response_type: 'token',
+    scope: COMPASS_OAUTH_USER_SCOPE,
+    response_type: 'code',
     redirect_uri: callbackUrl,
     state: encodeURIComponent(returnTo),
-    use_ms_for_expiry: 'true',
   });
 
   return Response.redirect(
@@ -318,50 +311,94 @@ async function handleImsLogin(request) {
 /* ─── GET /ims/callback — Capture token from hash, relay back to Compass ─── */
 
 async function handleImsCallback(request) {
-  // The token is in the URL fragment (#access_token=...), which the server can't see.
-  // Serve a tiny HTML page that reads the fragment and postMessages it to the opener,
-  // then redirects back to Compass with the token.
-  const html = `<!DOCTYPE html>
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code');
+  const error = url.searchParams.get('error');
+  const state = url.searchParams.get('state');
+  const returnTo = state ? decodeURIComponent(state) : ALLOWED_RETURN_URLS[0];
+
+  if (error) {
+    return new Response(`Adobe sign-in error: ${error} — ${url.searchParams.get('error_description') || ''}`, {
+      status: 400, headers: { 'Content-Type': 'text/plain' },
+    });
+  }
+
+  if (!code) {
+    return new Response('Sign-in failed. No authorization code received.', {
+      status: 400, headers: { 'Content-Type': 'text/plain' },
+    });
+  }
+
+  // Exchange authorization code for access token (server-side — secret never exposed)
+  try {
+    const callbackUrl = `${url.origin}/ims/callback`;
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: COMPASS_OAUTH_CLIENT_ID,
+      client_secret: typeof COMPASS_OAUTH_SECRET !== 'undefined' ? COMPASS_OAUTH_SECRET : '',
+      code,
+      redirect_uri: callbackUrl,
+    });
+
+    const tokenResp = await fetch('https://ims-na1.adobelogin.com/ims/token/v3', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+
+    if (!tokenResp.ok) {
+      const errText = await tokenResp.text();
+      return new Response(`Token exchange failed (${tokenResp.status}): ${errText}`, {
+        status: 502, headers: { 'Content-Type': 'text/plain' },
+      });
+    }
+
+    const data = await tokenResp.json();
+    if (!data.access_token) {
+      return new Response('No access token in response', {
+        status: 502, headers: { 'Content-Type': 'text/plain' },
+      });
+    }
+
+    const token = data.access_token;
+    const expiresIn = data.expires_in || '86400000';
+
+    // Serve HTML page that postMessages the token back to Compass (popup flow)
+    const html = `<!DOCTYPE html>
 <html><head><title>Compass Auth</title></head>
 <body>
-<p>Signing in...</p>
+<p>Signed in! Returning to Compass...</p>
 <script>
 (function() {
-  var hash = window.location.hash.substring(1);
-  var params = new URLSearchParams(hash);
-  var token = params.get('access_token');
-  var expiresIn = params.get('expires_in');
-  var state = params.get('state');
-  var returnTo = state ? decodeURIComponent(state) : '';
+  var token = ${JSON.stringify(token)};
+  var expiresIn = ${JSON.stringify(String(expiresIn))};
+  var returnTo = ${JSON.stringify(returnTo)};
 
-  if (token) {
-    // Try postMessage to opener (popup flow)
-    if (window.opener) {
-      window.opener.postMessage({
-        type: 'ew-ims-relay',
-        token: token,
-        expires_in: expiresIn
-      }, '*');
-      document.body.innerHTML = '<p>Signed in! You can close this window.</p>';
-      setTimeout(function() { window.close(); }, 1000);
-    } else if (returnTo) {
-      // Redirect flow — append token as fragment
-      window.location.href = returnTo + '#ims_token=' + encodeURIComponent(token)
-        + '&expires_in=' + (expiresIn || '');
-    } else {
-      document.body.innerHTML = '<p>Token received but no return URL. Copy: <code>' + token.substring(0,20) + '...</code></p>';
-    }
+  if (window.opener) {
+    window.opener.postMessage({
+      type: 'ew-ims-relay',
+      token: token,
+      expires_in: expiresIn
+    }, '*');
+    setTimeout(function() { window.close(); }, 1500);
+  } else if (returnTo) {
+    window.location.href = returnTo + '#ims_token=' + encodeURIComponent(token)
+      + '&expires_in=' + encodeURIComponent(expiresIn);
   } else {
-    document.body.innerHTML = '<p>Sign-in failed. No token received.</p>';
+    document.body.innerHTML = '<p>Signed in but no return URL.</p>';
   }
 })();
 </script>
 </body></html>`;
 
-  return new Response(html, {
-    status: 200,
-    headers: { 'Content-Type': 'text/html' },
-  });
+    return new Response(html, {
+      status: 200, headers: { 'Content-Type': 'text/html' },
+    });
+  } catch (err) {
+    return new Response(`Token exchange error: ${err.message}`, {
+      status: 502, headers: { 'Content-Type': 'text/plain' },
+    });
+  }
 }
 
 /* ─── GET /proxy — Fetch AEM author resources (CSS, images) with S2S auth ─── */
