@@ -66,6 +66,9 @@ async function route(request) {
   if (url.pathname === '/token' && request.method === 'POST') {
     return handleTokenProxy(request);
   }
+  if (url.pathname === '/proxy' && request.method === 'GET') {
+    return handleAuthorProxy(request);
+  }
 
   return new Response('Compass Auth Gateway', { status: 200 });
 }
@@ -266,6 +269,84 @@ async function handleTokenProxy(request) {
       status: 502,
       headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
     });
+  }
+}
+
+/* ─── GET /proxy — Fetch AEM author resources (CSS, images) with S2S auth ─── */
+
+async function handleAuthorProxy(request) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const url = new URL(request.url);
+  const targetUrl = url.searchParams.get('url');
+  if (!targetUrl) {
+    return jsonResponse({ error: 'Missing ?url= parameter' }, 400, origin);
+  }
+
+  // Only allow proxying to AEM author hosts
+  try {
+    const target = new URL(targetUrl);
+    if (!target.hostname.endsWith('.adobeaemcloud.com')) {
+      return jsonResponse({ error: 'Only adobeaemcloud.com hosts allowed' }, 403, origin);
+    }
+  } catch {
+    return jsonResponse({ error: 'Invalid URL' }, 400, origin);
+  }
+
+  // Ensure we have a valid S2S token
+  const now = Date.now();
+  if (!cachedToken || tokenExpiry <= now + 300000) {
+    try {
+      const body = new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: IMS_CLIENT_ID,
+        client_secret: IMS_CLIENT_SECRET,
+        scope: IMS_SCOPE,
+      });
+      const imsResp = await fetch(IMS_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+      if (imsResp.ok) {
+        const data = await imsResp.json();
+        if (data.access_token) {
+          cachedToken = data.access_token;
+          tokenExpiry = now + (data.expires_in || 86400000);
+        }
+      }
+    } catch { /* token refresh failed */ }
+  }
+
+  // Fetch the resource from AEM author with Bearer token
+  try {
+    const resp = await fetch(targetUrl, {
+      headers: cachedToken ? { Authorization: `Bearer ${cachedToken}` } : {},
+    });
+
+    if (!resp.ok) {
+      return new Response(`Upstream ${resp.status}`, {
+        status: resp.status,
+        headers: corsHeaders(origin),
+      });
+    }
+
+    const contentType = resp.headers.get('Content-Type') || 'application/octet-stream';
+    const body = await resp.arrayBuffer();
+
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=3600',
+        ...corsHeaders(origin),
+      },
+    });
+  } catch (err) {
+    return jsonResponse({ error: err.message }, 502, origin);
   }
 }
 

@@ -3522,28 +3522,24 @@ async function connectCustomSite(input) {
           let html = await resp.text();
 
           // CSS: .resource/ paths only work on the author tier (404 on publish).
-          // Fetch CSS from author with IMS Bearer token, then inline as <style>.
-          if (!isSignedIn()) await signIn();
-          const token = getToken();
+          // Fetch CSS via CF Worker proxy (avoids CORS) with S2S auth, then inline as <style>.
+          const PROXY_BASE = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev') + '/proxy?url=';
           const cssLinks = [...html.matchAll(/<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*\/?>/gi)];
           for (const match of cssLinks) {
-            // Resolve relative href to author host (where .resource/ paths work)
             const cssHref = match[1].startsWith('http') ? match[1] : `${authorBase}${match[1]}`;
             try {
-              const cssResp = await fetch(cssHref, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-              });
+              const cssResp = await fetch(`${PROXY_BASE}${encodeURIComponent(cssHref)}`);
               if (cssResp.ok) {
                 let css = await cssResp.text();
                 // Fix relative url() references to point to author host
                 css = css.replace(/url\(\s*["']?\//g, `url("${authorBase}/`);
                 html = html.replace(match[0], `<style>/* ${match[1]} */\n${css}</style>`);
-                console.log(`[EW] Inlined CSS from author: ${match[1]} (${css.length} chars)`);
+                console.log(`[EW] Inlined CSS from author via proxy: ${match[1]} (${css.length} chars)`);
               } else {
-                console.warn(`[EW] CSS fetch ${cssResp.status}: ${cssHref}`);
+                console.warn(`[EW] CSS proxy fetch ${cssResp.status}: ${cssHref}`);
               }
             } catch (cssErr) {
-              console.warn(`[EW] CSS fetch failed: ${cssErr.message}`);
+              console.warn(`[EW] CSS proxy fetch failed: ${cssErr.message}`);
             }
           }
 
@@ -3571,8 +3567,11 @@ async function connectCustomSite(input) {
           html = html.replace(/<head>/, `<head><base href="${publishBase}/">`);
           // Strip scripts and UE instrumentation (won't work in srcdoc null-origin)
           html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
-          // Strip raw section metadata divs that show as text (xwalk component properties)
-          html = html.replace(/<div[^>]*data-aue-type="container"[^>]*>[\s\S]*?<\/div>/gi, '');
+          // Strip section-metadata divs (xwalk properties like "sec-spacing", "section-none", "overlay")
+          // These are container divs with class "section-metadata" that show as raw text without JS decoration
+          html = html.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
+          // Also strip standalone property divs that contain only xwalk keywords
+          html = html.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width|image-left|image-right|cta-button|text-center)\s*<\/div>/gi, '');
 
           if (previewFrame) {
             previewFrame.srcdoc = html;
