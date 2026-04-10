@@ -60,6 +60,28 @@ function loadScript(src) {
   });
 }
 
+/** Handle successful IMS token (from onReady or onAccessToken) */
+function _handleImsToken() {
+  authMethod = 'imslib';
+  console.log('[IMS] imslib: signed in with user-level token');
+  window.adobeIMS.getProfile().then((p) => {
+    if (p) {
+      profile = {
+        displayName: p.name || p.displayName || '',
+        email: p.email || '',
+        firstName: p.first_name || (p.name || '').split(' ')[0] || '',
+        lastName: p.last_name || (p.name || '').split(' ').slice(1).join(' ') || '',
+        userId: p.userId || '',
+        avatar: '',
+      };
+      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    }
+    window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true, method: 'imslib' } }));
+  }).catch(() => {
+    window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true, method: 'imslib' } }));
+  });
+}
+
 async function tryImsLib() {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
@@ -80,27 +102,22 @@ async function tryImsLib() {
         imsLibLoaded = true;
         const accessToken = window.adobeIMS.getAccessToken();
         if (accessToken?.token) {
-          authMethod = 'imslib';
-          console.log('[IMS] imslib: signed in with user-level token');
-          // Fetch profile
-          window.adobeIMS.getProfile().then((p) => {
-            if (p) {
-              profile = {
-                displayName: p.name || p.displayName || '',
-                email: p.email || '',
-                firstName: p.first_name || (p.name || '').split(' ')[0] || '',
-                lastName: p.last_name || (p.name || '').split(' ').slice(1).join(' ') || '',
-                userId: p.userId || '',
-                avatar: '',
-              };
-              localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-            }
-          }).catch(() => {});
+          _handleImsToken();
           resolve(true);
         } else {
           console.log('[IMS] imslib: loaded but no token (user not signed in)');
           resolve(false);
         }
+      },
+      onAccessToken: (tokenInfo) => {
+        // Fired after popup sign-in completes
+        console.log('[IMS] onAccessToken — popup sign-in complete');
+        _handleImsToken();
+      },
+      onAccessTokenHasExpired: () => {
+        console.log('[IMS] Token expired — clearing auth');
+        authMethod = 'none';
+        window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: false } }));
       },
       onError: (e) => {
         clearTimeout(timeout);
@@ -121,38 +138,11 @@ async function tryImsLib() {
 
 export async function signIn() {
   // Try imslib popup first (user-level auth — works cross-origin on github.io)
+  // onAccessToken callback in the config handles the token after popup completes
   if (imsLibLoaded && window.adobeIMS) {
     console.log('[IMS] Signing in via imslib popup...');
-    return new Promise((resolve) => {
-      // imslib with modalMode:true opens a popup and calls onAccessToken when done
-      const tokenCheck = setInterval(() => {
-        const t = window.adobeIMS.getAccessToken();
-        if (t?.token) {
-          clearInterval(tokenCheck);
-          authMethod = 'imslib';
-          console.log('[IMS] imslib popup: token received');
-          // Fetch profile after popup sign-in
-          window.adobeIMS.getProfile().then((p) => {
-            if (p) {
-              profile = {
-                displayName: p.name || p.displayName || '',
-                email: p.email || '',
-                firstName: p.first_name || (p.name || '').split(' ')[0] || '',
-                lastName: p.last_name || (p.name || '').split(' ').slice(1).join(' ') || '',
-                userId: p.userId || '',
-                avatar: '',
-              };
-              localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-            }
-          }).catch(() => {});
-          window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true } }));
-          resolve(true);
-        }
-      }, 500);
-      // Timeout after 2 minutes (popup might be closed without completing)
-      setTimeout(() => { clearInterval(tokenCheck); resolve(false); }, 120000);
-      window.adobeIMS.signIn();
-    });
+    window.adobeIMS.signIn();
+    return true; // onAccessToken callback will fire when popup completes
   }
 
   // Fallback: S2S via CF Worker
