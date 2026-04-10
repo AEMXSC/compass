@@ -288,13 +288,21 @@ async function handleImsLogin(request) {
     return new Response('Invalid return_to URL', { status: 400 });
   }
 
-  // Build the callback URL on this Worker
+  // Use darkalley client (supports implicit flow) with redirect_uri pointing to
+  // this Worker's /ims/callback. The Worker callback page reads the token from the
+  // hash fragment and postMessages it back to the opener (Compass).
+  //
+  // NOTE: For this to work, the Worker's /ims/callback URL must be registered as
+  // a valid redirect_uri for the darkalley client in Adobe Developer Console.
+  // If not registered, IMS will reject the redirect. In that case, use the
+  // da.live relay approach instead.
   const callbackUrl = `${url.origin}/ims/callback`;
+  const DARKALLEY_CLIENT_ID = 'darkalley';
+  const USER_SCOPE = 'AdobeID,openid,gnav,read_organizations,additional_info.projectedProductContext,account_cluster.read';
 
-  // Use implicit flow (response_type=token) — token comes in the URL fragment
   const params = new URLSearchParams({
-    client_id: IMS_CLIENT_ID,
-    scope: IMS_SCOPE,
+    client_id: DARKALLEY_CLIENT_ID,
+    scope: USER_SCOPE,
     response_type: 'token',
     redirect_uri: callbackUrl,
     state: encodeURIComponent(returnTo),

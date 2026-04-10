@@ -137,8 +137,9 @@ async function tryImsLib() {
 /* ─── Sign in ─── */
 
 export async function signIn() {
-  // User-level auth via CF Worker: opens Adobe sign-in in a popup,
-  // Worker's /ims/callback captures the token and postMessages it back.
+  // Strategy: Try Worker-proxied IMS auth first (popup flow).
+  // If that fails (redirect_uri not registered), fall back to S2S.
+  // The Worker /ims/callback page postMessages the token back to this window.
   {
     console.log('[IMS] Opening Adobe sign-in popup via Worker...');
     const returnTo = encodeURIComponent(window.location.href);
@@ -150,24 +151,38 @@ export async function signIn() {
       `width=${w},height=${h},left=${left},top=${top}`);
     if (popup) {
       // Token arrives via handleRelayMessage (postMessage listener already active)
-      return new Promise((resolve) => {
+      const result = await new Promise((resolve) => {
         const checkClosed = setInterval(() => {
           if (popup.closed) {
             clearInterval(checkClosed);
-            if (authMethod === 'relay') {
-              console.log('[IMS] User-level token received via popup');
-              resolve(true);
-            } else {
-              console.log('[IMS] Popup closed without token — keeping S2S');
-              resolve(false);
-            }
+            resolve(authMethod === 'relay');
           }
         }, 500);
+        // Also resolve immediately if we get a relay token
+        const onAuth = (e) => {
+          if (e.detail?.method === 'relay') {
+            clearInterval(checkClosed);
+            window.removeEventListener('ew-auth-change', onAuth);
+            resolve(true);
+          }
+        };
+        window.addEventListener('ew-auth-change', onAuth);
         // Timeout after 3 minutes
-        setTimeout(() => { clearInterval(checkClosed); resolve(false); }, 180000);
+        setTimeout(() => {
+          clearInterval(checkClosed);
+          window.removeEventListener('ew-auth-change', onAuth);
+          resolve(false);
+        }, 180000);
       });
+      if (result) {
+        console.log('[IMS] User-level token received via Worker popup');
+        return true;
+      }
+      console.log('[IMS] Worker popup closed without token');
+      // Fall through to S2S
+    } else {
+      console.warn('[IMS] Popup blocked');
     }
-    console.warn('[IMS] Popup blocked');
   }
 
   // Fallback: S2S via CF Worker
