@@ -22,11 +22,8 @@ async function bootstrap() {
     // Replace body content with the SPA shell
     document.body.innerHTML = shellHTML;
 
-    // Load SPA CSS
-    const css = document.createElement('link');
-    css.rel = 'stylesheet';
-    css.href = '/styles/app.css';
-    document.head.appendChild(css);
+    // CSS: app.css is already loaded via styles.css @import (from head.html)
+    // No need to inject a second <link> — would cause duplicate CSS load.
 
     // Load external libraries (PDF.js, Mammoth) — same as index.html
     const pdfScript = document.createElement('script');
@@ -67,5 +64,9 @@ async function bootstrap() {
   }
 }
 
-// Auto-execute
-bootstrap();
+// Auto-execute after DOM is ready (ensures aem.js has finished decorating)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+  bootstrap();
+}
