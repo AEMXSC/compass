@@ -450,13 +450,11 @@ if (imsTokenHelp) {
     e.preventDefault();
     const helpHtml = `
       <div style="font-size:12px;line-height:1.6;color:var(--text-secondary);margin-top:8px;padding:10px;background:var(--bg-secondary);border-radius:6px;">
-        <strong style="color:var(--text-primary)">How to get your IMS token:</strong><br>
-        1. Go to <a href="https://da.live" target="_blank" style="color:var(--accent-light)">da.live</a> and sign in with Adobe ID<br>
-        2. Open browser DevTools (F12) → Console<br>
-        3. Run: <code style="background:var(--bg-input);padding:2px 6px;border-radius:3px;font-size:11px;">copy(adobeIMS.getAccessToken().token)</code><br>
-        4. Token is now on your clipboard — paste it above<br>
+        <strong style="color:var(--text-primary)">Adobe IMS Authentication</strong><br>
+        Compass uses S2S (Server-to-Server) authentication via a Cloudflare Worker.<br>
+        The token is fetched automatically on page load — no manual steps needed.<br>
         <br>
-        <em style="color:var(--text-muted)">Tokens expire after ~24hrs. Re-paste when needed.</em>
+        <em style="color:var(--text-muted)">S2S tokens refresh automatically. If you see auth errors, try reloading the page.</em>
       </div>
     `;
     imsTokenStatus.innerHTML = helpHtml;
@@ -531,14 +529,9 @@ const relaySetupDone = document.getElementById('relaySetupDone');
 const relayOpenDA = document.getElementById('relayOpenDA');
 const relayWaiting = document.getElementById('relayWaiting');
 
-// Set bookmarklet href
+// Bookmarklet no longer needed (S2S auth is automatic)
 if (relayBookmarklet) {
-  relayBookmarklet.href = getBookmarkletCode();
-  // Prevent click from navigating (it's meant to be dragged)
-  relayBookmarklet.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-  });
+  relayBookmarklet.style.display = 'none';
 }
 
 function openRelayModal() {
@@ -574,36 +567,18 @@ if (relaySetupDone) {
   });
 }
 
-// "Open da.live" → open popup and wait for relay
+// "Open da.live" → S2S auto-sign-in (relay no longer needed)
 if (relayOpenDA) {
   relayOpenDA.addEventListener('click', async () => {
     if (relayWaiting) relayWaiting.style.display = 'flex';
-    try {
-      const token = await relaySignIn();
-      if (token) {
-        // Show success
-        if (relayConnect) relayConnect.style.display = 'none';
-        if (relaySuccess) relaySuccess.style.display = '';
-        updateAuthUI();
-        da.resetMcpState?.();
-        // Auto-close after 1.5s
-        setTimeout(closeRelayModal, 1500);
-      }
-    } catch (err) {
-      if (err.message === 'popup-blocked') {
-        // eslint-disable-next-line no-alert
-        alert('Pop-up blocked — please allow pop-ups for this site.');
-      } else if (err.message === 'popup-closed') {
-        // User closed popup without relaying — check if token arrived via paste
-        if (isSignedIn()) {
-          if (relayConnect) relayConnect.style.display = 'none';
-          if (relaySuccess) relaySuccess.style.display = '';
-          updateAuthUI();
-          setTimeout(closeRelayModal, 1500);
-        } else {
-          if (relayWaiting) relayWaiting.style.display = 'none';
-        }
-      }
+    const ok = await signIn();
+    if (ok) {
+      if (relayConnect) relayConnect.style.display = 'none';
+      if (relaySuccess) relaySuccess.style.display = '';
+      updateAuthUI();
+      setTimeout(closeRelayModal, 1500);
+    } else {
+      if (relayWaiting) relayWaiting.style.display = 'none';
     }
   });
 }
