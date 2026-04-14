@@ -1,59 +1,71 @@
 /*
- * Compass SPA — EDS scripts.js
+ * Compass — EDS Bootstrap (scripts.js)
  *
- * The Compass SPA HTML is authored in DA (index page).
- * EDS renders it into the page, then this script loads app.js
- * which wires up all the interactivity.
+ * Architecture:
+ * 1. EDS serves DA content (minimal — just an Experience Workspace block table)
+ * 2. This script fetches the Compass SPA shell HTML from /scripts/compass-shell.html
+ * 3. Replaces the page body with the SPA shell
+ * 4. Loads app.css and app.js which wire up all interactivity
  *
- * We disable EDS block decoration since Compass is a SPA.
+ * This pattern lets the SPA HTML stay version-controlled in the code repo
+ * while DA content acts as the page trigger. Auth works natively on *.aem.page
+ * because imslib's darkalley redirect_uri includes aem.page origins.
  */
 
-const LCP_BLOCKS = [];
+async function bootstrap() {
+  try {
+    // Fetch the SPA shell HTML from the code bus
+    const resp = await fetch('/scripts/compass-shell.html');
+    if (!resp.ok) throw new Error(`Shell fetch failed: ${resp.status}`);
+    const shellHTML = await resp.text();
 
-function buildAutoBlocks() { }
-function decorateBlock() { }
+    // Replace body content with the SPA shell
+    document.body.innerHTML = shellHTML;
 
-async function loadEager(doc) {
-  // Remove default EDS header/footer (Compass has its own)
-  const header = doc.querySelector('header');
-  const footer = doc.querySelector('footer');
-  if (header) header.remove();
-  if (footer) footer.remove();
+    // Load SPA CSS
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = '/styles/app.css';
+    document.head.appendChild(css);
 
-  // Unwrap <main> — Compass expects body-level elements
-  const main = doc.querySelector('main');
-  if (main) {
-    const parent = main.parentElement;
-    while (main.firstChild) parent.insertBefore(main.firstChild, main);
-    main.remove();
+    // Load external libraries (PDF.js, Mammoth) — same as index.html
+    const pdfScript = document.createElement('script');
+    pdfScript.async = true;
+    pdfScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    pdfScript.integrity = 'sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e';
+    pdfScript.crossOrigin = 'anonymous';
+    pdfScript.onload = () => {
+      if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+    };
+    document.body.appendChild(pdfScript);
+
+    const mammothScript = document.createElement('script');
+    mammothScript.async = true;
+    mammothScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';
+    mammothScript.integrity = 'sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz';
+    mammothScript.crossOrigin = 'anonymous';
+    document.body.appendChild(mammothScript);
+
+    // Load the Compass app module
+    const appScript = document.createElement('script');
+    appScript.type = 'module';
+    appScript.src = '/scripts/app.js';
+    document.body.appendChild(appScript);
+
+    console.log('[Compass] SPA shell loaded, app.js bootstrapping on EDS');
+  } catch (err) {
+    console.error('[Compass] Bootstrap failed:', err);
+    document.body.innerHTML = `
+      <div style="font-family:system-ui;color:#e34850;display:flex;align-items:center;justify-content:center;height:100vh;background:#1a1a1a">
+        <div style="text-align:center">
+          <h2>Compass failed to load</h2>
+          <p style="color:#888">${err.message}</p>
+        </div>
+      </div>`;
   }
-
-  // Load the Compass app CSS
-  const css = document.createElement('link');
-  css.rel = 'stylesheet';
-  css.href = '/styles/app.css';
-  document.head.appendChild(css);
-
-  // Load the Compass app module
-  const script = document.createElement('script');
-  script.type = 'module';
-  script.src = '/scripts/app.js';
-  document.body.appendChild(script);
-
-  console.log('[Compass] SPA bootstrapped on EDS *.aem.page');
 }
 
-async function loadLazy() { }
-async function loadDelayed() { }
-
-// Auto-execute on load
-loadEager(document).catch(console.error);
-
-export {
-  buildAutoBlocks,
-  decorateBlock,
-  loadLazy,
-  loadDelayed,
-  loadEager,
-  LCP_BLOCKS,
-};
+// Auto-execute
+bootstrap();

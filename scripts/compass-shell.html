@@ -1,0 +1,658 @@
+  <div class="workspace">
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <div class="sidebar-top">
+        <button class="sidebar-btn active" title="Home" aria-label="Home" data-panel="home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4"/></svg>
+        </button>
+        <button class="sidebar-btn" title="Content" aria-label="Content" data-panel="content">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </button>
+        <button class="sidebar-btn" title="Code" aria-label="Code" data-panel="code">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        </button>
+      </div>
+      <div class="sidebar-bottom">
+        <button class="sidebar-btn" id="railSettingsBtn" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Main -->
+    <main class="main">
+      <!-- Header -->
+      <header class="header">
+        <div class="header-left">
+          <div class="adobe-logo">
+            <svg viewBox="0 0 30 26" fill="#e1251b" xmlns="http://www.w3.org/2000/svg"><polygon points="19,0 30,26 23.5,26 19.8,16.5 "/><polygon points="11,0 0,26 6.5,26 10.2,16.5 "/><polygon points="15,9.5 20,26 16.5,26 13,16.5 "/></svg>
+          </div>
+          <span class="header-title">Adobe Experience Manager</span>
+          <img id="customerLogo" class="customer-logo" style="display:none" alt="Customer logo">
+          <span id="headerCobrand" class="header-cobrand" style="display:none"></span>
+        </div>
+
+        <!-- Editor Toolbar (visible in content/editor mode) -->
+        <div class="header-center" id="editorToolbar" style="display:none">
+          <div class="layout-toggles">
+            <button class="layout-btn" data-layout="chat-only" title="Chat only">
+              <svg width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="currentColor" opacity="0.3"/><rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1" fill="none"/></svg>
+            </button>
+            <button class="layout-btn" data-layout="chat-preview" title="Chat + Preview">
+              <svg width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="1" width="6" height="14" rx="1" fill="currentColor" opacity="0.3"/><rect x="8" y="1" width="7" height="14" rx="1" fill="currentColor" opacity="0.6"/><rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1" fill="none"/></svg>
+            </button>
+            <button class="layout-btn active" data-layout="full" title="Chat + Preview + Resources">
+              <svg width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="1" width="4" height="14" rx="1" fill="currentColor" opacity="0.3"/><rect x="6" y="1" width="6" height="14" rx="1" fill="currentColor" opacity="0.6"/><rect x="13" y="1" width="2" height="14" rx="1" fill="currentColor" opacity="0.3"/><rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1" fill="none"/></svg>
+            </button>
+          </div>
+          <div class="breadcrumb" id="breadcrumb">
+            <span class="breadcrumb-item" data-nav="home">Home</span>
+          </div>
+        </div>
+
+        <div class="header-right">
+          <span id="authStatus" class="auth-status" style="display:none"></span>
+          <button id="settingsBtn" class="header-icon-btn" title="Settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          </button>
+          <!-- GitHub Connection -->
+          <div id="githubContainer" class="github-container">
+            <button id="githubBtn" class="header-icon-btn github-btn" title="GitHub">
+              <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+              <span class="github-status-dot" id="githubStatusDot"></span>
+            </button>
+            <div id="githubMenu" class="github-menu">
+              <!-- Connected state (shown when PAT is set) -->
+              <div id="githubConnectedState" style="display:none">
+                <div class="github-menu-profile">
+                  <img id="githubAvatar" class="github-avatar" alt="">
+                  <div class="github-info">
+                    <div class="github-name" id="githubName"></div>
+                    <div class="github-login" id="githubLogin"></div>
+                  </div>
+                </div>
+                <div class="github-menu-divider"></div>
+                <button class="github-menu-item" id="githubSyncBtn">
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M1.705 8.005a.75.75 0 01.834.656 5.5 5.5 0 009.592 2.97l-1.204-1.204a.25.25 0 01.177-.427h3.646a.25.25 0 01.25.25v3.646a.25.25 0 01-.427.177l-1.38-1.38A7.002 7.002 0 011.05 8.84a.75.75 0 01.656-.834zM8 2.5a5.487 5.487 0 00-4.131 1.869l1.204 1.204A.25.25 0 014.896 6H1.25A.25.25 0 011 5.75V2.104a.25.25 0 01.427-.177l1.38 1.38A7.002 7.002 0 0114.95 7.16a.75.75 0 11-1.49.178A5.5 5.5 0 008 2.5z"/></svg>
+                  Sync
+                </button>
+                <button class="github-menu-item" id="githubPushBtn">
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M4.44 9.56a.75.75 0 001.06 0L7 8.06v6.19a.75.75 0 001.5 0V8.06l1.5 1.5a.75.75 0 101.06-1.06l-2.78-2.78a.75.75 0 00-1.06 0L4.44 8.5a.75.75 0 000 1.06z"/><path d="M1.75 3a.75.75 0 010-1.5h12.5a.75.75 0 010 1.5H1.75z"/></svg>
+                  Push
+                </button>
+                <button class="github-menu-item" id="githubBranchBtn">
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V6A2.5 2.5 0 0110 8.5H6a1 1 0 00-1 1v1.128a2.251 2.251 0 11-1.5 0V5.372a2.25 2.25 0 111.5 0v1.836A2.492 2.492 0 016 7h4a1 1 0 001-1v-.628A2.25 2.25 0 019.5 3.25zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zM3.5 3.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0z"/></svg>
+                  Switch Branch
+                </button>
+                <button class="github-menu-item" id="githubReconnectBtn">
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M5.029 2.217a6.5 6.5 0 019.437 5.11.75.75 0 101.492-.154 8 8 0 00-14.09-4.171L1.1 2.2a.75.75 0 10-1.2.9l1.724 2.3a.75.75 0 001.05.175l2.3-1.724a.75.75 0 00-.9-1.2l-.985.738c.07-.075.142-.147.216-.218zM10.971 13.783a6.5 6.5 0 01-9.437-5.11.75.75 0 10-1.492.154 8 8 0 0014.09 4.171l.768.802a.75.75 0 101.2-.9l-1.724-2.3a.75.75 0 00-1.05-.175l-2.3 1.724a.75.75 0 10.9 1.2l.985-.738a6.472 6.472 0 01-.216.218z"/></svg>
+                  Reconnect
+                </button>
+                <button class="github-menu-item" id="githubSwitchSiteBtn">
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M1.543 7.25h2.733c.144-2.074.866-3.756 1.58-4.948.12-.197.237-.381.348-.55A6.507 6.507 0 001.543 7.25zm2.733 1.5H1.543a6.507 6.507 0 004.661 5.498 11.99 11.99 0 01-.348-.55c-.714-1.192-1.436-2.874-1.58-4.948zm1.504 0h4.44a10.542 10.542 0 01-1.432 4.442c-.59.985-1.252 1.637-1.788 1.989-.536-.352-1.198-1.004-1.788-1.989A10.542 10.542 0 015.78 8.75zm4.44-1.5H5.78c.158-1.867.783-3.374 1.432-4.442.59-.985 1.252-1.637 1.788-1.989.536.352 1.198 1.004 1.788 1.989.65 1.068 1.274 2.575 1.432 4.442zm1.504 1.5c-.144 2.074-.866 3.756-1.58 4.948-.12.197-.237.381-.348.55A6.507 6.507 0 0014.457 8.75h-2.733zm2.733-1.5a6.507 6.507 0 00-4.661-5.498c.111.169.228.353.348.55.714 1.192 1.436 2.874 1.58 4.948h2.733z"/></svg>
+                  Switch Site
+                </button>
+                <div class="github-menu-divider"></div>
+                <button class="github-menu-item github-menu-logout" id="githubLogoutBtn">
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M2 2.75C2 1.784 2.784 1 3.75 1h2.5a.75.75 0 010 1.5h-2.5a.25.25 0 00-.25.25v10.5c0 .138.112.25.25.25h2.5a.75.75 0 010 1.5h-2.5A1.75 1.75 0 012 13.25zm10.44 4.5H6.75a.75.75 0 000 1.5h5.69l-1.97 1.97a.749.749 0 101.06 1.06l3.25-3.25a.749.749 0 000-1.06l-3.25-3.25a.749.749 0 10-1.06 1.06l1.97 1.97z"/></svg>
+                  Logout
+                </button>
+              </div>
+              <!-- Disconnected state -->
+              <div id="githubDisconnectedState">
+                <div class="github-connect-header">Connect to GitHub</div>
+                <p class="github-connect-desc">Sign in to enable content editing and user identity.</p>
+                <button class="github-oauth-btn" id="githubOAuthBtn">
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                  Sign in with GitHub
+                </button>
+                <div class="github-connect-status" id="githubMenuStatus"></div>
+                <!-- PAT fallback (toggled on click) -->
+                <div class="github-pat-toggle">
+                  <a href="#" id="githubPatToggle" class="github-connect-link">Or paste a token manually</a>
+                </div>
+                <div id="githubPatFallback" style="display:none">
+                  <div class="github-connect-input-row">
+                    <input type="password" id="githubMenuTokenInput" class="github-connect-input" placeholder="ghp_...">
+                    <button class="github-connect-btn" id="githubMenuConnectBtn">Connect</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="authContainer" class="auth-container">
+            <button id="authBtn" class="auth-btn" title="Sign in with Adobe">Sign In</button>
+            <div id="userMenu" class="user-menu">
+              <div class="user-menu-profile">
+                <div class="user-avatar" id="userAvatar"></div>
+                <div class="user-info">
+                  <div class="user-name" id="userName"></div>
+                  <div class="user-email" id="userEmail"></div>
+                </div>
+              </div>
+              <div class="user-menu-divider"></div>
+              <button class="user-menu-signout" id="userSignOutBtn">Sign out</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Settings Panel -->
+      <div id="settingsPanel" class="settings-panel">
+       <div class="settings-panel-inner">
+        <div class="settings-header">
+          <div class="settings-title">Settings</div>
+          <button class="settings-close" id="settingsCloseBtn" aria-label="Close">&times;</button>
+        </div>
+
+        <label class="settings-label">Customer Profile</label>
+        <div id="orgSelector" class="org-selector"></div>
+        <button id="newProfileBtn" class="new-profile-btn">+ New Customer Profile</button>
+        <div class="settings-hint">Switch profiles or generate new ones from discovery notes</div>
+
+        <label class="settings-label" style="margin-top:16px" for="claudeKeyInput">Claude API Key</label>
+        <input type="password" id="claudeKeyInput" class="settings-input" placeholder="sk-ant-...">
+        <div class="settings-hint">Enables real AI chat, governance analysis, and brief processing</div>
+
+        <label class="settings-label" style="margin-top:16px" for="githubTokenInput">GitHub Token (PAT)</label>
+        <div class="settings-token-row">
+          <input type="password" id="githubTokenInput" class="settings-input" placeholder="ghp_...">
+          <button class="settings-token-btn" id="githubTokenBtn" title="Set token">Set</button>
+        </div>
+        <div class="settings-hint">
+          GitHub Personal Access Token for reading/writing content. This is the primary auth method.
+          <a href="https://github.com/settings/tokens" target="_blank" class="settings-link">Create a PAT</a>
+        </div>
+        <div class="settings-token-status" id="githubTokenStatus"></div>
+
+        <label class="settings-label" style="margin-top:16px" for="imsTokenInput">Adobe IMS Token</label>
+        <div class="settings-token-row">
+          <input type="password" id="imsTokenInput" class="settings-input" placeholder="eyJhbGci...">
+          <button class="settings-token-btn" id="imsTokenBtn" title="Paste token">Set</button>
+        </div>
+        <div class="settings-hint">
+          Paste your IMS token to enable DA content editing (fallback).
+          <a href="#" id="imsTokenHelp" class="settings-link">How to get your token</a>
+        </div>
+        <div class="settings-token-status" id="imsTokenStatus"></div>
+
+        <label class="settings-label" style="margin-top:16px">MCP Connectors</label>
+        <div id="settingsConnectors" class="settings-connectors"></div>
+        <div class="settings-hint">Registered connectors from Admin Console</div>
+
+        <!-- Workfront Webhook -->
+        <div class="settings-divider"></div>
+        <label class="settings-label">Workfront Integration</label>
+        <div class="settings-hint" style="margin-bottom:8px">Connect an N8N or webhook endpoint to create real Workfront approval tasks. Leave empty for simulated demo mode.</div>
+        <label class="settings-label-sm" for="workfrontWebhookInput">Webhook URL</label>
+        <div class="settings-token-row">
+          <input type="url" id="workfrontWebhookInput" class="settings-input" placeholder="https://n8n.example.com/webhook/...">
+          <button class="settings-token-btn" id="workfrontWebhookBtn" title="Set webhook">Set</button>
+        </div>
+        <div class="settings-token-status" id="workfrontWebhookStatus"></div>
+
+        <!-- Brand Governance -->
+        <div class="settings-divider"></div>
+        <label class="settings-label">Brand Governance</label>
+        <div class="settings-hint" style="margin-bottom:8px">Upload brand guidelines or connect an enterprise MCP endpoint. Policies extracted here are enforced in every governance scan.</div>
+
+        <div class="brand-config">
+          <div class="brand-config-row">
+            <label class="brand-config-label">Brand PDF</label>
+            <div class="brand-upload-wrap">
+              <input type="file" id="brandPdfInput" accept=".pdf" style="display:none">
+              <button class="brand-upload-btn" id="brandUploadBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Upload PDF
+              </button>
+              <span class="brand-upload-status" id="brandPdfStatus">No file</span>
+            </div>
+          </div>
+
+          <div class="brand-config-row">
+            <label class="brand-config-label">Brand URL</label>
+            <input type="text" class="brand-url-input" id="brandUrlInput" placeholder="https://brand.example.com/guidelines" autocomplete="off">
+          </div>
+
+          <div class="brand-config-row">
+            <label class="brand-config-label">Enterprise MCP</label>
+            <input type="text" class="brand-url-input" id="brandMcpInput" placeholder="https://brand-mcp.customer.com/v1/policies" autocomplete="off">
+            <div class="settings-hint" style="margin-top:4px">Customer-controlled brand policy endpoint — we query, they own the rules</div>
+          </div>
+
+          <button class="brand-extract-btn" id="brandExtractBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            Extract Brand Policies
+          </button>
+        </div>
+
+        <!-- Active Brand Policies -->
+        <div class="brand-policies" id="brandPolicies">
+          <div class="brand-policies-header">
+            <span class="brand-policies-title">Active Policies</span>
+            <span class="brand-policies-count" id="brandPolicyCount">0 rules</span>
+          </div>
+          <div class="brand-policies-list" id="brandPolicyList">
+            <div class="brand-policy-empty">No brand policies configured. Upload a PDF, paste a URL, or connect an enterprise MCP endpoint above.</div>
+          </div>
+        </div>
+
+        <div class="settings-actions">
+          <button class="settings-save" id="settingsSaveBtn">Save</button>
+          <button class="settings-cancel" id="settingsCancelBtn">Cancel</button>
+        </div>
+       </div>
+      </div>
+
+      <!-- Sign-In Relay Modal -->
+      <div id="relayModal" class="relay-modal" role="dialog" aria-modal="true" aria-label="IMS Token Relay">
+        <div class="relay-modal-content">
+          <div class="relay-modal-header">
+            <span class="relay-modal-title">Sign In with Adobe</span>
+            <button id="relayModalClose" class="relay-modal-close" aria-label="Close">&times;</button>
+          </div>
+
+          <!-- Step 1: Setup bookmarklet (shown first time only) -->
+          <div id="relaySetup" class="relay-step">
+            <div class="relay-step-num">One-time setup</div>
+            <p class="relay-step-desc">Drag this button to your bookmarks bar:</p>
+            <div class="relay-bookmarklet-wrap">
+              <a id="relayBookmarklet" class="relay-bookmarklet" href="#">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                Send to EW
+              </a>
+            </div>
+            <p class="relay-hint">Drag it up to your bookmark/favorites bar. You only need to do this once.</p>
+            <button id="relaySetupDone" class="relay-next-btn">I've added it &rarr;</button>
+          </div>
+
+          <!-- Step 2: Open da.live + relay -->
+          <div id="relayConnect" class="relay-step" style="display:none">
+            <div class="relay-instructions">
+              <div class="relay-instruction">
+                <span class="relay-num">1</span>
+                <span>Click below to open <strong>da.live</strong> &mdash; sign in if needed</span>
+              </div>
+              <div class="relay-instruction">
+                <span class="relay-num">2</span>
+                <span>Once signed in, click your <strong>"Send to EW"</strong> bookmark</span>
+              </div>
+            </div>
+            <button id="relayOpenDA" class="relay-open-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              Open da.live
+            </button>
+            <div class="relay-waiting" id="relayWaiting" style="display:none">
+              <div class="relay-spinner"></div>
+              <span>Waiting for token&hellip;</span>
+            </div>
+          </div>
+
+          <!-- Step 3: Success -->
+          <div id="relaySuccess" class="relay-step" style="display:none">
+            <div class="relay-success-icon">&#10003;</div>
+            <div class="relay-success-text">Signed in! DA editing enabled.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Profile Generator Modal -->
+      <div id="profileModal" class="profile-modal" role="dialog" aria-modal="true" aria-label="Customer Profile">
+        <div class="profile-modal-content">
+          <div class="profile-modal-header">
+            <span class="profile-modal-title">Generate Customer Profile</span>
+            <button id="profileModalClose" class="profile-modal-close" aria-label="Close">&times;</button>
+          </div>
+
+          <!-- Step 1: Input -->
+          <div id="profileStep1" class="profile-step">
+            <p class="profile-step-desc">Paste discovery call notes and/or a customer URL. The AI will extract brand voice, segments, approval chains, legal rules, and more.</p>
+
+            <label class="settings-label">Customer Website URL</label>
+            <input type="url" id="profileUrl" class="settings-input" placeholder="https://corporate.ralphlauren.com">
+            <div class="settings-hint">We'll scrape brand colors, typography, content structure, and navigation</div>
+
+            <label class="settings-label" style="margin-top:14px">Discovery Notes</label>
+            <textarea id="profileNotes" class="profile-textarea" rows="8" placeholder="Paste discovery call notes, customer requirements, or any context about the customer...&#10;&#10;Example:&#10;- Assets-only customer (very mature)&#10;- Wanting to learn about Sites&#10;- Lost a deal to Contentful&#10;- Corporate 'About RL' site is hand-coded&#10;- Key audiences: investors, press, careers"></textarea>
+            <div class="profile-upload-row">
+              <button id="profileUploadBtn" class="profile-upload-btn">Upload notes file</button>
+              <span id="profileFileName" class="profile-file-name"></span>
+            </div>
+
+            <button id="profileGenerateBtn" class="profile-generate-btn">Generate Profile</button>
+          </div>
+
+          <!-- Step 2: Generating -->
+          <div id="profileStep2" class="profile-step" style="display:none">
+            <div class="profile-generating">
+              <div class="profile-gen-spinner"></div>
+              <div class="profile-gen-status" id="profileGenStatus">Analyzing customer...</div>
+              <div class="profile-gen-steps" id="profileGenSteps"></div>
+            </div>
+          </div>
+
+          <!-- Step 3: Review & Save -->
+          <div id="profileStep3" class="profile-step" style="display:none">
+            <p class="profile-step-desc">Review the generated profile. Edit any fields, then save.</p>
+            <div id="profilePreview" class="profile-preview"></div>
+            <textarea id="profileJson" class="profile-json-editor" rows="12"></textarea>
+            <div class="profile-actions">
+              <button id="profileSaveBtn" class="profile-generate-btn">Save & Activate Profile</button>
+              <button id="profileBackBtn" class="settings-cancel">Back</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ HOME VIEW ═══ -->
+      <div class="view-home" id="viewHome">
+        <div class="home-scroll">
+          <!-- Hero Banner -->
+          <div class="home-hero">
+            <div class="home-hero-overlay"></div>
+            <div class="home-prompt-bar">
+              <button class="home-prompt-attach" title="Upload file">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+              </button>
+              <input type="text" class="home-prompt-input" id="homePromptInput" placeholder="Describe what you want to build..." autocomplete="off" aria-label="Describe what you want to build">
+              <button class="home-prompt-generate" id="homePromptSend">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                Generate
+              </button>
+            </div>
+            <div class="home-hero-help">Not sure how to prompt? <a href="#" id="helpLink">Let us help!</a></div>
+          </div>
+
+          <!-- Tagline -->
+          <div class="home-tagline">Discover. Govern. Optimize.</div>
+
+          <!-- Connect Site -->
+          <div class="connect-site" id="connectSite">
+            <div class="connect-site-label">Connect your site</div>
+            <div class="connect-site-row">
+              <div class="connect-site-input-wrap">
+                <input type="text" class="connect-site-input" id="connectSiteInput" placeholder="org/repo or .aem.page URL" autocomplete="off" aria-label="GitHub org/repo or AEM URL">
+                <button class="connect-site-btn" id="connectSiteBtn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                  Connect
+                </button>
+              </div>
+              <div class="connect-site-status" id="connectSiteStatus"></div>
+            </div>
+            <div class="connect-site-hint">Paste an .aem.page URL or enter org/repo to connect</div>
+            <div class="recent-repos" id="recentRepos"></div>
+          </div>
+
+          <!-- 3 Cards — PMM Use Cases -->
+          <div class="home-cards">
+            <div class="home-card" data-flow="demo-modernize" data-prompt="Run the Modernize for AI demo — check AI visibility, audit content freshness, and build an action plan">
+              <div class="home-card-thumb" style="background:linear-gradient(135deg, #1a1040 0%, #4a1068 40%, #e34850 100%)">
+                <div class="home-card-thumb-icon">&#129302;</div>
+              </div>
+              <div class="home-card-body">
+                <div class="home-card-title">Modernize for AI<span class="home-card-menu">&#8943;</span></div>
+                <div class="home-card-desc">Check AI visibility, audit content freshness, and build an action plan for AI-native discovery.</div>
+                <div class="home-card-status"><span class="home-card-dot"></span>Ready</div>
+              </div>
+            </div>
+
+            <div class="home-card" data-flow="demo-compliance" data-prompt="Run the Brand Compliance demo — governance check, content fragments, asset DRM, and compliance report">
+              <div class="home-card-thumb" style="background:linear-gradient(135deg, #0a2040 0%, #1a4068 40%, #4a5cdb 100%)">
+                <div class="home-card-thumb-icon">&#128737;</div>
+              </div>
+              <div class="home-card-body">
+                <div class="home-card-title">Brand compliance<span class="home-card-menu">&#8943;</span></div>
+                <div class="home-card-desc">Scan pages for brand violations, check asset DRM, and get a full compliance report.</div>
+                <div class="home-card-status"><span class="home-card-dot"></span>Ready</div>
+              </div>
+            </div>
+
+            <div class="home-card" data-flow="demo-production" data-prompt="Run the Speed Production demo — pipeline check, asset search, renditions, content variants, and optimization">
+              <div class="home-card-thumb" style="background:linear-gradient(135deg, #102a10 0%, #1a5028 40%, #34d399 100%)">
+                <div class="home-card-thumb-icon">&#9889;</div>
+              </div>
+              <div class="home-card-body">
+                <div class="home-card-title">Speed up production<span class="home-card-menu">&#8943;</span></div>
+                <div class="home-card-desc">Pipeline check, asset search, image renditions, content variants, and optimization — all in one flow.</div>
+                <div class="home-card-status"><span class="home-card-dot"></span>Ready</div>
+              </div>
+            </div>
+
+            <div class="home-card" data-flow="demo-enterprise" data-prompt="Run the Enterprise Workflow demo — document intake, AI compliance fix, governance gate, and Workfront approval">
+              <div class="home-card-thumb" style="background:linear-gradient(135deg, #2a1a00 0%, #8b4513 40%, #ff8c00 100%)">
+                <div class="home-card-thumb-icon">&#128203;</div>
+              </div>
+              <div class="home-card-body">
+                <div class="home-card-title">Enterprise workflow<span class="home-card-menu">&#8943;</span></div>
+                <div class="home-card-desc">Document intake, AI compliance fix, governance gate, and Workfront approval — 3 days to 10 minutes.</div>
+                <div class="home-card-status"><span class="home-card-dot"></span>Ready</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Actions — PMM "Find Your Path" -->
+          <div class="home-quick-actions">
+            <button class="prompt-chip" data-flow="find-content">
+              <span class="prompt-chip-icon">&#128269;</span>Find content faster
+            </button>
+            <button class="prompt-chip" data-flow="image-variants">
+              <span class="prompt-chip-icon">&#127912;</span>Channel-ready images
+            </button>
+            <button class="prompt-chip" data-flow="fix-pipeline">
+              <span class="prompt-chip-icon">&#128295;</span>Fix my pipeline
+            </button>
+            <button class="prompt-chip" data-flow="brand-compliance">
+              <span class="prompt-chip-icon">&#128737;</span>Brand compliance
+            </button>
+            <button class="prompt-chip" data-flow="update-content">
+              <span class="prompt-chip-icon">&#9889;</span>Update content fast
+            </button>
+          </div>
+
+          <!-- Connected Site Badge (hidden until a site is connected) -->
+          <div class="home-site-badge" id="homeSiteBadge" style="display:none">
+            <span class="site-dot connected"></span>
+            <span class="home-site-name" id="homeSiteName"></span>
+            <span class="home-site-url" id="homeSiteUrl"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ EDITOR VIEW (3-panel: Chat | Preview | Resources) ═══ -->
+      <div class="view-editor" id="viewEditor" style="display:none">
+        <div class="panels" id="panels" data-layout="full">
+
+          <!-- Chat Panel -->
+          <div class="panel-chat" id="panelChat">
+            <div class="chat-area" id="chatMessages">
+              <div class="chat-welcome">
+                <div class="chat-welcome-title">Welcome</div>
+                <div class="chat-welcome-sub">Hi, I can help you create and manage content for your Edge Delivery Services site.</div>
+              </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+              <div class="input-mode-bar">
+                <div class="mode-toggle" id="modeToggle">
+                  <button class="mode-btn active" data-mode="execute" title="Execute mode — AI modifies files directly">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Execute
+                  </button>
+                  <button class="mode-btn" data-mode="plan" title="Plan mode — AI analyzes and proposes strategy before changes">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+                    Plan
+                  </button>
+                </div>
+                <div class="design-selection" id="designSelection" style="display:none">
+                  <span class="design-selection-badge">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                    <span id="designSelectionLabel">element</span>
+                  </span>
+                  <button class="design-selection-clear" id="designSelectionClear" title="Remove selection">&times;</button>
+                </div>
+              </div>
+              <div class="input-wrapper">
+                <button class="attach-btn" title="Upload file" aria-label="Upload file">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+                </button>
+                <textarea class="chat-input" id="chatInput" placeholder="Talk to Compass..." autocomplete="off" aria-label="Chat message" rows="1"></textarea>
+                <button class="send-btn" id="sendBtn" title="Send" aria-label="Send message">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Resize Handle (drag to resize chat ↔ preview) -->
+          <div class="panel-resize-handle" id="panelResizeHandle" title="Drag to resize"></div>
+
+          <!-- Preview Panel -->
+          <div class="panel-preview" id="panelPreview">
+            <div class="preview-toolbar">
+              <div class="preview-locale">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+                <select class="locale-select" id="localeSelect" aria-label="Locale">
+                  <option value="">Global</option>
+                </select>
+              </div>
+              <div class="preview-site-url" id="previewSiteUrl" title="Click to switch site">
+                <span class="site-dot connected" id="previewDot"></span>
+                <span class="preview-url-text" id="previewUrlText">Not connected</span>
+                <input type="text" class="site-switch-input" id="siteSwitchInput" placeholder="org/repo or URL" autocomplete="off" style="display:none">
+              </div>
+              <div class="preview-view-tabs" id="previewViewTabs">
+                <button class="preview-view-tab active" data-view="preview" title="Page preview">Preview</button>
+                <button class="preview-view-tab" data-view="design" title="Design mode — click elements to add to prompt">Design</button>
+                <button class="preview-view-tab" data-view="jcr" title="JCR XML view — AEM content structure">JCR XML</button>
+              </div>
+              <div class="preview-actions">
+                <select class="branch-select" id="branchSelect" title="Branch">
+                  <option value="main">main</option>
+                </select>
+                <button class="preview-action-btn preview-action-da" id="editInDABtn" title="Edit in Document Authoring (DA)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                  DA
+                </button>
+                <button class="preview-action-btn preview-action-ue" id="editInUEBtn" title="Edit in Universal Editor">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  UE
+                </button>
+                <button class="preview-action-btn" id="refreshPreviewBtn" title="Refresh preview">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                </button>
+                <button class="preview-action-btn preview-action-pkg" id="packageBtn" title="Package content for upload">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 002 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0022 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                  Pkg
+                </button>
+              </div>
+            </div>
+            <div class="preview-frame-wrap" id="previewFrameWrap">
+              <iframe class="preview-frame" id="previewFrame" src="about:blank" title="Page Preview"></iframe>
+              <div class="design-overlay" id="designOverlay" style="display:none"></div>
+              <div class="jcr-view" id="jcrView" style="display:none">
+                <pre class="jcr-xml-content" id="jcrXmlContent">Select a page to view its JCR structure.</pre>
+              </div>
+            </div>
+            <!-- Content Package Modal -->
+            <div class="package-modal" id="packageModal" style="display:none" role="dialog" aria-modal="true" aria-label="Package Content">
+              <div class="package-modal-inner">
+                <div class="package-modal-header">
+                  <span>Package Content</span>
+                  <button class="package-modal-close" id="packageModalClose" aria-label="Close">&times;</button>
+                </div>
+                <div class="package-modal-body">
+                  <div class="package-pages" id="packagePages"></div>
+                  <div class="package-options">
+                    <label class="package-label">Package name</label>
+                    <input type="text" class="package-input" id="packageName" placeholder="my-site-content">
+                    <label class="package-label" style="margin-top:8px">Upload images</label>
+                    <label class="package-checkbox"><input type="checkbox" id="packageImages" checked> Include referenced images</label>
+                  </div>
+                </div>
+                <div class="package-modal-footer">
+                  <button class="package-cancel-btn" id="packageCancelBtn">Cancel</button>
+                  <button class="package-upload-btn" id="packageUploadBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    Upload to DA
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Resources Panel -->
+          <div class="panel-resources" id="panelResources">
+            <div class="resources-header">
+              <div class="resources-tabs">
+                <button class="resources-tab active" data-tab="pages">Pages</button>
+                <button class="resources-tab" data-tab="files">Files</button>
+              </div>
+            </div>
+            <div class="resources-tree" id="resourcesTree">
+              <div class="resources-loading">Loading...</div>
+            </div>
+            <div class="file-tree" id="fileTree" style="display:none">
+              <div class="resources-loading">Click to load files...</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <footer class="site-footer" aria-label="Footer">
+        <nav aria-label="Footer">
+          <a href="/" class="footer-brand">Adobe Experience Manager</a>
+          <span class="footer-sep">/</span>
+          <span class="footer-sub">Edge Delivery Services</span>
+        </nav>
+      </footer>
+
+    </main>
+  </div>
+
+  <!-- Demo Admin Modal -->
+  <div class="demo-admin-modal" id="demoAdminModal" role="dialog" aria-modal="true" aria-labelledby="demoAdminTitle">
+    <div class="demo-admin-content">
+      <div class="demo-admin-header">
+        <h2 id="demoAdminTitle">Demo Admin</h2>
+        <button class="demo-admin-close" id="demoAdminClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="demo-admin-body">
+        <div class="demo-admin-section">
+          <label class="demo-admin-label">Customer Co-Brand Logo</label>
+          <p class="demo-admin-hint">Appears as "Adobe Experience Manager x [Customer]" in the nav bar.</p>
+          <div class="demo-admin-field">
+            <label for="logoUrlInput">Logo URL</label>
+            <input type="url" id="logoUrlInput" class="demo-admin-input" placeholder="https://example.com/logo.png">
+          </div>
+          <div class="demo-admin-field">
+            <label for="logoFileInput">Or upload a file</label>
+            <input type="file" id="logoFileInput" accept="image/png,image/jpeg,image/svg+xml,image/webp">
+          </div>
+          <div class="demo-admin-row">
+            <div class="demo-admin-field" style="flex:1">
+              <label for="logoHeightInput">Height (px)</label>
+              <input type="number" id="logoHeightInput" class="demo-admin-input" value="20" min="16" max="48">
+            </div>
+            <div class="demo-admin-field" style="flex:2">
+              <label for="logoNameInput">Company name</label>
+              <input type="text" id="logoNameInput" class="demo-admin-input" placeholder="Acme Corp">
+            </div>
+          </div>
+          <div class="demo-admin-preview" id="logoPreview" style="display:none">
+            <span class="demo-admin-preview-label">Preview:</span>
+            <img id="logoPreviewImg" alt="">
+          </div>
+          <div class="demo-admin-actions">
+            <button class="demo-admin-btn primary" id="logoApplyBtn">Apply</button>
+            <button class="demo-admin-btn" id="logoRemoveBtn">Remove</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- External libs loaded by scripts.js -->
+
