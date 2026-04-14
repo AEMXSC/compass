@@ -25,13 +25,20 @@ const ALLOWED_ORIGINS = [
   'https://aemxsc.github.io',
   'http://localhost:3000',
   'http://localhost:3001',
+  'https://main--compass--aemxsc.aem.page',
+  'https://eds-migration--compass--aemxsc.aem.page',
+  'https://main--compass--aemxsc.aem.live',
 ];
 
 // Allowed return-to base URLs (must start with one of these)
+// Includes *.aem.page and *.aem.live for EDS-hosted Compass
 const ALLOWED_RETURN_URLS = [
   'https://aemxsc.github.io/compass/',
   'http://localhost:3000/',
   'http://localhost:3001/',
+  'https://main--compass--aemxsc.aem.page/',
+  'https://eds-migration--compass--aemxsc.aem.page/',
+  'https://main--compass--aemxsc.aem.live/',
 ];
 
 // Cache the S2S token in memory (lives as long as the Worker instance)

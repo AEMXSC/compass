@@ -89,14 +89,20 @@ async function tryImsLib() {
       resolve(false);
     }, IMS_TIMEOUT);
 
+    // DA uses Stage IMS for aem.page, Prod for aem.live and da.live
+    const host = window.location.hostname;
+    const isStage = host.endsWith('.aem.page') || host === 'localhost';
+    const imsEnv = isStage ? 'stg1' : 'prod';
+
     window.adobeid = {
       client_id: IMS_CLIENT_ID,
       scope: IMS_SCOPE,
       locale: 'en_US',
       autoValidateToken: true,
-      environment: 'prod',
+      environment: imsEnv,
       useLocalStorage: true,
-      modalMode: true, // popup auth — avoids redirect, works cross-origin on github.io
+      modalMode: true,
+      modalSettings: { allowedOrigin: window.location.origin },
       onReady: () => {
         clearTimeout(timeout);
         imsLibLoaded = true;
