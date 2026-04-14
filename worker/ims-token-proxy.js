@@ -288,7 +288,7 @@ async function handleTokenProxy(request) {
 /* ─── GET /ims/login — Redirect to Adobe IMS for user-level auth ─── */
 
 const COMPASS_OAUTH_CLIENT_ID = '8477ad6112764435814b12d28a778647';
-const COMPASS_OAUTH_USER_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext';
+const COMPASS_OAUTH_USER_SCOPE = 'AdobeID,openid';
 
 async function handleImsLogin(request) {
   const url = new URL(request.url);
