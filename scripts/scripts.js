@@ -46,6 +46,9 @@ async function loadEager(doc) {
 async function loadLazy() { }
 async function loadDelayed() { }
 
+// Auto-execute on load
+loadEager(document).catch(console.error);
+
 export {
   buildAutoBlocks,
   decorateBlock,
