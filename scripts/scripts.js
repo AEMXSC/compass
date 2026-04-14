@@ -31,7 +31,7 @@ async function loadEager(doc) {
   // Load the Compass app CSS
   const css = document.createElement('link');
   css.rel = 'stylesheet';
-  css.href = '/app.css';
+  css.href = '/styles/app.css';
   document.head.appendChild(css);
 
   // Load the Compass app module
