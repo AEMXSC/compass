@@ -370,7 +370,8 @@ async function handleImsCallback(request) {
     const token = data.access_token;
     const expiresIn = data.expires_in || '86400000';
 
-    // Serve HTML page that postMessages the token back to Compass (popup flow)
+    // Serve HTML page that relays token back to Compass
+    // Strategy: try postMessage first (popup flow), then redirect with hash (fallback)
     const html = `<!DOCTYPE html>
 <html><head><title>Compass Auth</title></head>
 <body>
@@ -380,19 +381,36 @@ async function handleImsCallback(request) {
   var token = ${JSON.stringify(token)};
   var expiresIn = ${JSON.stringify(String(expiresIn))};
   var returnTo = ${JSON.stringify(returnTo)};
+  var sent = false;
 
+  // Try postMessage to opener (popup flow)
   if (window.opener) {
-    window.opener.postMessage({
-      type: 'ew-ims-relay',
-      token: token,
-      expires_in: expiresIn
-    }, '*');
-    setTimeout(function() { window.close(); }, 1500);
-  } else if (returnTo) {
+    try {
+      window.opener.postMessage({
+        type: 'ew-ims-relay',
+        token: token,
+        expires_in: expiresIn
+      }, '*');
+      sent = true;
+      document.body.innerHTML = '<p>Signed in! This window will close...</p>';
+      setTimeout(function() { window.close(); }, 1500);
+    } catch(e) { /* opener lost */ }
+  }
+
+  // Fallback: always redirect back with token in hash
+  // This works even if window.opener is null (lost after cross-origin redirects)
+  if (!sent && returnTo) {
     window.location.href = returnTo + '#ims_token=' + encodeURIComponent(token)
       + '&expires_in=' + encodeURIComponent(expiresIn);
-  } else {
-    document.body.innerHTML = '<p>Signed in but no return URL.</p>';
+  } else if (sent) {
+    // Also redirect as backup — if postMessage was sent but Compass didn't receive it,
+    // the hash token will be picked up on next page load
+    setTimeout(function() {
+      if (!document.hidden) {
+        window.location.href = returnTo + '#ims_token=' + encodeURIComponent(token)
+          + '&expires_in=' + encodeURIComponent(expiresIn);
+      }
+    }, 3000);
   }
 })();
 </script>
