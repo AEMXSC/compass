@@ -18,7 +18,7 @@ import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
 import * as aemAssets from './aem-assets-client.js';
-import { contentUpdaterMcp, developmentMcp, cjaMcp, acrobatMcp, marketingMcp } from './mcp-client.js';
+import { contentUpdaterMcp, developmentMcp, cjaMcp, acrobatMcp, marketingMcp, aemUnifiedMcp } from './mcp-client.js';
 import * as wf from './workfront.js';
 const { hasWebhook, createTaskViaWebhook } = wf;
 import { getSiteType } from './site-detect.js';
@@ -1321,6 +1321,65 @@ const AEM_TOOLS = [
       required: ['url'],
     },
   },
+
+  /* ─── Unified AEM MCP (/adobe/mcp/aem) ─── */
+  /* Code-execution model: tools accept JavaScript that runs in a sandboxed env with aem.get(), aem.post(), etc. */
+
+  {
+    name: 'aem_list_environments',
+    description: 'Unified AEM MCP — List all AEM environments and sites available to this account.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'aem_lookup_api',
+    description: 'Unified AEM MCP — Discover AEM API endpoints, code recipes, and feature flags. Use this BEFORE calling aem_read or aem_write to find the correct API paths. Pass JavaScript code that calls spec.search() or recipes.search().',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: "JavaScript code. Must use `return`. Examples: `return spec.search('fragment');` or `return recipes.search('update page');`" },
+        aem_url: { type: 'string', description: 'AEM environment URL (optional). Filters specs to endpoints available on that tier.' },
+      },
+      required: ['code'],
+    },
+  },
+  {
+    name: 'aem_read',
+    description: 'Unified AEM MCP — Execute read-only AEM API calls (GET/HEAD). ALWAYS call aem_lookup_api first to find the correct endpoint. Pass JavaScript code that uses aem.get(). Returns page content, fragments, assets, site structure, etc.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Async JavaScript with aem.get() / aem.head(). Must use `return`.' },
+        aem_url: { type: 'string', description: "AEM environment URL (e.g., 'https://author-p153659-e1614585.adobeaemcloud.com')" },
+      },
+      required: ['code', 'aem_url'],
+    },
+  },
+  {
+    name: 'aem_write',
+    description: 'Unified AEM MCP — Execute AEM API mutations (POST/PUT/PATCH). ALWAYS call aem_lookup_api first. Pass JavaScript code that uses aem.post(), aem.put(), aem.patch(). Set confirmed=true to execute for real (default is dry-run).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Async JavaScript with aem.post(), aem.put(), aem.patch(). Must use `return`.' },
+        aem_url: { type: 'string', description: 'AEM environment URL' },
+        confirmed: { type: 'boolean', description: 'Set true to execute mutations. Default false = dry-run simulation.' },
+      },
+      required: ['code', 'aem_url'],
+    },
+  },
+  {
+    name: 'aem_delete',
+    description: 'Unified AEM MCP — Delete AEM content. IRREVERSIBLE. ALWAYS call aem_lookup_api first. Requires two-step confirmation: first call with confirmed=false (dry-run), then confirmed=true.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Async JavaScript with aem.get() and aem.delete(). Must use `return`.' },
+        aem_url: { type: 'string', description: 'AEM environment URL' },
+        confirmed: { type: 'boolean', description: 'Set true after a successful dry-run. Requires prior dry-run in same session.' },
+      },
+      required: ['code', 'aem_url'],
+    },
+  },
 ];
 
 /* ── Tool → Official Adobe Agent Mapping (for UI badges) ── */
@@ -1341,6 +1400,12 @@ export const TOOL_AGENT_MAP = {
   patch_aem_page_content: 'Experience Production Agent',
   create_aem_page: 'Experience Production Agent',
   list_aem_pages: 'Experience Production Agent',
+  // ── Unified AEM MCP (code-execution model) ──
+  aem_list_environments: 'Adobe Agent',
+  aem_lookup_api: 'Adobe Agent',
+  aem_read: 'Adobe Agent',
+  aem_write: 'Adobe Agent',
+  aem_delete: 'Adobe Agent',
   delete_aem_page: 'Experience Production Agent',
   list_aem_templates: 'Experience Production Agent',
   create_aem_launch: 'Experience Production Agent',
@@ -3873,6 +3938,71 @@ async function executeTool(name, input) {
       }
     }
 
+    /* ─── Unified AEM MCP (code-execution model) ─── */
+
+    case 'aem_list_environments': {
+      if (!(await ensureAuth())) return authRequiredError('aem_list_environments');
+      try {
+        const result = await aemUnifiedMcp.callTool('list-aem-environments', {});
+        return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('aem_list_environments', err);
+      }
+    }
+
+    case 'aem_lookup_api': {
+      if (!(await ensureAuth())) return authRequiredError('aem_lookup_api');
+      try {
+        const args = { code: input.code };
+        if (input.aem_url) args.aemUrl = input.aem_url;
+        const result = await aemUnifiedMcp.callTool('lookup-api-spec', args);
+        return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('aem_lookup_api', err);
+      }
+    }
+
+    case 'aem_read': {
+      if (!(await ensureAuth())) return authRequiredError('aem_read');
+      try {
+        const result = await aemUnifiedMcp.callTool('read-api', {
+          code: input.code,
+          aemUrl: input.aem_url,
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('aem_read', err);
+      }
+    }
+
+    case 'aem_write': {
+      if (!(await ensureAuth())) return authRequiredError('aem_write');
+      try {
+        const result = await aemUnifiedMcp.callTool('write-api', {
+          code: input.code,
+          aemUrl: input.aem_url,
+          confirmed: input.confirmed || false,
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('aem_write', err);
+      }
+    }
+
+    case 'aem_delete': {
+      if (!(await ensureAuth())) return authRequiredError('aem_delete');
+      try {
+        const result = await aemUnifiedMcp.callTool('delete-api', {
+          code: input.code,
+          aemUrl: input.aem_url,
+          confirmed: input.confirmed || false,
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('aem_delete', err);
+      }
+    }
+
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -4338,6 +4468,13 @@ This is an **AEM CS (JCR)** site. You MUST use these tools:
 **Launches:**
 - Create: \`create_aem_launch\`
 - Promote: \`promote_aem_launch\`
+
+**Unified AEM API (advanced — code execution):**
+- Discover APIs: \`aem_lookup_api\` (find API endpoints before read/write)
+- Read: \`aem_read\` (execute GET calls via sandboxed JavaScript)
+- Write: \`aem_write\` (execute POST/PUT/PATCH — dry-run by default, set confirmed=true to execute)
+- Delete: \`aem_delete\` (requires two-step confirmation)
+- List envs: \`aem_list_environments\`
 
 **DO NOT** use DA tools (edit_page_content, preview_page, list_site_pages) — they are not available for this site.`;
     } else if (isDa) {

@@ -229,3 +229,11 @@ export const marketingMcp = createMcpClient('/adobe/mcp/marketing-agent', 'Marke
 
 /** Spacecat / AEM Sites Optimizer — site audits, SEO, CWV, broken backlinks. */
 export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
+
+/**
+ * Unified AEM MCP — code-execution model with full read/write/delete.
+ * Tools: list-aem-environments, lookup-api-spec, read-api, write-api, delete-api.
+ * This is the recommended endpoint from Experience League docs.
+ * Tools accept JavaScript code that runs in a sandboxed environment with aem.get(), aem.post(), etc.
+ */
+export const aemUnifiedMcp = createMcpClient('/adobe/mcp/aem', 'AEM-Unified');
