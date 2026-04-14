@@ -291,6 +291,15 @@ function handleRelayMessage(event) {
 }
 window.addEventListener('message', handleRelayMessage);
 
+// Listen for localStorage changes from auth popup (same-origin cross-window communication)
+window.addEventListener('storage', (event) => {
+  if (event.key === TOKEN_KEY && event.newValue) {
+    console.log('[IMS] Token detected via storage event (auth popup completed)');
+    authMethod = 'redirect';
+    window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true, method: 'redirect' } }));
+  }
+});
+
 export function relaySignIn() {
   return new Promise((resolve, reject) => {
     const w = 900, h = 700;
@@ -322,12 +331,22 @@ export async function loadIms() {
     const tokenParams = new URLSearchParams(hash.slice(1));
     const token = tokenParams.get('access_token') || tokenParams.get('ims_token');
     const expiresIn = tokenParams.get('expires_in');
+    const isAuthPopup = tokenParams.get('auth_popup') === '1';
     if (token) {
       localStorage.setItem(TOKEN_KEY, token);
       localStorage.setItem('ew-ims', 'true');
       if (expiresIn) localStorage.setItem(EXPIRY_KEY, String(Date.now() + Number(expiresIn)));
       authMethod = 'redirect';
+      console.log('[IMS] Token received from auth redirect');
       history.replaceState(null, '', window.location.pathname + window.location.search);
+
+      // If this is a popup callback, close after saving token.
+      // The main window picks up the token via the 'storage' event.
+      if (isAuthPopup) {
+        console.log('[IMS] Auth popup — token saved to localStorage, closing...');
+        window.close();
+        return { anonymous: false, method: 'redirect' };
+      }
     }
   }
   if (hash.includes('error=')) {
