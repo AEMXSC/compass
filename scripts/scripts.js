@@ -37,7 +37,7 @@ async function loadEager(doc) {
   // Load the Compass app module
   const script = document.createElement('script');
   script.type = 'module';
-  script.src = '/app.js';
+  script.src = '/scripts/app.js';
   document.body.appendChild(script);
 
   console.log('[Compass] SPA bootstrapped on EDS *.aem.page');
