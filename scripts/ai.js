@@ -18,7 +18,7 @@ import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
 import * as aemAssets from './aem-assets-client.js';
-import { contentUpdaterMcp, developmentMcp, cjaMcp, aaMcp, acrobatMcp, marketingMcp, targetMcp, rtcdpMcp, aemUnifiedMcp, governanceMcp as govMcpClient, discoveryMcp as discMcpClient } from './mcp-client.js';
+import { contentUpdaterMcp, developmentMcp, cjaMcp, aaMcp, acrobatMcp, marketingMcp, targetMcp, rtcdpMcp, aemUnifiedMcp } from './mcp-client.js';
 import * as wf from './workfront.js';
 const { hasWebhook, createTaskViaWebhook } = wf;
 import { getSiteType } from './site-detect.js';
