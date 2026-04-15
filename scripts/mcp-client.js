@@ -21,6 +21,7 @@ import { getToken } from './ims.js';
 
 const MCP_BASE = 'https://mcp.adobeaemcloud.com';
 const MCP_PROTOCOL_VERSION = '2024-11-05';
+const WORKER_MCP_BASE = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev') + '/mcp?endpoint=';
 
 /**
  * Create an MCP client for a specific endpoint path.
@@ -207,16 +208,16 @@ export const contentMcp = createMcpClient('/adobe/mcp/content', 'AEM-Content');
 export const contentReadonlyMcp = createMcpClient('/adobe/mcp/content-readonly', 'AEM-ReadOnly');
 
 /** AI-powered content updates (Experience Production Agent). Uses AI credits. */
-export const contentUpdaterMcp = createMcpClient('/adobe/mcp/content-updater', 'AEM-Updater');
+export const contentUpdaterMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/content-updater', 'AEM-Updater');
 
-/** Brand policy get + check. Uses AI credits. */
-export const governanceMcp = createMcpClient('/adobe/mcp/experience-governance', 'AEM-Governance');
+/** Brand policy get + check. Uses AI credits. Routed through Worker for CORS. */
+export const governanceMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/experience-governance', 'AEM-Governance');
 
-/** Search assets, CF, forms, pages. Uses AI credits. */
-export const discoveryMcp = createMcpClient('/adobe/mcp/discovery', 'AEM-Discovery');
+/** Search assets, CF, forms, pages. Uses AI credits. Routed through Worker for CORS. */
+export const discoveryMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/discovery', 'AEM-Discovery');
 
-/** Pipeline troubleshooting tools. Uses AI credits. */
-export const developmentMcp = createMcpClient('/adobe/mcp/development', 'AEM-Dev');
+/** Pipeline troubleshooting tools. Uses AI credits. Routed through Worker for CORS. */
+export const developmentMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/development', 'AEM-Dev');
 
 /** CJA — Customer Journey Analytics data insights. */
 export const cjaMcp = createMcpClient('/adobe/mcp/cja', 'CJA');
@@ -236,5 +237,4 @@ export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.liv
  * doesn't expose mcp-session-id in Access-Control-Expose-Headers).
  * The Worker proxies requests, adds S2S auth, and exposes the session ID header.
  */
-const WORKER_MCP_PROXY = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev') + '/mcp?endpoint=/adobe/mcp/aem';
-export const aemUnifiedMcp = createMcpClient(WORKER_MCP_PROXY, 'AEM-Unified');
+export const aemUnifiedMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/aem', 'AEM-Unified');

@@ -1380,6 +1380,63 @@ const AEM_TOOLS = [
       required: ['code', 'aem_url'],
     },
   },
+
+  /* ─── Bulk Operations ─── */
+
+  {
+    name: 'batch_aem_update',
+    description: 'Bulk update a component or property across multiple AEM pages. Lists matching pages, shows a preview of what will change, then patches each page. Use when the user wants to update something "on all pages", "across the site", or "everywhere". Requires confirmation before executing.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        aem_url: { type: 'string', description: "AEM environment URL (e.g., 'https://author-p153659-e1614585.adobeaemcloud.com')" },
+        site_id: { type: 'string', description: 'Site ID or path prefix to scope the pages (e.g., "wknd-universal" or "/content/wknd-universal")' },
+        component_type: { type: 'string', description: 'Component type to find and update (e.g., "hero", "teaser", "title"). Leave empty to match all pages.' },
+        property_path: { type: 'string', description: 'JSON path to the property to update within the component (e.g., "properties/jcr:title", "properties/text")' },
+        new_value: { type: 'string', description: 'New value to set for the property' },
+        description: { type: 'string', description: 'Human-readable description of the change for the confirmation prompt' },
+        confirmed: { type: 'boolean', description: 'Set true to execute. First call with false to preview affected pages.' },
+      },
+      required: ['aem_url', 'site_id', 'description'],
+    },
+  },
+
+  /* ─── ALT Text / Accessibility ─── */
+
+  {
+    name: 'suggest_alt_text',
+    description: 'Analyze all images on a page and suggest descriptive ALT text using AI vision. Returns a table of images with current ALT text and AI-suggested alternatives. Works with any AEM page (JCR or DA).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_url: { type: 'string', description: 'Page URL to analyze (author URL or .aem.page URL). If omitted, uses the currently loaded preview page.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'apply_alt_text',
+    description: 'Apply AI-suggested ALT text to images on a page. Call suggest_alt_text first to get suggestions, then use this tool to apply approved ones. Patches image components via aem_write.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        aem_url: { type: 'string', description: 'AEM environment URL' },
+        page_path: { type: 'string', description: 'Page path in JCR' },
+        updates: {
+          type: 'array',
+          description: 'Array of {image_path, alt_text} objects to apply',
+          items: {
+            type: 'object',
+            properties: {
+              image_path: { type: 'string', description: 'JSON path to the image component in the page content tree' },
+              alt_text: { type: 'string', description: 'New ALT text to set' },
+            },
+          },
+        },
+      },
+      required: ['aem_url', 'page_path', 'updates'],
+    },
+  },
 ];
 
 /* ── Tool → Official Adobe Agent Mapping (for UI badges) ── */
@@ -1406,6 +1463,9 @@ export const TOOL_AGENT_MAP = {
   aem_read: 'Adobe Agent',
   aem_write: 'Adobe Agent',
   aem_delete: 'Adobe Agent',
+  batch_aem_update: 'Experience Production Agent',
+  suggest_alt_text: 'Content Advisor Agent',
+  apply_alt_text: 'Content Advisor Agent',
   delete_aem_page: 'Experience Production Agent',
   list_aem_templates: 'Experience Production Agent',
   create_aem_launch: 'Experience Production Agent',
@@ -4021,6 +4081,258 @@ async function executeTool(name, input) {
       }
     }
 
+    /* ─── Bulk Operations ─── */
+
+    case 'batch_aem_update': {
+      if (!(await ensureAuth())) return authRequiredError('batch_aem_update');
+      try {
+        const aemUrl = input.aem_url;
+        const siteId = input.site_id;
+        const confirmed = input.confirmed || false;
+
+        // Step 1: List pages for the site
+        const listCode = `
+          const resp = await aem.get('/adobe/sites/sites');
+          const sites = resp.body?.items || [];
+          const site = sites.find(s => s.name === '${siteId}' || s.id === '${siteId}');
+          if (!site) return { error: 'Site not found: ${siteId}', available: sites.map(s => s.name) };
+
+          const pages = await aem.get('/adobe/sites/sites/' + site.id + '/pages', { limit: 50 });
+          return { siteId: site.id, pages: (pages.body?.items || []).map(p => ({ id: p.id, title: p.title, path: p.path })) };
+        `;
+        const listResult = await aemUnifiedMcp.callTool('read-api', { code: listCode, aemUrl });
+
+        if (!confirmed) {
+          // Preview mode — show what would be affected
+          return JSON.stringify({
+            status: 'preview',
+            description: input.description,
+            message: `Found pages for site "${siteId}". Review and call again with confirmed=true to apply changes.`,
+            ...listResult,
+            hint: 'Call batch_aem_update again with confirmed=true to execute the updates.',
+            source: 'AEM Unified MCP — Batch',
+          }, null, 2);
+        }
+
+        // Step 2: Execute updates (confirmed=true)
+        // Build batch update code that iterates pages and patches
+        const updateCode = `
+          const resp = await aem.get('/adobe/sites/sites');
+          const sites = resp.body?.items || [];
+          const site = sites.find(s => s.name === '${siteId}' || s.id === '${siteId}');
+          if (!site) return { error: 'Site not found' };
+
+          const pages = await aem.get('/adobe/sites/sites/' + site.id + '/pages', { limit: 50 });
+          const pageList = pages.body?.items || [];
+          const results = { updated: 0, skipped: 0, errors: [], pages: [] };
+
+          for (const page of pageList) {
+            try {
+              const content = await aem.get('/adobe/pages/' + page.id + '/content');
+              if (!content.body) { results.skipped++; continue; }
+
+              ${input.component_type ? `
+              // Find matching component
+              function findComp(node, type, path) {
+                if (node.componentType && node.componentType.includes('${input.component_type}')) return { node, path };
+                if (Array.isArray(node.items)) {
+                  for (let i = 0; i < node.items.length; i++) {
+                    const found = findComp(node.items[i], type, path + '/items/' + i);
+                    if (found) return found;
+                  }
+                }
+                return null;
+              }
+              const match = findComp(content.body, '${input.component_type}', '');
+              if (!match) { results.skipped++; continue; }
+              const patchPath = match.path + '/${input.property_path || 'properties/text'}';
+              ` : `const patchPath = '/${input.property_path || 'properties/jcr:title'}';`}
+
+              await aem.patch('/adobe/pages/' + page.id + '/content', [
+                { op: 'replace', path: patchPath, value: '${(input.new_value || '').replace(/'/g, "\\'")}' }
+              ], { etag: content.etag });
+
+              results.updated++;
+              results.pages.push({ title: page.title, path: page.path, status: 'updated' });
+            } catch (e) {
+              results.errors.push({ title: page.title, error: e.message });
+            }
+          }
+          return results;
+        `;
+
+        const updateResult = await aemUnifiedMcp.callTool('write-api', {
+          code: updateCode,
+          aemUrl,
+          confirmed: true,
+        });
+
+        // Auto-refresh preview
+        setTimeout(() => {
+          const frame = document.querySelector('.preview-frame');
+          if (frame) {
+            if (window.__JCR_PREVIEW_URL) {
+              frame.src = window.__JCR_PREVIEW_URL + '&_t=' + Date.now();
+            } else if (frame.src?.includes('.aem.page')) {
+              frame.src = frame.src.replace(/[?&]_t=\d+/, '') + (frame.src.includes('?') ? '&' : '?') + '_t=' + Date.now();
+            }
+          }
+        }, 1000);
+
+        return JSON.stringify({
+          status: 'success',
+          description: input.description,
+          ...updateResult,
+          source: 'AEM Unified MCP — Batch Update',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('batch_aem_update', err);
+      }
+    }
+
+    /* ─── ALT Text / Accessibility ─── */
+
+    case 'suggest_alt_text': {
+      try {
+        // Get page URL from input or current preview
+        let pageUrl = input.page_url;
+        if (!pageUrl) {
+          pageUrl = window.__EW_PREVIEW_URL || document.querySelector('.preview-frame')?.src || '';
+        }
+        if (!pageUrl || pageUrl === 'about:blank') {
+          return JSON.stringify({ error: 'No page URL. Connect a site or provide a page_url.' });
+        }
+
+        // Fetch page HTML to find images
+        let pageHTML = '';
+        try {
+          const resp = await fetch(pageUrl);
+          if (resp.ok) pageHTML = await resp.text();
+        } catch { /* fallback below */ }
+
+        if (!pageHTML) {
+          // Try DA API
+          if (da.getOrg() && da.getRepo()) {
+            const u = new URL(pageUrl);
+            const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
+            pageHTML = await da.getPage(`${path}.html`) || '';
+          }
+        }
+
+        if (!pageHTML) {
+          return JSON.stringify({ error: `Could not fetch page content from ${pageUrl}` });
+        }
+
+        // Parse images from HTML
+        const imgRegex = /<img[^>]*src=["']([^"']+)["'][^>]*(?:alt=["']([^"']*)["'])?[^>]*>/gi;
+        const imgRegex2 = /<img[^>]*(?:alt=["']([^"']*)["'])?[^>]*src=["']([^"']+)["'][^>]*>/gi;
+        const images = [];
+        let match;
+
+        // First pass: src before alt
+        const html1 = pageHTML;
+        while ((match = imgRegex.exec(html1)) !== null) {
+          images.push({ src: match[1], currentAlt: match[2] || '', index: images.length });
+        }
+        // Second pass: alt before src (if any were missed)
+        while ((match = imgRegex2.exec(pageHTML)) !== null) {
+          const src = match[2];
+          if (!images.some((i) => i.src === src)) {
+            images.push({ src, currentAlt: match[1] || '', index: images.length });
+          }
+        }
+
+        if (images.length === 0) {
+          return JSON.stringify({ status: 'no_images', message: 'No images found on this page.' });
+        }
+
+        // For each image, generate ALT text suggestion using Claude Vision
+        const suggestions = [];
+        for (const img of images.slice(0, 10)) { // limit to 10 images
+          try {
+            const suggestion = await ai.callRaw(
+              `Analyze this image and write a concise, descriptive ALT text (1-2 sentences, max 125 characters). Focus on what the image shows, not what it means. Be specific.\n\nImage URL: ${img.src}\n\nCurrent ALT text: ${img.currentAlt || '(none)'}\n\nRespond with ONLY the suggested ALT text, nothing else.`,
+              { maxTokens: 100 },
+            );
+            suggestions.push({
+              ...img,
+              suggestedAlt: suggestion.trim(),
+              needsUpdate: !img.currentAlt || img.currentAlt.length < 5,
+            });
+          } catch {
+            suggestions.push({ ...img, suggestedAlt: '(analysis failed)', needsUpdate: !img.currentAlt });
+          }
+        }
+
+        const missing = suggestions.filter((s) => !s.currentAlt || s.currentAlt.length < 5).length;
+
+        return JSON.stringify({
+          status: 'success',
+          page_url: pageUrl,
+          total_images: images.length,
+          analyzed: suggestions.length,
+          missing_alt: missing,
+          suggestions: suggestions.map((s) => ({
+            image: s.src.split('/').pop(),
+            current_alt: s.currentAlt || '(none)',
+            suggested_alt: s.suggestedAlt,
+            needs_update: s.needsUpdate,
+          })),
+          hint: 'Review the suggestions above. Call apply_alt_text to apply approved ones.',
+          source: 'Content Advisor Agent — ALT Text',
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: `ALT text analysis failed: ${err.message}` });
+      }
+    }
+
+    case 'apply_alt_text': {
+      if (!(await ensureAuth())) return authRequiredError('apply_alt_text');
+      try {
+        const patches = (input.updates || []).map((u) => ({
+          op: 'replace',
+          path: u.image_path + '/properties/alt',
+          value: u.alt_text,
+        }));
+
+        if (patches.length === 0) {
+          return JSON.stringify({ error: 'No updates provided. Call suggest_alt_text first.' });
+        }
+
+        const code = `
+          const page = await aem.get('/adobe/pages/${input.page_path}/content');
+          await aem.patch('/adobe/pages/${input.page_path}/content',
+            ${JSON.stringify(patches)},
+            { etag: page.etag }
+          );
+          return { updated: ${patches.length}, page: '${input.page_path}' };
+        `;
+
+        const result = await aemUnifiedMcp.callTool('write-api', {
+          code,
+          aemUrl: input.aem_url,
+          confirmed: true,
+        });
+
+        // Auto-refresh preview
+        setTimeout(() => {
+          const frame = document.querySelector('.preview-frame');
+          if (frame && window.__JCR_PREVIEW_URL) {
+            frame.src = window.__JCR_PREVIEW_URL + '&_t=' + Date.now();
+          }
+        }, 500);
+
+        return JSON.stringify({
+          status: 'success',
+          ...result,
+          message: `Applied ALT text to ${patches.length} images on ${input.page_path}`,
+          source: 'Content Advisor Agent — ALT Text',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('apply_alt_text', err);
+      }
+    }
+
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -4217,6 +4529,8 @@ Use these when users ask about:
 21. For documentation questions ("how do I...", "what is...", "show me docs on..."), call search_experience_league. For release notes ("what's new", "latest features"), call get_product_release_notes.
 22. For site health, performance, or SEO questions, call get_site_audit for scores and get_site_opportunities for recommendations. Use Spacecat tools BEFORE giving optimization advice.
 23. When users mention broken backlinks, 404s, or redirect chains, call get_site_audit with audit_type=broken-backlinks or get_site_opportunities with category=broken-backlinks.
+24. **BULK OPERATIONS**: When users say "all pages", "every page", "across the site", "update everywhere", or "change on all" — use \`batch_aem_update\`. ALWAYS call with confirmed=false first to show affected pages, then ask user to confirm before calling with confirmed=true. Never execute bulk updates without user confirmation.
+25. **ALT TEXT**: When users mention "ALT text", "accessibility", "image descriptions", "missing ALT", or "image audit" — use \`suggest_alt_text\` to analyze page images. Present suggestions as a table. Only call \`apply_alt_text\` after user approves specific suggestions.
 24. **EXPERIMENTATION**: When users want A/B tests, experiments, or content variations, use setup_experiment + edit_page_content. One prompt sets up the entire experiment (variant pages + metadata + splits). This is FASTER than the UE extensions approach.
 25. **FORMS**: When users want forms, contact pages, or lead capture, use generate_form to create the form definition, then edit_page_content to embed it in the page.
 26. **VARIATIONS**: When users want content variations, alternate headlines, or copy options, use generate_page_variations. Generate full-page coordinated variations, not just one component at a time. If they also want to test them, chain with setup_experiment.
