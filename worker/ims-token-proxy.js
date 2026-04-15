@@ -76,6 +76,9 @@ async function route(request) {
   if (url.pathname === '/proxy' && request.method === 'GET') {
     return handleAuthorProxy(request);
   }
+  if (url.pathname === '/preview' && request.method === 'GET') {
+    return handlePreview(request);
+  }
   if (url.pathname === '/ims/login' && request.method === 'GET') {
     return handleImsLogin(request);
   }
@@ -282,6 +285,121 @@ async function handleTokenProxy(request) {
       status: 502,
       headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
     });
+  }
+}
+
+/* ─── GET /preview — Full-page proxy for AEM JCR/xwalk content ─── */
+/* Fetches HTML from publish (public), CSS from author (S2S auth), returns self-contained page */
+
+async function handlePreview(request) {
+  const url = new URL(request.url);
+  const publishUrl = url.searchParams.get('publish');
+  const authorUrl = url.searchParams.get('author');
+  const pagePath = url.searchParams.get('path');
+  const cacheBust = url.searchParams.get('_t');
+
+  if (!publishUrl || !pagePath) {
+    return new Response('Missing ?publish= and ?path= params', { status: 400 });
+  }
+
+  // Validate hosts — only allow adobeaemcloud.com
+  try {
+    const pubHost = new URL(publishUrl).hostname;
+    if (!pubHost.endsWith('.adobeaemcloud.com')) {
+      return new Response('Only adobeaemcloud.com hosts allowed', { status: 403 });
+    }
+  } catch {
+    return new Response('Invalid publish URL', { status: 400 });
+  }
+
+  try {
+    // Step 1: Fetch HTML from publish tier (public, no auth)
+    const pageUrl = `${publishUrl}${pagePath}`;
+    const htmlResp = await fetch(pageUrl);
+    if (!htmlResp.ok) {
+      return new Response(`Publish tier returned ${htmlResp.status} for ${pageUrl}`, { status: 502 });
+    }
+    let html = await htmlResp.text();
+
+    // Step 2: Ensure we have an S2S token for author CSS fetch
+    const now = Date.now();
+    if (!cachedToken || tokenExpiry <= now + 300000) {
+      const body = new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: IMS_CLIENT_ID,
+        client_secret: IMS_CLIENT_SECRET,
+        scope: IMS_SCOPE,
+      });
+      const imsResp = await fetch(IMS_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+      if (imsResp.ok) {
+        const data = await imsResp.json();
+        if (data.access_token) {
+          cachedToken = data.access_token;
+          tokenExpiry = now + (data.expires_in || 86400000);
+        }
+      }
+    }
+
+    // Step 3: Inline CSS from author tier (with S2S Bearer token)
+    const authorBase = authorUrl || publishUrl.replace('publish-', 'author-');
+    const cssLinks = [...html.matchAll(/<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*\/?>/gi)];
+    for (const match of cssLinks) {
+      const cssHref = match[1].startsWith('http') ? match[1] : `${authorBase}${match[1]}`;
+      try {
+        const cssResp = await fetch(cssHref, {
+          headers: cachedToken ? { Authorization: `Bearer ${cachedToken}` } : {},
+        });
+        if (cssResp.ok) {
+          let css = await cssResp.text();
+          // Fix relative url() references to point to author (for fonts, icons)
+          css = css.replace(/url\(\s*["']?\//g, `url("${authorBase}/`);
+          html = html.replace(match[0], `<style>/* ${match[1].split('/').pop()} */\n${css}</style>`);
+        }
+      } catch { /* CSS fetch failed — skip */ }
+    }
+
+    // Step 4: Strip <script> tags (won't execute properly out of context)
+    html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+
+    // Step 5: Strip xwalk section-metadata divs (raw properties like "sec-spacing", "overlay")
+    html = html.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
+    html = html.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width|image-left|image-right|cta-button|text-center)\s*<\/div>/gi, '');
+
+    // Step 6: Add <base> for images and relative links (publish tier serves these publicly)
+    html = html.replace(/<head>/, `<head><base href="${publishUrl}/">`);
+
+    // Step 7: Add a fallback stylesheet if no CSS was inlined
+    if (!html.includes('<style>')) {
+      const fallback = `<style>
+        :root{--color-brand:#1473e6;--color-bg:#fff;--color-text:#2c2c2c;--font-sans:system-ui,-apple-system,sans-serif}
+        body{font-family:var(--font-sans);color:var(--color-text);background:var(--color-bg);line-height:1.6;margin:0}
+        main{max-width:1200px;margin:0 auto;padding:1rem}
+        img{max-width:100%;height:auto;display:block}
+        h1{font-size:2.5rem} h2{font-size:2rem} h3{font-size:1.5rem}
+        a{color:var(--color-brand)}
+      </style>`;
+      html = html.replace(/<head>/, `<head>${fallback}`);
+    }
+
+    // Cache: 5min default, no-cache if _t= param present (post-write refresh)
+    const cacheHeader = cacheBust
+      ? 'no-store, no-cache, must-revalidate'
+      : 'public, max-age=300';
+
+    return new Response(html, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': cacheHeader,
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  } catch (err) {
+    return new Response(`Preview error: ${err.message}`, { status: 502 });
   }
 }
 

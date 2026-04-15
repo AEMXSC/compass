@@ -3983,6 +3983,24 @@ async function executeTool(name, input) {
           aemUrl: input.aem_url,
           confirmed: input.confirmed || false,
         });
+
+        // Auto-refresh preview after successful write
+        if (result && !result.error && input.confirmed) {
+          setTimeout(() => {
+            const frame = document.querySelector('.preview-frame');
+            if (frame) {
+              // JCR preview via Worker proxy
+              if (window.__JCR_PREVIEW_URL) {
+                frame.src = window.__JCR_PREVIEW_URL + '&_t=' + Date.now();
+              }
+              // DA/EDS preview via .aem.page iframe
+              else if (frame.src?.includes('.aem.page')) {
+                frame.src = frame.src.replace(/[?&]_t=\d+/, '') + (frame.src.includes('?') ? '&' : '?') + '_t=' + Date.now();
+              }
+            }
+          }, 500); // wait for publish replication
+        }
+
         return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
       } catch (err) {
         return mcpError('aem_write', err);

@@ -22,6 +22,7 @@ import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCust
 import { detectSiteMention, resolveSite } from './known-sites.js';
 import { getGitHubToken, setGitHubToken, hasGitHubToken, getRepoInfo, listBranches, getRepoTree } from './github-content.js';
 import { detectAndCacheSiteType, getSiteType } from './site-detect.js';
+import { aemUnifiedMcp } from './mcp-client.js';
 
 /* ── Dynamic Org Configuration (from customer profile) ── */
 let AEM_ORG = getOrgConfig();
@@ -3481,108 +3482,22 @@ async function connectCustomSite(input) {
         <div style="text-align:center"><p>Loading JCR page preview...</p><p style="font-size:12px">${jcrPath}</p></div></body></html>`;
     }
 
-    // Fetch rendered HTML from publish tier, CSS from author tier (with auth)
-    (async () => {
-      const authorHost = parsed.aemHost;
-      const publishHost = authorHost.replace('author-', 'publish-');
-      const authorBase = `https://${authorHost}`;
-      const publishBase = `https://${publishHost}`;
-      const pageUrl = `https://${publishHost}${jcrPath}.html`;
+    // Use CF Worker /preview proxy — fetches HTML from publish, inlines CSS from author,
+    // strips scripts/metadata, returns self-contained HTML. No CORS, no X-Frame-Options issues.
+    const WORKER_BASE = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+    const authorHost = parsed.aemHost;
+    const publishUrl = `https://${authorHost.replace('author-', 'publish-')}`;
+    const authorUrl = `https://${authorHost}`;
+    const previewUrl = `${WORKER_BASE}/preview?publish=${encodeURIComponent(publishUrl)}&author=${encodeURIComponent(authorUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`;
 
-      try {
-        console.log(`[EW] JCR preview: fetching HTML from publish: ${pageUrl}`);
-        const resp = await fetch(pageUrl);
-        if (resp.ok) {
-          let html = await resp.text();
+    if (previewFrame) {
+      previewFrame.removeAttribute('srcdoc');
+      previewFrame.src = previewUrl;
+      console.log(`[EW] JCR preview via Worker proxy: ${previewUrl}`);
+    }
 
-          // CSS: .resource/ paths only work on the author tier (404 on publish).
-          // Fetch CSS via CF Worker proxy (avoids CORS) with S2S auth, then inline as <style>.
-          const PROXY_BASE = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev') + '/proxy?url=';
-          const cssLinks = [...html.matchAll(/<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*\/?>/gi)];
-          for (const match of cssLinks) {
-            const cssHref = match[1].startsWith('http') ? match[1] : `${authorBase}${match[1]}`;
-            try {
-              const cssResp = await fetch(`${PROXY_BASE}${encodeURIComponent(cssHref)}`);
-              if (cssResp.ok) {
-                let css = await cssResp.text();
-                // Fix relative url() references to point to author host
-                css = css.replace(/url\(\s*["']?\//g, `url("${authorBase}/`);
-                html = html.replace(match[0], `<style>/* ${match[1]} */\n${css}</style>`);
-                console.log(`[EW] Inlined CSS from author via proxy: ${match[1]} (${css.length} chars)`);
-              } else {
-                console.warn(`[EW] CSS proxy fetch ${cssResp.status}: ${cssHref}`);
-              }
-            } catch (cssErr) {
-              console.warn(`[EW] CSS proxy fetch failed: ${cssErr.message}`);
-            }
-          }
-
-          // If no CSS was inlined, add a clean fallback stylesheet
-          if (!html.includes('/* /content/')) {
-            const fallbackCss = `<style>
-              :root{--color-brand:#1473e6;--color-bg:#fff;--color-text:#2c2c2c;--font-sans:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-              *{margin:0;padding:0;box-sizing:border-box}
-              body{font-family:var(--font-sans);color:var(--color-text);background:var(--color-bg);line-height:1.6}
-              main{max-width:1200px;margin:0 auto}
-              img{max-width:100%;height:auto;display:block}
-              h1,h2,h3,h4,h5,h6{margin:0.5em 0;line-height:1.2}
-              h1{font-size:2.5rem} h2{font-size:2rem} h3{font-size:1.5rem}
-              p{margin:0.5em 0}
-              a{color:var(--color-brand);text-decoration:none}
-              a:hover{text-decoration:underline}
-              section,div>div{padding:1rem 2rem}
-              [class]{display:block}
-              nav,header,footer{padding:1rem 2rem;background:#f5f5f5}
-            </style>`;
-            html = html.replace(/<head>/, `<head>${fallbackCss}`);
-          }
-
-          // <base> for images (publish tier serves images without auth)
-          html = html.replace(/<head>/, `<head><base href="${publishBase}/">`);
-          // Strip scripts and UE instrumentation (won't work in srcdoc null-origin)
-          html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
-          // Strip section-metadata divs (xwalk properties like "sec-spacing", "section-none", "overlay")
-          // These are container divs with class "section-metadata" that show as raw text without JS decoration
-          html = html.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
-          // Also strip standalone property divs that contain only xwalk keywords
-          html = html.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width|image-left|image-right|cta-button|text-center)\s*<\/div>/gi, '');
-
-          if (previewFrame) {
-            previewFrame.srcdoc = html;
-            cachedPageHTML = html;
-            console.log(`[EW] JCR preview rendered: ${jcrPath} (${html.length} chars)`);
-          }
-        } else {
-          throw new Error(`Publish tier returned ${resp.status}`);
-        }
-      } catch (e) {
-        console.warn(`[EW] Publish tier fetch failed: ${e.message}. Trying AEM Content MCP...`);
-        // Fallback: try AEM Content MCP for structured content
-        try {
-          if (!isSignedIn()) await signIn();
-          const host = window.__EW_AEM_HOST;
-          if (host) {
-            const aemContentMod = await import('./aem-content-mcp-client.js');
-            const result = await aemContentMod.getPage(host, jcrPath);
-            const mcpHtml = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-            if (mcpHtml && previewFrame) {
-              previewFrame.srcdoc = `<!DOCTYPE html><html><head>
-                <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-                <style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;color:#333;line-height:1.6}img{max-width:100%;height:auto}h1,h2,h3{color:#1a1a1a}</style>
-              </head><body>${mcpHtml}</body></html>`;
-              cachedPageHTML = mcpHtml;
-              console.log('[EW] JCR preview rendered via AEM Content MCP:', jcrPath);
-            }
-          }
-        } catch (mcpErr) {
-          console.warn('[EW] JCR preview: all methods failed:', mcpErr.message);
-          if (previewFrame) {
-            previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
-              <div style="text-align:center"><p>JCR preview unavailable</p><p style="font-size:12px">Use the <strong>UE</strong> button to open Universal Editor</p><p style="font-size:11px;color:#555">${e.message}</p></div></body></html>`;
-          }
-        }
-      }
-    })();
+    // Store the preview base URL for auto-refresh after writes
+    window.__JCR_PREVIEW_URL = previewUrl;
   } else {
     navigateToPage('/');
   }
@@ -5328,6 +5243,52 @@ async function init() {
 
   if (ai.hasApiKey()) {
     console.log(`Claude API key found — live AI mode${AEM_ORG.name ? ` for ${AEM_ORG.name}` : ''}`);
+  }
+
+  // Context prefetch: pre-discover all AEM environments (like Adobe's AI Assistant pattern)
+  // Runs async — doesn't block init. Results cached for instant lookup on site connect.
+  if (isSignedIn()) {
+    prefetchAemEnvironments();
+  }
+}
+
+/**
+ * Prefetch AEM environments via unified MCP (aem_list_environments).
+ * Caches results in window.__AEM_ENVIRONMENTS and indexes by authorUrl
+ * for fast lookup when user connects a site.
+ * ~350ms — runs async, doesn't block UI.
+ */
+async function prefetchAemEnvironments() {
+  try {
+    const result = await aemUnifiedMcp.callTool('list-aem-environments', {});
+    const environments = Array.isArray(result) ? result : (result?.environments || result?.value || []);
+
+    // Parse the text response if it's a string
+    let envList = environments;
+    if (typeof result === 'string') {
+      try {
+        // The tool returns text with JSON embedded — extract the array
+        const jsonMatch = result.match(/\[[\s\S]*\]/);
+        if (jsonMatch) envList = JSON.parse(jsonMatch[0]);
+      } catch { envList = []; }
+    }
+
+    window.__AEM_ENVIRONMENTS = envList;
+
+    // Index by author URL hostname for fast lookup
+    window.__AEM_ENV_BY_AUTHOR = {};
+    for (const env of envList) {
+      if (env.authorUrl) {
+        const host = env.authorUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        window.__AEM_ENV_BY_AUTHOR[host] = env;
+      }
+    }
+
+    console.log(`[Compass] Prefetched ${envList.length} AEM environments`, Object.keys(window.__AEM_ENV_BY_AUTHOR));
+  } catch (err) {
+    console.warn('[Compass] Environment prefetch failed:', err.message);
+    window.__AEM_ENVIRONMENTS = [];
+    window.__AEM_ENV_BY_AUTHOR = {};
   }
 }
 
