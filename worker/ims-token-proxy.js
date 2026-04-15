@@ -483,12 +483,28 @@ async function handlePreview(request) {
     html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 
     // Step 5: Strip xwalk UE instrumentation and section-metadata
-    // Remove data-aue-* divs that contain raw property values (overlay, button, sec-spacing, etc.)
+    // Remove data-aue-* attribute divs with raw property values
     html = html.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');
+    // Remove section-metadata containers
     html = html.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
+    // Remove known style/layout property values
     html = html.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width|sec-full-width-background|image-left|image-right|cta-button[^<]*|text-center|light|dark|hidden|teaser-card|teaser-overlay|image-top|image-bottom|teaserStyle|ctastyle|style)\s*<\/div>/gi, '');
+    // Remove xwalk component field-name divs (camelCase/kebab-case property labels like "title", "videoReference", "imageRef", "bg-default")
+    // These are authoring model field names that show as raw text without JS decoration
+    html = html.replace(/<div>\s*(title|videoReference|imageRef|buttonText|video|bg-default|bg-dark|bg-light|description|altText|linkUrl|linkText|eyebrow|subtitle|fragmentRef|teaserStyle|displayStyle|herolayout|sectionStyle)\s*<\/div>/gi, '');
+    // Generic catch-all: any div containing ONLY a single camelCase word (no spaces, no tags, 3-20 chars)
+    // This catches field names we didn't list explicitly
+    html = html.replace(/<div>\s*([a-z][a-zA-Z]{2,19})\s*<\/div>/g, (match, word) => {
+      // Only strip if it looks like a property name (camelCase or known pattern)
+      if (/^[a-z]+[A-Z]/.test(word) || /^(bg|sec|cta)-/.test(word)) return '';
+      return match; // Keep normal content like "Hello" or "Adventure"
+    });
     // Strip empty separator divs
     html = html.replace(/<div[^>]*class="[^"]*separator[^"]*"[^>]*>\s*<\/div>/gi, '<hr>');
+    // Strip divs that contain ONLY whitespace (leftover from stripped content)
+    html = html.replace(/<div>\s*<\/div>/g, '');
+    // Clean up excessive blank lines from stripping
+    html = html.replace(/\n{3,}/g, '\n\n');
 
     // Step 6: Add <base> for images and relative links (publish tier serves these publicly)
     html = html.replace(/<head>/, `<head><base href="${publishUrl}/">`);
