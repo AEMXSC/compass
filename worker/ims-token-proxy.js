@@ -79,6 +79,9 @@ async function route(request) {
   if (url.pathname === '/preview' && request.method === 'GET') {
     return handlePreview(request);
   }
+  if (url.pathname === '/mcp' && request.method === 'POST') {
+    return handleMcpProxy(request);
+  }
   if (url.pathname === '/ims/login' && request.method === 'GET') {
     return handleImsLogin(request);
   }
@@ -286,6 +289,82 @@ async function handleTokenProxy(request) {
       headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
     });
   }
+}
+
+/* ─── POST /mcp — Proxy MCP calls to expose mcp-session-id header ─── */
+/* CORS on mcp.adobeaemcloud.com doesn't expose mcp-session-id to browsers. */
+/* This proxy forwards MCP requests and returns the session ID in an exposed header. */
+
+async function handleMcpProxy(request) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin) && !origin.endsWith('.aem.page') && !origin.endsWith('.aem.live')) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const url = new URL(request.url);
+  const mcpEndpoint = url.searchParams.get('endpoint') || '/adobe/mcp/aem';
+  const targetUrl = `https://mcp.adobeaemcloud.com${mcpEndpoint}`;
+
+  // Ensure we have an S2S token
+  const now = Date.now();
+  if (!cachedToken || tokenExpiry <= now + 300000) {
+    const body = new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: IMS_CLIENT_ID,
+      client_secret: IMS_CLIENT_SECRET,
+      scope: IMS_SCOPE,
+    });
+    const imsResp = await fetch(IMS_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    if (imsResp.ok) {
+      const data = await imsResp.json();
+      if (data.access_token) {
+        cachedToken = data.access_token;
+        tokenExpiry = now + (data.expires_in || 86400000);
+      }
+    }
+  }
+
+  // Forward the request to MCP, preserving session ID
+  const incomingBody = await request.text();
+  const forwardHeaders = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream',
+    Authorization: `Bearer ${cachedToken}`,
+  };
+
+  // Pass through the client's session ID if provided
+  const clientSessionId = request.headers.get('mcp-session-id');
+  if (clientSessionId) {
+    forwardHeaders['Mcp-Session-Id'] = clientSessionId;
+  }
+
+  const mcpResp = await fetch(targetUrl, {
+    method: 'POST',
+    headers: forwardHeaders,
+    body: incomingBody,
+  });
+
+  // Capture session ID from MCP response
+  const sessionId = mcpResp.headers.get('mcp-session-id') || '';
+
+  // Forward response body and status, adding session ID as an exposed header
+  const responseBody = await mcpResp.text();
+  return new Response(responseBody, {
+    status: mcpResp.status,
+    headers: {
+      'Content-Type': mcpResp.headers.get('content-type') || 'application/json',
+      'Mcp-Session-Id': sessionId,
+      'Access-Control-Allow-Origin': origin || '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id',
+      'Access-Control-Expose-Headers': 'Mcp-Session-Id',
+      'Access-Control-Allow-Credentials': 'true',
+    },
+  });
 }
 
 /* ─── GET /preview — Full-page proxy for AEM JCR/xwalk content ─── */

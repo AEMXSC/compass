@@ -232,8 +232,9 @@ export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.liv
 
 /**
  * Unified AEM MCP — code-execution model with full read/write/delete.
- * Tools: list-aem-environments, lookup-api-spec, read-api, write-api, delete-api.
- * This is the recommended endpoint from Experience League docs.
- * Tools accept JavaScript code that runs in a sandboxed environment with aem.get(), aem.post(), etc.
+ * Routed through CF Worker /mcp proxy to work around CORS (mcp.adobeaemcloud.com
+ * doesn't expose mcp-session-id in Access-Control-Expose-Headers).
+ * The Worker proxies requests, adds S2S auth, and exposes the session ID header.
  */
-export const aemUnifiedMcp = createMcpClient('/adobe/mcp/aem', 'AEM-Unified');
+const WORKER_MCP_PROXY = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev') + '/mcp?endpoint=/adobe/mcp/aem';
+export const aemUnifiedMcp = createMcpClient(WORKER_MCP_PROXY, 'AEM-Unified');
