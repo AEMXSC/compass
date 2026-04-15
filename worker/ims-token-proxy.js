@@ -302,14 +302,20 @@ async function handlePreview(request) {
     return new Response('Missing ?publish= and ?path= params', { status: 400 });
   }
 
-  // Validate hosts — only allow adobeaemcloud.com
+  // Validate hosts — only allow adobeaemcloud.com (prevents S2S token leak to arbitrary hosts)
   try {
     const pubHost = new URL(publishUrl).hostname;
     if (!pubHost.endsWith('.adobeaemcloud.com')) {
       return new Response('Only adobeaemcloud.com hosts allowed', { status: 403 });
     }
+    if (authorUrl) {
+      const authHost = new URL(authorUrl).hostname;
+      if (!authHost.endsWith('.adobeaemcloud.com')) {
+        return new Response('Only adobeaemcloud.com author hosts allowed', { status: 403 });
+      }
+    }
   } catch {
-    return new Response('Invalid publish URL', { status: 400 });
+    return new Response('Invalid URL', { status: 400 });
   }
 
   try {
@@ -499,10 +505,6 @@ async function handleImsCallback(request) {
       + '&auth_popup=1';
 
     return Response.redirect(redirectUrl, 302);
-
-    return new Response(html, {
-      status: 200, headers: { 'Content-Type': 'text/html' },
-    });
   } catch (err) {
     return new Response(`Token exchange error: ${err.message}`, {
       status: 502, headers: { 'Content-Type': 'text/plain' },
