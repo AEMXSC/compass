@@ -429,46 +429,110 @@ async function handlePreview(request) {
       }
     }
 
-    // Step 3: Inline CSS from author tier (with S2S Bearer token)
+    // Step 3: Try to inline CSS from author tier (with S2S Bearer token)
+    // Note: S2S may not have access to .resource/ paths (403). Fallback CSS handles this.
     const authorBase = authorUrl || publishUrl.replace('publish-', 'author-');
-    const cssLinks = [...html.matchAll(/<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*\/?>/gi)];
+    let cssInlined = false;
+    // Match <link> with rel="stylesheet" in either attribute order
+    const cssLinks = [...html.matchAll(/<link[^>]*(?:rel=["']stylesheet["'][^>]*href=["']([^"']+)["']|href=["']([^"']+)["'][^>]*rel=["']stylesheet["'])[^>]*\/?>/gi)];
     for (const match of cssLinks) {
-      const cssHref = match[1].startsWith('http') ? match[1] : `${authorBase}${match[1]}`;
+      const hrefVal = match[1] || match[2];
+      if (!hrefVal) continue;
+      const cssHref = hrefVal.startsWith('http') ? hrefVal : `${authorBase}${hrefVal}`;
       try {
         const cssResp = await fetch(cssHref, {
           headers: cachedToken ? { Authorization: `Bearer ${cachedToken}` } : {},
         });
         if (cssResp.ok) {
           let css = await cssResp.text();
-          // Fix relative url() references to point to author (for fonts, icons)
           css = css.replace(/url\(\s*["']?\//g, `url("${authorBase}/`);
-          html = html.replace(match[0], `<style>/* ${match[1].split('/').pop()} */\n${css}</style>`);
+          html = html.replace(match[0], `<style>/* ${hrefVal.split('/').pop()} */\n${css}</style>`);
+          cssInlined = true;
+        } else {
+          console.log(`[Preview] CSS fetch ${cssResp.status} for ${cssHref} — using fallback CSS`);
+          // Remove the <link> tag since it won't resolve in the iframe
+          html = html.replace(match[0], '');
         }
-      } catch { /* CSS fetch failed — skip */ }
+      } catch (cssErr) {
+        console.log(`[Preview] CSS fetch error: ${cssErr.message} — using fallback CSS`);
+        html = html.replace(match[0], '');
+      }
     }
 
     // Step 4: Strip <script> tags (won't execute properly out of context)
     html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 
-    // Step 5: Strip xwalk section-metadata divs (raw properties like "sec-spacing", "overlay")
+    // Step 5: Strip xwalk UE instrumentation and section-metadata
+    // Remove data-aue-* divs that contain raw property values (overlay, button, sec-spacing, etc.)
+    html = html.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');
     html = html.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
-    html = html.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width|image-left|image-right|cta-button|text-center)\s*<\/div>/gi, '');
+    html = html.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width|sec-full-width-background|image-left|image-right|cta-button[^<]*|text-center|light|dark|hidden|teaser-card|teaser-overlay|image-top|image-bottom|teaserStyle|ctastyle|style)\s*<\/div>/gi, '');
+    // Strip empty separator divs
+    html = html.replace(/<div[^>]*class="[^"]*separator[^"]*"[^>]*>\s*<\/div>/gi, '<hr>');
 
     // Step 6: Add <base> for images and relative links (publish tier serves these publicly)
     html = html.replace(/<head>/, `<head><base href="${publishUrl}/">`);
 
-    // Step 7: Add a fallback stylesheet if no CSS was inlined
-    if (!html.includes('<style>')) {
-      const fallback = `<style>
-        :root{--color-brand:#1473e6;--color-bg:#fff;--color-text:#2c2c2c;--font-sans:system-ui,-apple-system,sans-serif}
-        body{font-family:var(--font-sans);color:var(--color-text);background:var(--color-bg);line-height:1.6;margin:0}
-        main{max-width:1200px;margin:0 auto;padding:1rem}
-        img{max-width:100%;height:auto;display:block}
-        h1{font-size:2.5rem} h2{font-size:2rem} h3{font-size:1.5rem}
-        a{color:var(--color-brand)}
-      </style>`;
-      html = html.replace(/<head>/, `<head>${fallback}`);
-    }
+    // Step 7: Comprehensive AEM/EDS fallback CSS (always inject — covers xwalk block types)
+    const aemFallbackCss = `<style>
+/* Compass Preview — AEM Fallback Styles */
+:root{--brand:#1473e6;--bg:#fff;--text:#2c2c2c;--text-light:#666;--font:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;--max-w:1200px;--gap:2rem;--radius:8px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--font);color:var(--text);background:var(--bg);line-height:1.6}
+img,video,picture{max-width:100%;height:auto;display:block;border-radius:var(--radius)}
+a{color:var(--brand);text-decoration:none} a:hover{text-decoration:underline}
+h1{font-size:2.5rem;line-height:1.15;margin-bottom:.5rem}
+h2{font-size:2rem;line-height:1.2;margin-bottom:.5rem}
+h3{font-size:1.5rem;line-height:1.3;margin-bottom:.5rem}
+h4,h5,h6{font-size:1.1rem;margin-bottom:.25rem}
+p{margin-bottom:.75rem}
+hr{border:none;border-top:1px solid #e0e0e0;margin:2rem 0}
+
+/* Layout */
+main{max-width:var(--max-w);margin:0 auto;padding:0 var(--gap)}
+header,nav{padding:1rem var(--gap);background:#f5f5f5;display:flex;align-items:center;gap:1rem}
+footer{padding:2rem var(--gap);background:#1a1a1a;color:#ccc;font-size:.875rem}
+footer a{color:#aaa}
+
+/* Hero */
+.hero{position:relative;min-height:400px;display:flex;align-items:center;padding:3rem var(--gap);overflow:hidden}
+.hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1}
+.hero h1,.hero h2,.hero p{position:relative;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.5)}
+.hero h1{font-size:3rem}
+
+/* Cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--gap);padding:var(--gap) 0}
+.cards>div{border:1px solid #e0e0e0;border-radius:var(--radius);overflow:hidden;background:#fff}
+.cards>div>div:last-child{padding:1rem}
+
+/* Columns */
+.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--gap);padding:var(--gap) 0;align-items:center}
+
+/* Carousel */
+.carousel{overflow-x:auto;display:flex;gap:1rem;scroll-snap-type:x mandatory;padding:var(--gap) 0}
+.carousel>div{flex:0 0 80%;scroll-snap-align:start;border-radius:var(--radius);overflow:hidden}
+
+/* Teaser */
+.teaser{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap);padding:var(--gap) 0;align-items:center}
+
+/* Content Fragment */
+.content-fragment{padding:var(--gap);background:#f9f9f9;border-radius:var(--radius);margin:var(--gap) 0}
+
+/* Video */
+.video{position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:var(--radius)}
+.video iframe,.video video{position:absolute;top:0;left:0;width:100%;height:100%}
+
+/* Dynamic Media */
+.dynamicmedia-image img,.dynamicmedia-template img{width:100%;border-radius:var(--radius)}
+
+/* CTA buttons */
+a[href]:not([href="#"]){display:inline-block;padding:.5rem 1.5rem;background:var(--brand);color:#fff;border-radius:var(--radius);font-weight:600;text-decoration:none;margin:.25rem .25rem .25rem 0}
+
+/* Section spacing */
+main>div{padding:var(--gap) 0}
+main>div+div{border-top:1px solid #f0f0f0}
+</style>`;
+    html = html.replace(/<head>/, `<head>${aemFallbackCss}`);
 
     // Cache: 5min default, no-cache if _t= param present (post-write refresh)
     const cacheHeader = cacheBust
