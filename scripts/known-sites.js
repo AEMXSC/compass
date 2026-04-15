@@ -14,9 +14,12 @@ export const KNOWN_SITES = {
   frescopa: {
     name: 'Frescopa Coffee',
     siteId: 'frescopa',
+    siteType: 'xwalk', // JCR content + EDS code repo + UE editing
     org: 'aem-showcase',
     repo: 'frescopa',
     branch: 'main',
+    aemHost: 'author-p153659-e1614585.adobeaemcloud.com',
+    publishHost: 'publish-p153659-e1614585.adobeaemcloud.com',
     get previewOrigin() { return `https://${this.branch}--${this.repo}--${this.org}.aem.page`; },
     get liveOrigin() { return `https://${this.branch}--${this.repo}--${this.org}.aem.live`; },
     description: 'Premium coffee brand demo — retail vertical. Flagship EDS reference site used in demos and training.',
@@ -36,6 +39,7 @@ export const KNOWN_SITES = {
   'aem-xsc-showcase': {
     name: 'XSC Team Site',
     siteId: 'xscteamsite',
+    siteType: 'da', // DA-backed EDS
     org: 'AEMXSC',
     repo: 'xscteamsite',
     branch: 'main',
@@ -53,9 +57,12 @@ export const KNOWN_SITES = {
   securbank: {
     name: 'SecurBank',
     siteId: 'securbank-aem-ue',
+    siteType: 'xwalk', // JCR + UE
     org: 'markszulc',
     repo: 'securbank-aem-ue',
     branch: 'main',
+    aemHost: 'author-p153659-e1614585.adobeaemcloud.com',
+    publishHost: 'publish-p153659-e1614585.adobeaemcloud.com',
     get previewOrigin() { return `https://${this.branch}--${this.repo}--${this.org}.aem.page`; },
     get liveOrigin() { return `https://${this.branch}--${this.repo}--${this.org}.aem.live`; },
     description: 'Financial services demo — FSI vertical with Universal Editor',
@@ -70,6 +77,7 @@ export const KNOWN_SITES = {
   wknd: {
     name: 'WKND Adventures',
     siteId: 'wknd',
+    siteType: 'da', // DA-backed EDS
     org: 'hlxsites',
     repo: 'wknd',
     branch: 'main',
@@ -87,6 +95,7 @@ export const KNOWN_SITES = {
   'wknd-universal': {
     name: 'WKND Universal',
     siteId: 'wknd-universal',
+    siteType: 'xwalk', // JCR + UE
     org: 'aem-showcase',
     repo: 'wknd-universal',
     branch: 'main',
@@ -95,6 +104,7 @@ export const KNOWN_SITES = {
     description: 'WKND Universal Editor demo — primary showcase site for xwalk/JCR on AEM CS',
     vertical: 'Media / Lifestyle',
     aemHost: 'author-p153659-e1614585.adobeaemcloud.com',
+    publishHost: 'publish-p153659-e1614585.adobeaemcloud.com',
     pages: [
       { path: '/index', title: 'Homepage', description: 'Hero, featured articles' },
       { path: '/language-masters/en', title: 'English (Language Master)', description: 'English language root' },
