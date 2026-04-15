@@ -22,7 +22,7 @@ import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCust
 import { detectSiteMention, resolveSite } from './known-sites.js';
 import { getGitHubToken, setGitHubToken, hasGitHubToken, getRepoInfo, listBranches, getRepoTree } from './github-content.js';
 import { detectAndCacheSiteType, getSiteType } from './site-detect.js';
-import { aemUnifiedMcp } from './mcp-client.js';
+import { aemUnifiedMcp, prewarmSessions } from './mcp-client.js';
 
 /* ── Dynamic Org Configuration (from customer profile) ── */
 let AEM_ORG = getOrgConfig();
@@ -5250,7 +5250,10 @@ async function init() {
   // Context prefetch: pre-discover all AEM environments (like Adobe's AI Assistant pattern)
   // Runs async — doesn't block init. Results cached for instant lookup on site connect.
   if (isSignedIn()) {
+    // Run in parallel: prefetch environments + pre-warm MCP sessions
+    // Both async, neither blocks UI. Combined ~400ms.
     prefetchAemEnvironments();
+    prewarmSessions();
   }
 }
 

@@ -197,44 +197,44 @@ export function createMcpClient(endpointPath, label = 'MCP') {
 }
 
 /* ─── Pre-built endpoint clients ─── */
+/* ALL routed through CF Worker /mcp proxy for CORS (mcp-session-id header) + S2S auth injection */
 
-/** DA content operations (list, get, create, update, delete, copy, move, versions) */
-export const daMcp = createMcpClient('/adobe/mcp/da', 'DA-MCP');
-
-/** AEM CS JCR content CRUD — pages + content fragments. No AI credits. */
-export const contentMcp = createMcpClient('/adobe/mcp/content', 'AEM-Content');
-
-/** Read-only content/asset search. No AI credits. */
-export const contentReadonlyMcp = createMcpClient('/adobe/mcp/content-readonly', 'AEM-ReadOnly');
-
-/** AI-powered content updates (Experience Production Agent). Uses AI credits. */
+// ── AEM Content (Critical) ──
+export const daMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/da', 'DA-MCP');
+export const contentMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/content', 'AEM-Content');
+export const contentReadonlyMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/content-readonly', 'AEM-ReadOnly');
 export const contentUpdaterMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/content-updater', 'AEM-Updater');
+export const aemUnifiedMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/aem', 'AEM-Unified');
 
-/** Brand policy get + check. Uses AI credits. Routed through Worker for CORS. */
+// ── AEM Governance & Discovery (Critical) ──
 export const governanceMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/experience-governance', 'AEM-Governance');
-
-/** Search assets, CF, forms, pages. Uses AI credits. Routed through Worker for CORS. */
 export const discoveryMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/discovery', 'AEM-Discovery');
 
-/** Pipeline troubleshooting tools. Uses AI credits. Routed through Worker for CORS. */
+// ── AEM Development ──
 export const developmentMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/development', 'AEM-Dev');
 
-/** CJA — Customer Journey Analytics data insights. */
-export const cjaMcp = createMcpClient('/adobe/mcp/cja', 'CJA');
+// ── Analytics & Insights (High Value) ──
+export const cjaMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/cja', 'CJA');
+export const aaMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/adobe-analytics', 'Adobe-Analytics');
 
-/** Acrobat MCP — PDF services (extract, convert, etc.). */
-export const acrobatMcp = createMcpClient('/adobe/mcp/acrobat', 'Acrobat');
+// ── Cross-Product (High Value) ──
+export const acrobatMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/acrobat', 'Acrobat');
+export const marketingMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/marketing-agent', 'Marketing-Agent');
+export const targetMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/target', 'Target');
+export const rtcdpMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/rtcdp', 'RT-CDP');
 
-/** Marketing Agent — AJO journeys, Target decisioning, audience activation. */
-export const marketingMcp = createMcpClient('/adobe/mcp/marketing-agent', 'Marketing-Agent');
-
-/** Spacecat / AEM Sites Optimizer — site audits, SEO, CWV, broken backlinks. */
+// ── External (not Adobe MCP — different protocol) ──
 export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
 
 /**
- * Unified AEM MCP — code-execution model with full read/write/delete.
- * Routed through CF Worker /mcp proxy to work around CORS (mcp.adobeaemcloud.com
- * doesn't expose mcp-session-id in Access-Control-Expose-Headers).
- * The Worker proxies requests, adds S2S auth, and exposes the session ID header.
+ * Pre-warm critical MCP sessions in parallel on site connect.
+ * Each session takes ~350ms for handshake. Running 4 in parallel = ~400ms total.
+ * Subsequent tool calls skip the handshake entirely.
  */
-export const aemUnifiedMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/aem', 'AEM-Unified');
+export async function prewarmSessions() {
+  const critical = [aemUnifiedMcp, discoveryMcp, governanceMcp, contentMcp];
+  const results = await Promise.allSettled(critical.map((c) => c.initSession()));
+  const ok = results.filter((r) => r.status === 'fulfilled').length;
+  console.log(`[MCP] Pre-warmed ${ok}/${critical.length} sessions`);
+  return ok;
+}

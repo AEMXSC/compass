@@ -18,7 +18,7 @@ import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
 import * as aemAssets from './aem-assets-client.js';
-import { contentUpdaterMcp, developmentMcp, cjaMcp, acrobatMcp, marketingMcp, aemUnifiedMcp } from './mcp-client.js';
+import { contentUpdaterMcp, developmentMcp, cjaMcp, aaMcp, acrobatMcp, marketingMcp, targetMcp, rtcdpMcp, aemUnifiedMcp, governanceMcp as govMcpClient, discoveryMcp as discMcpClient } from './mcp-client.js';
 import * as wf from './workfront.js';
 const { hasWebhook, createTaskViaWebhook } = wf;
 import { getSiteType } from './site-detect.js';
@@ -1437,6 +1437,116 @@ const AEM_TOOLS = [
       required: ['aem_url', 'page_path', 'updates'],
     },
   },
+
+  /* ─── CJA / Analytics Skills (High Value) ─── */
+
+  {
+    name: 'cja_visualize',
+    description: 'CJA — Answer analytics questions with visualizations. "Trend orders in July", "Show revenue by region", "Top 10 SKUs by profit". Returns visualization data for charts and tables.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'Natural language analytics question' },
+        dataview_id: { type: 'string', description: 'CJA data view ID (optional — uses default if omitted)' },
+      },
+      required: ['question'],
+    },
+  },
+  {
+    name: 'cja_kpi_pulse',
+    description: 'CJA — Compact KPI digest showing how key metrics changed over a period. "How did we do this week?", "Give me a performance overview", "Weekly KPI recap".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        period: { type: 'string', description: 'Time period: "last 7 days", "last month", "this quarter"' },
+        dataview_id: { type: 'string', description: 'CJA data view ID (optional)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'cja_executive_briefing',
+    description: 'CJA — Generate executive-ready performance summary with key metrics, trends, and drivers. "Write an exec summary", "Monthly business review", "Stakeholder briefing".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        period: { type: 'string', description: 'Time period to summarize' },
+        focus: { type: 'string', description: 'Focus area: "revenue", "engagement", "conversion", "all"' },
+        dataview_id: { type: 'string', description: 'CJA data view ID (optional)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'cja_anomaly_triage',
+    description: 'CJA — Investigate an unexpected metric change to find root cause. "Why did conversion drop?", "What caused the traffic spike?", "Root cause analysis on revenue dip".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        metric: { type: 'string', description: 'The metric that changed (e.g., "conversion rate", "revenue", "page views")' },
+        direction: { type: 'string', description: '"increase" or "decrease"' },
+        timeframe: { type: 'string', description: 'When it happened (e.g., "last week", "yesterday")' },
+        dataview_id: { type: 'string', description: 'CJA data view ID (optional)' },
+      },
+      required: ['metric'],
+    },
+  },
+
+  /* ─── Journey / Campaign Skills (Valuable) ─── */
+
+  {
+    name: 'create_journey',
+    description: 'AJO — Build a multi-step customer journey from a brief. Supports email, push, SMS channels. "Create a post-purchase journey", "Build a re-engagement drip", "3-email welcome series".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        brief: { type: 'string', description: 'Natural language description of the journey to create' },
+        channels: { type: 'array', items: { type: 'string' }, description: 'Channels: ["email", "push", "sms"]' },
+        entry_type: { type: 'string', description: 'Entry type: "event", "audience", "business-event"' },
+      },
+      required: ['brief'],
+    },
+  },
+  {
+    name: 'generate_journey_content',
+    description: 'AJO — Generate channel-specific content (email subject, body, push notification, SMS) for journey nodes. "Generate a welcome email with friendly tone", "Create push notification for cart abandonment".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', description: 'Channel: "email", "push", "sms"' },
+        context: { type: 'string', description: 'What the content is for (journey step, campaign goal)' },
+        tone: { type: 'string', description: 'Tone: "friendly", "urgent", "professional", "casual"' },
+      },
+      required: ['channel', 'context'],
+    },
+  },
+  {
+    name: 'analyze_experiment',
+    description: 'Experimentation — Summarize experiment results, explain why treatments won or lost, recommend next tests. "What did we learn from this test?", "Why did variant A outperform?", "What should I test next?".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        experiment_id: { type: 'string', description: 'Experiment or activity ID' },
+        question: { type: 'string', description: 'Specific question about results (optional)' },
+      },
+      required: [],
+    },
+  },
+
+  /* ─── Audience Skills (Valuable) ─── */
+
+  {
+    name: 'explore_audiences',
+    description: 'RT-CDP — Search, filter, and inspect existing audiences. Find sizes, check activation status, list destinations. "Which audiences are largest?", "Show inactive audiences", "Audiences targeting California".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Natural language search query for audiences' },
+        status: { type: 'string', description: 'Filter: "active", "inactive", "all"' },
+      },
+      required: ['query'],
+    },
+  },
 ];
 
 /* ── Tool → Official Adobe Agent Mapping (for UI badges) ── */
@@ -1466,6 +1576,17 @@ export const TOOL_AGENT_MAP = {
   batch_aem_update: 'Experience Production Agent',
   suggest_alt_text: 'Content Advisor Agent',
   apply_alt_text: 'Content Advisor Agent',
+  // CJA / Analytics
+  cja_visualize: 'Analytics Agent',
+  cja_kpi_pulse: 'Analytics Agent',
+  cja_executive_briefing: 'Analytics Agent',
+  cja_anomaly_triage: 'Analytics Agent',
+  // Journeys / Campaigns
+  create_journey: 'Journey Agent',
+  generate_journey_content: 'Journey Agent',
+  analyze_experiment: 'Experimentation Agent',
+  // Audiences
+  explore_audiences: 'Audience Agent',
   delete_aem_page: 'Experience Production Agent',
   list_aem_templates: 'Experience Production Agent',
   create_aem_launch: 'Experience Production Agent',
@@ -4346,6 +4467,89 @@ async function executeTool(name, input) {
       }
     }
 
+    /* ─── CJA / Analytics Skills ─── */
+
+    case 'cja_visualize':
+    case 'cja_kpi_pulse':
+    case 'cja_executive_briefing':
+    case 'cja_anomaly_triage': {
+      if (!(await ensureAuth())) return authRequiredError(name);
+      try {
+        // Map tool names to CJA MCP skill names
+        const skillMap = {
+          cja_visualize: 'visualize_data',
+          cja_kpi_pulse: 'kpi_pulse',
+          cja_executive_briefing: 'executive_briefing',
+          cja_anomaly_triage: 'anomaly_triage',
+        };
+        const result = await cjaMcp.callTool(skillMap[name] || name, input);
+        return JSON.stringify({ status: 'success', ...result, source: `CJA — ${name}` }, null, 2);
+      } catch (err) {
+        return mcpError(name, err);
+      }
+    }
+
+    /* ─── Journey / Campaign Skills ─── */
+
+    case 'create_journey': {
+      if (!(await ensureAuth())) return authRequiredError('create_journey');
+      try {
+        const result = await marketingMcp.callTool('create_journey', {
+          brief: input.brief,
+          channels: input.channels || ['email'],
+          entry_type: input.entry_type || 'audience',
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'AJO — Journey Agent' }, null, 2);
+      } catch (err) {
+        return mcpError('create_journey', err);
+      }
+    }
+
+    case 'generate_journey_content': {
+      if (!(await ensureAuth())) return authRequiredError('generate_journey_content');
+      try {
+        const result = await marketingMcp.callTool('generate_content', {
+          channel: input.channel,
+          context: input.context,
+          tone: input.tone || 'professional',
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'AJO — Journey Agent' }, null, 2);
+      } catch (err) {
+        return mcpError('generate_journey_content', err);
+      }
+    }
+
+    case 'analyze_experiment': {
+      if (!(await ensureAuth())) return authRequiredError('analyze_experiment');
+      try {
+        // Try Target MCP first, fall back to CJA
+        let result;
+        try {
+          result = await targetMcp.callTool('analyze_experiment', input);
+        } catch {
+          result = await cjaMcp.callTool('analyze_experiment', input);
+        }
+        return JSON.stringify({ status: 'success', ...result, source: 'Experimentation Agent' }, null, 2);
+      } catch (err) {
+        return mcpError('analyze_experiment', err);
+      }
+    }
+
+    /* ─── Audience Skills ─── */
+
+    case 'explore_audiences': {
+      if (!(await ensureAuth())) return authRequiredError('explore_audiences');
+      try {
+        const result = await rtcdpMcp.callTool('explore_audiences', {
+          query: input.query,
+          status: input.status || 'all',
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'RT-CDP — Audience Agent' }, null, 2);
+      } catch (err) {
+        return mcpError('explore_audiences', err);
+      }
+    }
+
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -4544,6 +4748,15 @@ Use these when users ask about:
 23. When users mention broken backlinks, 404s, or redirect chains, call get_site_audit with audit_type=broken-backlinks or get_site_opportunities with category=broken-backlinks.
 24. **BULK OPERATIONS**: When users say "all pages", "every page", "across the site", "update everywhere", or "change on all" — use \`batch_aem_update\`. ALWAYS call with confirmed=false first to show affected pages, then ask user to confirm before calling with confirmed=true. Never execute bulk updates without user confirmation.
 25. **ALT TEXT**: When users mention "ALT text", "accessibility", "image descriptions", "missing ALT", or "image audit" — use \`suggest_alt_text\` to analyze page images. Present suggestions as a table. Only call \`apply_alt_text\` after user approves specific suggestions.
+26. **ANALYTICS (CJA)**: For data questions — "How did we do?", "trend orders", "revenue by region", "why did X drop?" — use \`cja_visualize\`, \`cja_kpi_pulse\`, \`cja_executive_briefing\`, or \`cja_anomaly_triage\`. These connect to CJA data views.
+27. **JOURNEYS (AJO)**: For journey creation — "Create a welcome series", "Build a re-engagement drip" — use \`create_journey\`. For journey content — "Generate a push notification" — use \`generate_journey_content\`.
+28. **EXPERIMENTS**: For experiment analysis — "What did we learn?", "Why did variant A win?" — use \`analyze_experiment\`.
+29. **AUDIENCES (RT-CDP)**: For audience questions — "Show me our largest audiences", "Which audiences target California?" — use \`explore_audiences\`.
+30. **SPEED — PARALLEL CALLS**: When the user's request touches MULTIPLE products (e.g., "Create a page AND set up a journey to drive traffic to it"), call the tools in PARALLEL. Return multiple tool_use blocks in one response. Examples of parallel-safe combinations:
+    - \`aem_read\` + \`search_dam_assets\` (read page content while searching for images)
+    - \`aem_write\` + \`create_workfront_task\` (update content while creating approval task)
+    - \`cja_kpi_pulse\` + \`explore_audiences\` (get metrics while checking audiences)
+    - \`suggest_alt_text\` + \`run_governance_check\` (accessibility + brand audit simultaneously)
 24. **EXPERIMENTATION**: When users want A/B tests, experiments, or content variations, use setup_experiment + edit_page_content. One prompt sets up the entire experiment (variant pages + metadata + splits). This is FASTER than the UE extensions approach.
 25. **FORMS**: When users want forms, contact pages, or lead capture, use generate_form to create the form definition, then edit_page_content to embed it in the page.
 26. **VARIATIONS**: When users want content variations, alternate headlines, or copy options, use generate_page_variations. Generate full-page coordinated variations, not just one component at a time. If they also want to test them, chain with setup_experiment.
