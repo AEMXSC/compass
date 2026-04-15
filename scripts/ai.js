@@ -4250,7 +4250,7 @@ async function executeTool(name, input) {
         const suggestions = [];
         for (const img of images.slice(0, 10)) { // limit to 10 images
           try {
-            const suggestion = await ai.callRaw(
+            const suggestion = await callRaw(
               `Analyze this image and write a concise, descriptive ALT text (1-2 sentences, max 125 characters). Focus on what the image shows, not what it means. Be specific.\n\nImage URL: ${img.src}\n\nCurrent ALT text: ${img.currentAlt || '(none)'}\n\nRespond with ONLY the suggested ALT text, nothing else.`,
               { maxTokens: 100 },
             );
