@@ -13,7 +13,7 @@
 // Different query strings (e.g., './da-client.js' vs './da-client.js?v=57') create
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile } from './ims.js';
 import * as ai from './ai.js';
 import { TOOL_AGENT_MAP } from './ai.js';
 import * as da from './da-client.js';
@@ -174,7 +174,11 @@ function md(text) {
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/`(.*?)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, (_, text, url) => {
+      // Only allow http/https URLs — blocks javascript:, data:, etc.
+      if (/^https?:\/\//i.test(url)) return `<a href="${url}" target="_blank" rel="noopener">${text}</a>`;
+      return `${text} (${url})`;
+    })
     .replace(/^[-*] (.+)/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
     .replace(/<\/ul>\s*<ul>/g, '')
@@ -5191,9 +5195,7 @@ Body Text (excerpt): ${bodyText}`;
 
 /* ── Init ── */
 async function init() {
-  // Handle PKCE callback (?code= in URL) — must run before IMS library init
-  const wasCallback = await handlePkceCallback();
-  if (wasCallback) console.log('[EW] PKCE callback handled — signed in');
+  // S2S auth handles sign-in automatically — no PKCE or redirect callbacks needed
 
   // Configure DA client from dynamic org config (only if a site is set)
   if (AEM_ORG.orgId && AEM_ORG.repo) {

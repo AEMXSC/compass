@@ -139,8 +139,12 @@ export async function loadIms() {
 export async function fetchWithToken(url, opts = {}) {
   const token = getToken();
   if (!token) throw new Error('Not authenticated');
-  return fetch(url, {
+  const resp = await fetch(url, {
     ...opts,
     headers: { Authorization: `Bearer ${token}`, ...opts.headers },
   });
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status} for ${url}`);
+  }
+  return resp;
 }

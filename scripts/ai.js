@@ -4087,27 +4087,33 @@ async function executeTool(name, input) {
       if (!(await ensureAuth())) return authRequiredError('batch_aem_update');
       try {
         const aemUrl = input.aem_url;
-        const siteId = input.site_id;
+        // Sanitize all user inputs — these get interpolated into MCP code execution
+        const safeSiteId = String(input.site_id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        const safeCompType = String(input.component_type || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        const safePropPath = String(input.property_path || 'properties/text').replace(/[^a-zA-Z0-9_/:-]/g, '');
+        const safeNewValue = JSON.stringify(String(input.new_value || '')); // JSON.stringify handles all escaping
         const confirmed = input.confirmed || false;
+
+        if (!safeSiteId) {
+          return JSON.stringify({ error: 'site_id is required and must be alphanumeric' });
+        }
 
         // Step 1: List pages for the site
         const listCode = `
           const resp = await aem.get('/adobe/sites/sites');
           const sites = resp.body?.items || [];
-          const site = sites.find(s => s.name === '${siteId}' || s.id === '${siteId}');
-          if (!site) return { error: 'Site not found: ${siteId}', available: sites.map(s => s.name) };
-
+          const site = sites.find(s => s.name === ${JSON.stringify(safeSiteId)} || s.id === ${JSON.stringify(safeSiteId)});
+          if (!site) return { error: 'Site not found: ' + ${JSON.stringify(safeSiteId)}, available: sites.map(s => s.name) };
           const pages = await aem.get('/adobe/sites/sites/' + site.id + '/pages', { limit: 50 });
           return { siteId: site.id, pages: (pages.body?.items || []).map(p => ({ id: p.id, title: p.title, path: p.path })) };
         `;
         const listResult = await aemUnifiedMcp.callTool('read-api', { code: listCode, aemUrl });
 
         if (!confirmed) {
-          // Preview mode — show what would be affected
           return JSON.stringify({
             status: 'preview',
             description: input.description,
-            message: `Found pages for site "${siteId}". Review and call again with confirmed=true to apply changes.`,
+            message: `Found pages for site "${safeSiteId}". Review and call again with confirmed=true to apply changes.`,
             ...listResult,
             hint: 'Call batch_aem_update again with confirmed=true to execute the updates.',
             source: 'AEM Unified MCP — Batch',
@@ -4115,11 +4121,16 @@ async function executeTool(name, input) {
         }
 
         // Step 2: Execute updates (confirmed=true)
-        // Build batch update code that iterates pages and patches
+        // All user values are JSON.stringify'd to prevent code injection
         const updateCode = `
+          const SITE_ID = ${JSON.stringify(safeSiteId)};
+          const COMP_TYPE = ${JSON.stringify(safeCompType)};
+          const PROP_PATH = ${JSON.stringify(safePropPath)};
+          const NEW_VALUE = ${safeNewValue};
+
           const resp = await aem.get('/adobe/sites/sites');
           const sites = resp.body?.items || [];
-          const site = sites.find(s => s.name === '${siteId}' || s.id === '${siteId}');
+          const site = sites.find(s => s.name === SITE_ID || s.id === SITE_ID);
           if (!site) return { error: 'Site not found' };
 
           const pages = await aem.get('/adobe/sites/sites/' + site.id + '/pages', { limit: 50 });
@@ -4131,25 +4142,27 @@ async function executeTool(name, input) {
               const content = await aem.get('/adobe/pages/' + page.id + '/content');
               if (!content.body) { results.skipped++; continue; }
 
-              ${input.component_type ? `
-              // Find matching component
-              function findComp(node, type, path) {
-                if (node.componentType && node.componentType.includes('${input.component_type}')) return { node, path };
-                if (Array.isArray(node.items)) {
-                  for (let i = 0; i < node.items.length; i++) {
-                    const found = findComp(node.items[i], type, path + '/items/' + i);
-                    if (found) return found;
+              let patchPath;
+              if (COMP_TYPE) {
+                function findComp(node, type, path) {
+                  if (node.componentType && node.componentType.includes(type)) return { node, path };
+                  if (Array.isArray(node.items)) {
+                    for (let i = 0; i < node.items.length; i++) {
+                      const found = findComp(node.items[i], type, path + '/items/' + i);
+                      if (found) return found;
+                    }
                   }
+                  return null;
                 }
-                return null;
+                const match = findComp(content.body, COMP_TYPE, '');
+                if (!match) { results.skipped++; continue; }
+                patchPath = match.path + '/' + PROP_PATH;
+              } else {
+                patchPath = '/' + PROP_PATH;
               }
-              const match = findComp(content.body, '${input.component_type}', '');
-              if (!match) { results.skipped++; continue; }
-              const patchPath = match.path + '/${input.property_path || 'properties/text'}';
-              ` : `const patchPath = '/${input.property_path || 'properties/jcr:title'}';`}
 
               await aem.patch('/adobe/pages/' + page.id + '/content', [
-                { op: 'replace', path: patchPath, value: '${(input.new_value || '').replace(/'/g, "\\'")}' }
+                { op: 'replace', path: patchPath, value: NEW_VALUE }
               ], { etag: content.etag });
 
               results.updated++;

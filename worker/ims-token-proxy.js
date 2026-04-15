@@ -297,7 +297,8 @@ async function handleTokenProxy(request) {
 
 async function handleMcpProxy(request) {
   const origin = request.headers.get('Origin') || '';
-  if (!ALLOWED_ORIGINS.includes(origin) && !origin.endsWith('.aem.page') && !origin.endsWith('.aem.live')) {
+  // Only allow explicitly listed origins (no wildcards — prevents abuse from arbitrary *.aem.page subdomains)
+  if (!ALLOWED_ORIGINS.includes(origin)) {
     return new Response('Forbidden', { status: 403 });
   }
 
