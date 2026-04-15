@@ -429,8 +429,7 @@ async function handlePreview(request) {
       }
     }
 
-    // Step 3: Try to inline CSS from author tier (with S2S Bearer token)
-    // Note: S2S may not have access to .resource/ paths (403). Fallback CSS handles this.
+    // Step 3: Inline CSS — try publish first (clientlibs are public), then author (.resource/ needs auth)
     const authorBase = authorUrl || publishUrl.replace('publish-', 'author-');
     let cssInlined = false;
     // Match <link> with rel="stylesheet" in either attribute order
@@ -438,23 +437,43 @@ async function handlePreview(request) {
     for (const match of cssLinks) {
       const hrefVal = match[1] || match[2];
       if (!hrefVal) continue;
-      const cssHref = hrefVal.startsWith('http') ? hrefVal : `${authorBase}${hrefVal}`;
+
+      // Try publish first (clientlibs at /etc.clientlibs/ are publicly accessible)
+      const publishCssUrl = hrefVal.startsWith('http') ? hrefVal : `${publishUrl}${hrefVal}`;
+      const authorCssUrl = hrefVal.startsWith('http') ? hrefVal : `${authorBase}${hrefVal}`;
+
+      let css = null;
+      // Attempt 1: Fetch from publish tier (no auth — works for /etc.clientlibs/)
       try {
-        const cssResp = await fetch(cssHref, {
-          headers: cachedToken ? { Authorization: `Bearer ${cachedToken}` } : {},
-        });
-        if (cssResp.ok) {
-          let css = await cssResp.text();
-          css = css.replace(/url\(\s*["']?\//g, `url("${authorBase}/`);
-          html = html.replace(match[0], `<style>/* ${hrefVal.split('/').pop()} */\n${css}</style>`);
-          cssInlined = true;
-        } else {
-          console.log(`[Preview] CSS fetch ${cssResp.status} for ${cssHref} — using fallback CSS`);
-          // Remove the <link> tag since it won't resolve in the iframe
-          html = html.replace(match[0], '');
+        const resp = await fetch(publishCssUrl);
+        if (resp.ok) {
+          css = await resp.text();
+          console.log(`[Preview] CSS from publish: ${hrefVal} (${css.length} chars)`);
         }
-      } catch (cssErr) {
-        console.log(`[Preview] CSS fetch error: ${cssErr.message} — using fallback CSS`);
+      } catch { /* publish failed */ }
+
+      // Attempt 2: Fetch from author tier with S2S token (for .resource/ paths)
+      if (!css && cachedToken) {
+        try {
+          const resp = await fetch(authorCssUrl, {
+            headers: { Authorization: `Bearer ${cachedToken}` },
+          });
+          if (resp.ok) {
+            css = await resp.text();
+            console.log(`[Preview] CSS from author: ${hrefVal} (${css.length} chars)`);
+          } else {
+            console.log(`[Preview] Author CSS ${resp.status}: ${authorCssUrl}`);
+          }
+        } catch { /* author failed */ }
+      }
+
+      if (css) {
+        // Fix relative url() references to point to publish (for images, fonts)
+        css = css.replace(/url\(\s*["']?\//g, `url("${publishUrl}/`);
+        html = html.replace(match[0], `<style>/* ${hrefVal.split('/').pop()} */\n${css}</style>`);
+        cssInlined = true;
+      } else {
+        console.log(`[Preview] CSS unavailable: ${hrefVal} — removing link, fallback will apply`);
         html = html.replace(match[0], '');
       }
     }
