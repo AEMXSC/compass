@@ -4949,3 +4949,120 @@ textarea:focus-visible,
 .toast-info .toast-icon {
   background: rgba(255,255,255,0.2);
 }
+
+/* ─── Chat UX Improvements ─── */
+
+/* Stop generation button */
+.send-btn.stop-mode {
+  background: var(--accent-danger, #e34850);
+}
+.send-btn.stop-mode:hover {
+  background: var(--accent-danger-hover, #c9363e);
+}
+
+/* Scroll-to-bottom FAB */
+.scroll-to-bottom-fab {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-secondary, #2a2a2a);
+  border: 1px solid var(--border-color, #444);
+  color: var(--text-secondary, #aaa);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  transition: opacity 0.2s, transform 0.2s;
+}
+.scroll-to-bottom-fab:hover {
+  background: var(--bg-hover, #333);
+  color: var(--text-primary, #fff);
+  transform: translateX(-50%) scale(1.1);
+}
+
+/* Code block copy button */
+.code-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: var(--font-sans, system-ui);
+  background: var(--bg-secondary, #2a2a2a);
+  color: var(--text-secondary, #aaa);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+pre:hover .code-copy-btn {
+  opacity: 1;
+}
+.code-copy-btn:hover {
+  background: var(--bg-hover, #333);
+  color: var(--text-primary, #fff);
+}
+
+/* Message action buttons (copy, etc.) */
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.message:hover .msg-actions {
+  opacity: 1;
+}
+.msg-action-btn {
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+  color: var(--text-muted, #666);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+.msg-action-btn:hover {
+  background: var(--bg-secondary, #2a2a2a);
+  color: var(--text-primary, #fff);
+  border-color: var(--text-secondary, #aaa);
+}
+
+/* Context chips above chat input */
+.context-chips {
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.context-chips::-webkit-scrollbar { display: none; }
+.context-chip {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: var(--font-sans, system-ui);
+  background: var(--bg-secondary, #2a2a2a);
+  color: var(--text-secondary, #aaa);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.context-chip:hover {
+  background: var(--accent, #1473e6);
+  color: #fff;
+  border-color: var(--accent, #1473e6);
+}

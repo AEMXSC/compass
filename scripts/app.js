@@ -215,10 +215,14 @@ function addTyping() {
   el.id = 'typingIndicator';
   chatMessages.appendChild(el);
   scrollChat();
+  // Toggle send button to stop mode
+  if (window.__compassSetGenerating) window.__compassSetGenerating(true);
 }
 
 function removeTyping() {
   document.getElementById('typingIndicator')?.remove();
+  // Toggle send button back to send mode
+  if (window.__compassSetGenerating) window.__compassSetGenerating(false);
 }
 
 function addStreamMessage(agentBadge) {
@@ -3469,6 +3473,9 @@ async function connectCustomSite(input) {
 
   switchView('editor');
 
+  // Update contextual prompt chips for the connected site
+  if (typeof updateContextChips === 'function') updateContextChips();
+
   // For JCR sites where iframe can't load (X-Frame-Options), fetch rendered HTML
   // from the publish tier and render as srcdoc with <base> pointing to publish.
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
@@ -3869,10 +3876,169 @@ document.querySelectorAll('.prompt-chip').forEach((btn) => {
   });
 });
 
-sendBtn.addEventListener('click', handleUserInput);
+sendBtn.addEventListener('click', () => {
+  if (sendBtn.classList.contains('stop-mode')) {
+    // Stop generation
+    ai.abortCurrentChat();
+    setGenerating(false);
+    return;
+  }
+  handleUserInput();
+});
 chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleUserInput(); }
+  if (e.key === 'Escape') { ai.abortCurrentChat(); setGenerating(false); }
 });
+
+/* ── Chat UX: Stop button, copy, scroll-to-bottom, regenerate ── */
+
+const SEND_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+const STOP_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+
+/** Toggle send button between send/stop states */
+function setGenerating(active) {
+  if (active) {
+    sendBtn.innerHTML = STOP_ICON;
+    sendBtn.classList.add('stop-mode');
+    sendBtn.title = 'Stop generating (Esc)';
+    sendBtn.setAttribute('aria-label', 'Stop generating');
+  } else {
+    sendBtn.innerHTML = SEND_ICON;
+    sendBtn.classList.remove('stop-mode');
+    sendBtn.title = 'Send';
+    sendBtn.setAttribute('aria-label', 'Send message');
+  }
+}
+
+// Hook into the existing addTyping/removeTyping to toggle send/stop button
+const _origAddTyping = addTyping;
+const _origRemoveTyping = removeTyping;
+// Override addTyping to also set generating state
+window.__compassSetGenerating = setGenerating; // expose for streaming hooks
+
+/** Contextual prompt chips above chat input — change based on what's loaded */
+function updateContextChips() {
+  let container = document.getElementById('contextChips');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'contextChips';
+    container.className = 'context-chips';
+    const inputWrapper = document.querySelector('.input-wrapper');
+    if (inputWrapper) inputWrapper.parentElement.insertBefore(container, inputWrapper);
+  }
+
+  const chips = [];
+  const siteType = window.__EW_SITE_TYPE;
+  const hasPage = !!window.__EW_PREVIEW_URL || !!document.querySelector('.preview-frame')?.src;
+
+  if (hasPage) {
+    chips.push({ icon: '✏️', label: 'Edit hero', prompt: 'Change the hero headline to something more engaging' });
+    chips.push({ icon: '🛡', label: 'Brand check', prompt: 'Run a brand compliance check on this page' });
+    chips.push({ icon: '♿', label: 'ALT text', prompt: 'Suggest ALT text for all images on this page' });
+    chips.push({ icon: '📄', label: 'Summarize', prompt: 'Summarize the content on this page' });
+  }
+
+  if (siteType === 'jcr' || window.__EW_AEM_HOST) {
+    chips.push({ icon: '📋', label: 'List pages', prompt: 'Show me all pages on this site' });
+    chips.push({ icon: '🔄', label: 'Bulk update', prompt: 'Update the footer CTA on all pages' });
+    chips.push({ icon: '📑', label: 'New page from brief', prompt: 'Create a new page from an attached brief' });
+  }
+
+  if (siteType === 'da') {
+    chips.push({ icon: '📝', label: 'Edit page', prompt: 'Change the hero headline' });
+    chips.push({ icon: '🔍', label: 'Find assets', prompt: 'Find 5 approved images for the hero' });
+  }
+
+  // Always available
+  chips.push({ icon: '📊', label: 'KPI report', prompt: 'How did our site perform this week?' });
+
+  // Limit to 4 chips
+  const display = chips.slice(0, 4);
+  container.innerHTML = display.map((c) =>
+    `<button class="context-chip" data-prompt="${c.prompt.replace(/"/g, '&quot;')}">${c.icon} ${c.label}</button>`
+  ).join('');
+
+  container.querySelectorAll('.context-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      chatInput.value = btn.dataset.prompt;
+      chatInput.focus();
+    });
+  });
+}
+
+// Update context chips when site connects or view changes
+window.addEventListener('ew-auth-change', () => setTimeout(updateContextChips, 500));
+
+/** Scroll-to-bottom FAB */
+const scrollFab = document.createElement('button');
+scrollFab.className = 'scroll-to-bottom-fab';
+scrollFab.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
+scrollFab.title = 'Scroll to bottom';
+scrollFab.style.display = 'none';
+scrollFab.addEventListener('click', () => { scrollChat(); scrollFab.style.display = 'none'; });
+chatMessages?.parentElement?.appendChild(scrollFab);
+
+if (chatMessages) {
+  chatMessages.addEventListener('scroll', () => {
+    const atBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 100;
+    scrollFab.style.display = atBottom ? 'none' : 'flex';
+  });
+}
+
+/** Copy button on code blocks — inject after markdown rendering */
+function injectCodeCopyButtons(container) {
+  if (!container) return;
+  container.querySelectorAll('pre > code, pre code').forEach((code) => {
+    const pre = code.closest('pre');
+    if (!pre || pre.querySelector('.code-copy-btn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'code-copy-btn';
+    btn.textContent = 'Copy';
+    btn.addEventListener('click', () => {
+      navigator.clipboard.writeText(code.textContent).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    });
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
+  });
+}
+
+/** Copy + Regenerate buttons on assistant messages */
+function injectMessageActions(msgEl) {
+  if (!msgEl || msgEl.querySelector('.msg-actions')) return;
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+
+  // Copy message
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'msg-action-btn';
+  copyBtn.title = 'Copy message';
+  copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+  copyBtn.addEventListener('click', () => {
+    const text = msgEl.querySelector('.message-content')?.textContent || msgEl.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+      setTimeout(() => { copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>'; }, 2000);
+    });
+  });
+  actions.appendChild(copyBtn);
+
+  msgEl.appendChild(actions);
+}
+
+// Override addMessage to inject copy buttons and message actions
+const _origAddMessage = addMessage;
+addMessage = function (type, html, agentBadge) {
+  _origAddMessage(type, html, agentBadge);
+  // Post-process: add copy buttons to code blocks and message actions
+  const lastMsg = chatMessages?.lastElementChild;
+  if (lastMsg && type === 'assistant') {
+    injectCodeCopyButtons(lastMsg);
+    injectMessageActions(lastMsg);
+  }
+};
 
 // Auto-resize textarea as user types
 function autoResizeChatInput() {
