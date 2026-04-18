@@ -5066,3 +5066,44 @@ pre:hover .code-copy-btn {
   color: #fff;
   border-color: var(--accent, #1473e6);
 }
+
+/* ─── Slash Command Autocomplete ─── */
+.slash-dropdown {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--bg-secondary, #2a2a2a);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 8px;
+  margin: 0 8px 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.slash-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary, #fff);
+  font-family: var(--font-sans, system-ui);
+  transition: background 0.1s;
+}
+.slash-option:hover {
+  background: var(--bg-hover, #333);
+}
+.slash-cmd {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--accent-light, #5b9af5);
+  min-width: 80px;
+}
+.slash-desc {
+  font-size: 12px;
+  color: var(--text-secondary, #aaa);
+}

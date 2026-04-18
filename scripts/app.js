@@ -3801,9 +3801,85 @@ function matchSpecializedFlow(text) {
   return null;
 }
 
+/* ── Slash Commands — intercept /commands before AI ── */
+const SLASH_COMMANDS = {
+  '/blocks': { description: 'List available blocks for this site', prompt: 'Show me all available blocks for this site with descriptions' },
+  '/mcp': { description: 'Show MCP connection status', action: () => { addMessage('assistant', md(`**MCP Connections**\n- AEM Unified: ${window.__AEM_ENVIRONMENTS ? '✅ Connected' : '⏳ Connecting...'}\n- Environments: ${(window.__AEM_ENVIRONMENTS || []).length} discovered\n- Auth: ${isSignedIn() ? '✅ S2S' : '❌ Not signed in'}`)); } },
+  '/sites': { description: 'List known AEM sites', prompt: 'List all known AEM sites I can connect to' },
+  '/governance': { description: 'Run brand compliance check', prompt: 'Run a full governance check on the current page' },
+  '/audit': { description: 'Run content audit', prompt: 'Audit this page for content quality, readability, and accessibility' },
+  '/alt': { description: 'Suggest ALT text for images', prompt: 'Suggest ALT text for all images on this page' },
+  '/bulk': { description: 'Bulk update across pages', prompt: 'I want to update content across multiple pages' },
+  '/brief': { description: 'Create page from brief', prompt: 'Create a new page from an attached brief' },
+  '/kpi': { description: 'Get KPI performance report', prompt: 'How did our site perform this week? Give me a KPI digest.' },
+  '/journey': { description: 'Create a customer journey', prompt: 'Create a customer journey for re-engagement' },
+  '/publish': { description: 'Publish current page', prompt: 'Publish the current page to live' },
+  '/help': { description: 'Show available commands', action: () => {
+    const cmds = Object.entries(SLASH_COMMANDS).map(([cmd, v]) => `\`${cmd}\` — ${v.description}`).join('\n');
+    addMessage('assistant', md(`**Available Commands**\n${cmds}\n\nType any command or just describe what you want in plain English.`));
+  }},
+};
+
+function handleSlashCommand(text) {
+  const cmd = text.split(' ')[0].toLowerCase();
+  const match = SLASH_COMMANDS[cmd];
+  if (!match) return false;
+  if (match.action) { match.action(); return true; }
+  if (match.prompt) { chatInput.value = match.prompt; handleUserInput(); return true; }
+  return false;
+}
+
+/** Show slash command autocomplete dropdown */
+function updateSlashAutocomplete(text) {
+  let dropdown = document.getElementById('slashDropdown');
+  if (!text.startsWith('/') || text.includes(' ')) {
+    if (dropdown) dropdown.style.display = 'none';
+    return;
+  }
+  const matches = Object.entries(SLASH_COMMANDS).filter(([cmd]) => cmd.startsWith(text.toLowerCase()));
+  if (matches.length === 0) {
+    if (dropdown) dropdown.style.display = 'none';
+    return;
+  }
+  if (!dropdown) {
+    dropdown = document.createElement('div');
+    dropdown.id = 'slashDropdown';
+    dropdown.className = 'slash-dropdown';
+    const inputWrapper = document.querySelector('.input-wrapper');
+    if (inputWrapper) inputWrapper.parentElement.insertBefore(dropdown, inputWrapper);
+  }
+  dropdown.innerHTML = matches.map(([cmd, v]) =>
+    `<button class="slash-option" data-cmd="${cmd}"><span class="slash-cmd">${cmd}</span><span class="slash-desc">${v.description}</span></button>`
+  ).join('');
+  dropdown.style.display = 'flex';
+  dropdown.querySelectorAll('.slash-option').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      chatInput.value = btn.dataset.cmd + ' ';
+      dropdown.style.display = 'none';
+      chatInput.focus();
+      // If it's a direct action command, run it
+      if (SLASH_COMMANDS[btn.dataset.cmd]?.action) {
+        chatInput.value = '';
+        SLASH_COMMANDS[btn.dataset.cmd].action();
+      }
+    });
+  });
+}
+
+// Wire autocomplete to input events
+chatInput?.addEventListener('input', () => updateSlashAutocomplete(chatInput.value));
+
 function handleUserInput() {
   const text = chatInput.value.trim();
   if (!text && !pendingFile) return;
+
+  // Check for slash commands first
+  if (text.startsWith('/') && handleSlashCommand(text)) {
+    chatInput.value = '';
+    autoResizeChatInput();
+    return;
+  }
+
   chatInput.value = '';
   autoResizeChatInput();
 
