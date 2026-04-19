@@ -21,6 +21,7 @@ async function bootstrap() {
 
     // Replace body content with the SPA shell
     document.body.innerHTML = shellHTML;
+    document.title = 'Project Compass';
 
     // CSS: app.css is already loaded via styles.css @import (from head.html)
     // No need to inject a second <link> — would cause duplicate CSS load.
