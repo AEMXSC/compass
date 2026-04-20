@@ -252,14 +252,14 @@ function updateAuthUI() {
       if (userName) userName.textContent = profile.displayName;
       if (userEmail) userEmail.textContent = profile.email || '';
     } else if (signedIn) {
-      // Signed in but no profile (S2S service account) — show "Sign In" to upgrade
-      authBtn.classList.remove('signed-in', 'avatar-mode');
-      authBtn.innerHTML = 'Sign In';
-      authBtn.title = 'Sign in with Adobe ID to unlock full MCP access (currently using service account)';
-      // Populate dropdown with service account info
+      // Signed in via S2S service account — show avatar
+      authBtn.textContent = '';
+      authBtn.classList.add('signed-in', 'avatar-mode');
+      authBtn.title = 'Signed in — Adobe S2S';
+      authBtn.innerHTML = '<span class="auth-avatar">A</span>';
       if (userAvatar) userAvatar.textContent = 'A';
       if (userName) userName.textContent = 'AEM Service Account';
-      if (userEmail) userEmail.textContent = 'S2S · Click Sign In to upgrade';
+      if (userEmail) userEmail.textContent = 'S2S · Adobe IMS';
     } else {
       // Not signed in — show "Sign In" text button
       authBtn.classList.remove('signed-in', 'avatar-mode');
