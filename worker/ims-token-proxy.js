@@ -361,7 +361,7 @@ async function handleMcpProxy(request) {
       'Mcp-Session-Id': sessionId,
       'Access-Control-Allow-Origin': origin || '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, Mcp-Session-Id',
       'Access-Control-Expose-Headers': 'Mcp-Session-Id',
       'Access-Control-Allow-Credentials': 'true',
     },
@@ -781,7 +781,7 @@ function corsHeaders(origin) {
   return {
     'Access-Control-Allow-Origin': allowed,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Mcp-Session-Id',
     'Access-Control-Max-Age': '86400',
   };
 }
