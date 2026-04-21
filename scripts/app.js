@@ -270,10 +270,11 @@ function updateAuthUI() {
       if (userName) userName.textContent = 'Adobe User';
       if (userEmail) userEmail.textContent = 'User-level IMS · Full access';
     } else if (signedIn) {
-      // Signed in via S2S — show "Sign In" to upgrade to user-level
-      authBtn.classList.remove('signed-in', 'avatar-mode');
-      authBtn.innerHTML = 'Sign In';
-      authBtn.title = 'Sign in with Adobe ID for full access (currently using service account)';
+      // Signed in but no profile yet — show checkmark
+      authBtn.textContent = '';
+      authBtn.classList.add('signed-in', 'avatar-mode');
+      authBtn.title = 'Signed in — Adobe IMS';
+      authBtn.innerHTML = '<span class="auth-avatar">✓</span>';
     } else {
       // Not signed in — show "Sign In" text button
       authBtn.classList.remove('signed-in', 'avatar-mode');
@@ -3809,7 +3810,7 @@ function matchSpecializedFlow(text) {
 /* ── Slash Commands — intercept /commands before AI ── */
 const SLASH_COMMANDS = {
   '/blocks': { description: 'List available blocks for this site', prompt: 'Show me all available blocks for this site with descriptions' },
-  '/mcp': { description: 'Show MCP connection status', action: () => { addMessage('assistant', md(`**MCP Connections**\n- AEM Unified: ${window.__AEM_ENVIRONMENTS ? '✅ Connected' : '⏳ Connecting...'}\n- Environments: ${(window.__AEM_ENVIRONMENTS || []).length} discovered\n- Auth: ${isSignedIn() ? '✅ S2S' : '❌ Not signed in'}`)); } },
+  '/mcp': { description: 'Show MCP connection status', action: () => { addMessage('assistant', md(`**MCP Connections**\n- AEM Unified: ${window.__AEM_ENVIRONMENTS ? '✅ Connected' : '⏳ Connecting...'}\n- Environments: ${(window.__AEM_ENVIRONMENTS || []).length} discovered\n- Auth: ${isSignedIn() ? '✅ Adobe IMS' : '❌ Not signed in'}`)); } },
   '/sites': { description: 'List known AEM sites', prompt: 'List all known AEM sites I can connect to' },
   '/governance': { description: 'Run brand compliance check', prompt: 'Run a full governance check on the current page' },
   '/audit': { description: 'Run content audit', prompt: 'Audit this page for content quality, readability, and accessibility' },
