@@ -1,13 +1,18 @@
 /*
- * IMS Authentication Module — Hybrid (S2S + User-Level OAuth)
+ * IMS Authentication Module — Adobe IMS (Implicit Flow)
  *
- * Flow:
- * 1. Page loads → S2S auto-signs in (instant, service account)
- * 2. User clicks Sign In → OAuth popup upgrades to user-level token
- * 3. User-level token gives full AEM author access, audit trails, personal permissions
+ * Matches the EXCAT/Sliccy auth pattern:
+ * 1. Build IMS authorize URL with client_id + redirect_uri
+ * 2. Open in popup (or redirect)
+ * 3. IMS returns token in URL hash (#access_token=...)
+ * 4. Parse token from hash, store in localStorage
  *
- * S2S provides baseline MCP access. User-level OAuth provides full access.
+ * No CF Worker needed for auth. Token comes directly from Adobe IMS.
  */
+
+const IMS_CLIENT_ID = '11f136d2a27aba7a99dc6d31159f4311';
+const IMS_SCOPE = 'openid,AdobeID,additional_info.projectedProductContext,additional_info.ownerOrg,read_organizations,aem.frontend.all';
+const IMS_AUTHORIZE_URL = 'https://ims-na1.adobelogin.com/ims/authorize/v2';
 
 const IMS_WORKER = localStorage.getItem('ew-ims-proxy')
   || 'https://compass-ims-proxy.compass-xsc.workers.dev';
@@ -18,7 +23,7 @@ const EXPIRY_KEY = 'ew-ims-expiry';
 const AUTH_METHOD_KEY = 'ew-ims-method';
 
 let profile = null;
-let authMethod = localStorage.getItem(AUTH_METHOD_KEY) || 'none'; // 's2s' | 'user' | 'none'
+let authMethod = localStorage.getItem(AUTH_METHOD_KEY) || 'none';
 
 /* ─── Token access ─── */
 
@@ -38,61 +43,52 @@ export function getProfile() {
 export function isSignedIn() { return !!getToken(); }
 export function getAuthMethod() { return authMethod; }
 
-/* ─── S2S Sign In (automatic, service account) ─── */
+/* ─── Build IMS Authorize URL ─── */
 
-async function signInS2S() {
-  console.log('[IMS] Signing in via S2S Worker...');
-  try {
-    const resp = await fetch(`${IMS_WORKER}/auth`, { credentials: 'omit' });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: resp.statusText }));
-      throw new Error(err.error || 'Auth request failed');
-    }
-    const data = await resp.json();
-    if (!data.access_token) throw new Error('No access token received');
-
-    localStorage.setItem(TOKEN_KEY, data.access_token);
-    localStorage.setItem('ew-ims', 'true');
-    localStorage.setItem(AUTH_METHOD_KEY, 's2s');
-    if (data.expires_at) localStorage.setItem(EXPIRY_KEY, String(data.expires_at));
-
-    authMethod = 's2s';
-    console.log('[IMS] S2S token received');
-    window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true, method: 's2s' } }));
-    return true;
-  } catch (err) {
-    console.error('[IMS] S2S sign-in failed:', err.message);
-    return false;
-  }
+function buildAuthorizeUrl(redirectUri) {
+  const params = new URLSearchParams({
+    client_id: IMS_CLIENT_ID,
+    scope: IMS_SCOPE,
+    response_type: 'token',
+    redirect_uri: redirectUri,
+    code_challenge_method: 'plain',
+    use_ms_for_expiry: 'true',
+  });
+  return `${IMS_AUTHORIZE_URL}?${params}`;
 }
 
-/* ─── User-Level OAuth Sign In (click Sign In → popup) ─── */
+/* ─── Sign In (Adobe IMS popup — implicit flow) ─── */
 
-async function signInOAuth() {
-  console.log('[IMS] Opening Adobe sign-in popup...');
-  const returnTo = encodeURIComponent(window.location.href);
-  const loginUrl = `${IMS_WORKER}/ims/login?return_to=${returnTo}`;
+export async function signIn() {
+  console.log('[IMS] Opening Adobe sign-in...');
+
+  // The redirect_uri is the current page — IMS returns #access_token=... in the hash
+  const redirectUri = window.location.origin + window.location.pathname;
+  const authorizeUrl = buildAuthorizeUrl(redirectUri);
+
+  // Open in popup
   const w = 500;
   const h = 700;
   const left = Math.round((screen.width - w) / 2);
   const top = Math.round((screen.height - h) / 2);
-  const popup = window.open(loginUrl, 'adobeSignIn',
+  const popup = window.open(authorizeUrl, 'adobeSignIn',
     `width=${w},height=${h},left=${left},top=${top}`);
 
   if (!popup) {
-    console.warn('[IMS] Popup blocked — staying with S2S');
-    return false;
+    // Popup blocked — redirect instead
+    console.warn('[IMS] Popup blocked — redirecting to Adobe sign-in');
+    window.location.href = authorizeUrl;
+    return true;
   }
 
-  // Wait for the popup to complete and relay the token
+  // Wait for token via storage event (popup writes to same-origin localStorage)
   return new Promise((resolve) => {
-    // Listen for token from hash (popup redirects back to Compass with #ims_token=...)
     const onStorage = (e) => {
       if (e.key === TOKEN_KEY && e.newValue) {
         cleanup();
         authMethod = 'user';
         localStorage.setItem(AUTH_METHOD_KEY, 'user');
-        console.log('[IMS] User-level token received via OAuth popup');
+        console.log('[IMS] User token received via popup');
         window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true, method: 'user' } }));
         resolve(true);
       }
@@ -101,20 +97,16 @@ async function signInOAuth() {
     const checkClosed = setInterval(() => {
       if (popup.closed) {
         cleanup();
-        // Check if token arrived while popup was closing
-        if (authMethod === 'user') {
+        if (isSignedIn() && authMethod === 'user') {
           resolve(true);
         } else {
-          console.log('[IMS] Popup closed — keeping current auth');
+          console.log('[IMS] Popup closed without sign-in');
           resolve(false);
         }
       }
     }, 500);
 
-    const timeout = setTimeout(() => {
-      cleanup();
-      resolve(false);
-    }, 180000); // 3 minute timeout
+    const timeout = setTimeout(() => { cleanup(); resolve(false); }, 180000);
 
     function cleanup() {
       clearInterval(checkClosed);
@@ -124,18 +116,6 @@ async function signInOAuth() {
 
     window.addEventListener('storage', onStorage);
   });
-}
-
-/* ─── Public Sign In (called by UI) ─── */
-
-export async function signIn() {
-  // If already S2S, upgrade to user-level via OAuth popup
-  if (authMethod === 's2s' || authMethod === 'none') {
-    const ok = await signInOAuth();
-    if (ok) return true;
-  }
-  // Fallback: S2S
-  return signInS2S();
 }
 
 /* ─── Sign out ─── */
@@ -189,54 +169,49 @@ export async function handlePkceCallback() { return false; }
 /* ─── Init ─── */
 
 export async function loadIms() {
-  // Check for token from OAuth popup redirect (#ims_token=... in URL hash)
+  // Check for token from IMS redirect (#access_token=... in URL hash)
   const hash = window.location.hash;
-  if (hash.includes('ims_token=')) {
+  if (hash.includes('access_token=')) {
     const tokenParams = new URLSearchParams(hash.slice(1));
-    const token = tokenParams.get('ims_token');
+    const token = tokenParams.get('access_token');
     const expiresIn = tokenParams.get('expires_in');
-    const isAuthPopup = tokenParams.get('auth_popup') === '1';
     if (token) {
       localStorage.setItem(TOKEN_KEY, token);
       localStorage.setItem('ew-ims', 'true');
       localStorage.setItem(AUTH_METHOD_KEY, 'user');
       if (expiresIn) localStorage.setItem(EXPIRY_KEY, String(Date.now() + Number(expiresIn)));
       authMethod = 'user';
-      console.log('[IMS] User-level token from OAuth redirect');
+      console.log('[IMS] Token received from IMS redirect');
+      // Clean the hash from URL
       history.replaceState(null, '', window.location.pathname + window.location.search);
 
-      // If this is the popup window, close it — main window picks up via storage event
-      if (isAuthPopup) {
-        console.log('[IMS] Auth popup — closing...');
+      // If this is a popup, close it — main window picks up via storage event
+      if (window.opener) {
+        console.log('[IMS] Popup — closing');
         window.close();
         return { anonymous: false, method: 'user' };
       }
     }
   }
 
+  if (hash.includes('error=')) {
+    const errorParams = new URLSearchParams(hash.slice(1));
+    console.error(`[IMS] Auth error: ${errorParams.get('error')}`);
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+
   // Check existing token
   const expiry = Number(localStorage.getItem(EXPIRY_KEY) || 0);
   if (isSignedIn() && expiry && Date.now() > expiry - 300000) {
-    // Token expired — refresh with same method
-    console.log(`[IMS] Token expired — refreshing (was ${authMethod})...`);
-    if (authMethod === 'user') {
-      // User token expired — fall back to S2S, user can re-sign-in
-      await signInS2S();
-    } else {
-      await signInS2S();
-    }
-  } else if (!isSignedIn()) {
-    // No token — auto S2S
-    console.log('[IMS] No token — auto-signing in via S2S...');
-    await signInS2S();
-  } else {
-    // Existing valid token
-    authMethod = localStorage.getItem(AUTH_METHOD_KEY) || 's2s';
+    // Token expired — clear and require re-sign-in
+    console.log('[IMS] Token expired — sign in again');
+    signOut();
+  } else if (isSignedIn()) {
+    authMethod = localStorage.getItem(AUTH_METHOD_KEY) || 'user';
     console.log(`[IMS] Existing token: method=${authMethod}`);
   }
 
   if (isSignedIn()) {
-    console.log(`[IMS] Ready: method=${authMethod}`);
     window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: true, method: authMethod } }));
   }
 
