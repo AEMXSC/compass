@@ -1,23 +1,27 @@
 /*
- * IMS Authentication Module — Adobe IMS (Authorization Code Flow via Worker)
+ * IMS Authentication Module — Adobe IMS (PKCE Authorization Code Flow)
  *
- * Flow:
- * 1. Open popup to Worker /ims/login (passes return_to URL)
- * 2. Worker redirects to IMS authorize with response_type=code
- * 3. IMS redirects back to Worker /ims/callback with auth code
- * 4. Worker exchanges code for token (server-side, secret never exposed)
- * 5. Worker redirects popup back to Compass with #ims_token=...
- * 6. Compass parses token from hash, stores in localStorage
- * 7. Main window picks up token via storage event, popup closes
+ * Pure client-side auth — no Worker needed:
+ * 1. Generate PKCE code_verifier + code_challenge
+ * 2. Open popup to IMS authorize (redirect_uri = this page)
+ * 3. IMS redirects popup back with ?code=...
+ * 4. Exchange code for token using code_verifier (no client_secret)
+ * 5. Store token in localStorage, popup closes
+ * 6. Main window picks up token via storage event
  */
 
-const IMS_WORKER = localStorage.getItem('ew-ims-proxy')
-  || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+const IMS_AUTHORIZE_URL = 'https://ims-na1.adobelogin.com/ims/authorize/v2';
+const IMS_TOKEN_URL = 'https://ims-na1.adobelogin.com/ims/token/v3';
+const IMS_SCOPE = 'openid,AdobeID,additional_info.projectedProductContext,additional_info.ownerOrg,read_organizations,aem.frontend.all';
+
+// Will be updated when you create the new OAuth Single-Page App credential
+const IMS_CLIENT_ID = 'compass1';
 
 const PROFILE_STORAGE_KEY = 'ew-ims-profile';
 const TOKEN_KEY = 'ew-ims-token';
 const EXPIRY_KEY = 'ew-ims-expiry';
 const AUTH_METHOD_KEY = 'ew-ims-method';
+const VERIFIER_KEY = 'ew-pkce-verifier';
 
 let profile = null;
 let authMethod = localStorage.getItem(AUTH_METHOD_KEY) || 'none';
@@ -40,20 +44,51 @@ export function getProfile() {
 export function isSignedIn() { return !!getToken(); }
 export function getAuthMethod() { return authMethod; }
 
-/* ─── Build Worker Login URL ─── */
+/* ─── PKCE Helpers ─── */
 
-function buildLoginUrl() {
-  const returnTo = window.location.origin + window.location.pathname;
-  const params = new URLSearchParams({ return_to: returnTo });
-  return `${IMS_WORKER}/ims/login?${params}`;
+function generateVerifier() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return base64url(array);
 }
 
-/* ─── Sign In (Adobe IMS via Worker authorization_code flow) ─── */
+async function computeChallenge(verifier) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(verifier);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return base64url(new Uint8Array(hash));
+}
+
+function base64url(bytes) {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/* ─── Sign In (PKCE popup flow) ─── */
 
 export async function signIn() {
-  console.log('[IMS] Opening Adobe sign-in...');
+  console.log('[IMS] Opening Adobe sign-in (PKCE)...');
 
-  const authorizeUrl = buildLoginUrl();
+  // Generate PKCE pair
+  const codeVerifier = generateVerifier();
+  const codeChallenge = await computeChallenge(codeVerifier);
+
+  // Store verifier for the callback (sessionStorage so popup can read it)
+  sessionStorage.setItem(VERIFIER_KEY, codeVerifier);
+
+  const redirectUri = window.location.origin + window.location.pathname;
+
+  const params = new URLSearchParams({
+    client_id: IMS_CLIENT_ID,
+    scope: IMS_SCOPE,
+    response_type: 'code',
+    redirect_uri: redirectUri,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+  });
+
+  const authorizeUrl = `${IMS_AUTHORIZE_URL}?${params}`;
 
   // Open in popup
   const w = 500;
@@ -64,8 +99,7 @@ export async function signIn() {
     `width=${w},height=${h},left=${left},top=${top}`);
 
   if (!popup) {
-    // Popup blocked — redirect instead
-    console.warn('[IMS] Popup blocked — redirecting to Adobe sign-in');
+    console.warn('[IMS] Popup blocked — redirecting');
     window.location.href = authorizeUrl;
     return true;
   }
@@ -115,6 +149,7 @@ export function signOut() {
   localStorage.removeItem(EXPIRY_KEY);
   localStorage.removeItem(PROFILE_STORAGE_KEY);
   localStorage.removeItem(AUTH_METHOD_KEY);
+  sessionStorage.removeItem(VERIFIER_KEY);
   profile = null;
   authMethod = 'none';
   window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: false } }));
@@ -155,10 +190,79 @@ export function getBookmarkletCode() { return ''; }
 export function relaySignIn() { return Promise.reject(new Error('not-implemented')); }
 export async function handlePkceCallback() { return false; }
 
-/* ─── Init ─── */
+/* ─── Init (handles auth callback in popup) ─── */
 
 export async function loadIms() {
-  // Check for token from Worker callback (#ims_token=... in URL hash)
+  const url = new URL(window.location.href);
+
+  // Handle PKCE callback: IMS redirected back with ?code=...
+  const code = url.searchParams.get('code');
+  if (code) {
+    console.log('[IMS] Auth callback — exchanging code for token...');
+    const codeVerifier = sessionStorage.getItem(VERIFIER_KEY);
+    if (!codeVerifier) {
+      console.error('[IMS] No code_verifier in sessionStorage — cannot exchange');
+    } else {
+      try {
+        const redirectUri = url.origin + url.pathname;
+        const body = new URLSearchParams({
+          grant_type: 'authorization_code',
+          client_id: IMS_CLIENT_ID,
+          code,
+          code_verifier: codeVerifier,
+          redirect_uri: redirectUri,
+        });
+
+        const tokenResp = await fetch(IMS_TOKEN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        });
+
+        if (tokenResp.ok) {
+          const data = await tokenResp.json();
+          if (data.access_token) {
+            localStorage.setItem(TOKEN_KEY, data.access_token);
+            localStorage.setItem('ew-ims', 'true');
+            localStorage.setItem(AUTH_METHOD_KEY, 'user');
+            if (data.expires_in) {
+              localStorage.setItem(EXPIRY_KEY, String(Date.now() + Number(data.expires_in)));
+            }
+            authMethod = 'user';
+            sessionStorage.removeItem(VERIFIER_KEY);
+            console.log('[IMS] Token received via PKCE exchange');
+
+            // Clean URL (remove ?code= from address bar)
+            history.replaceState(null, '', url.pathname);
+
+            // If this is a popup, close it — main window picks up via storage event
+            if (window.opener) {
+              console.log('[IMS] Popup — closing');
+              window.close();
+              return { anonymous: false, method: 'user' };
+            }
+          }
+        } else {
+          const errText = await tokenResp.text();
+          console.error(`[IMS] Token exchange failed (${tokenResp.status}):`, errText);
+        }
+      } catch (err) {
+        console.error('[IMS] Token exchange error:', err);
+      }
+    }
+
+    // Clean URL even on failure
+    history.replaceState(null, '', url.pathname);
+  }
+
+  // Handle error callback
+  const error = url.searchParams.get('error');
+  if (error) {
+    console.error(`[IMS] Auth error: ${error} — ${url.searchParams.get('error_description') || ''}`);
+    history.replaceState(null, '', url.pathname);
+  }
+
+  // Handle legacy hash-based token (Worker callback fallback)
   const hash = window.location.hash;
   if (hash.includes('ims_token=')) {
     const tokenParams = new URLSearchParams(hash.slice(1));
@@ -170,29 +274,14 @@ export async function loadIms() {
       localStorage.setItem(AUTH_METHOD_KEY, 'user');
       if (expiresIn) localStorage.setItem(EXPIRY_KEY, String(Date.now() + Number(expiresIn)));
       authMethod = 'user';
-      console.log('[IMS] Token received from IMS redirect');
-      // Clean the hash from URL
-      history.replaceState(null, '', window.location.pathname + window.location.search);
-
-      // If this is a popup, close it — main window picks up via storage event
-      if (window.opener) {
-        console.log('[IMS] Popup — closing');
-        window.close();
-        return { anonymous: false, method: 'user' };
-      }
+      history.replaceState(null, '', url.pathname);
+      if (window.opener) { window.close(); return { anonymous: false, method: 'user' }; }
     }
   }
 
-  if (hash.includes('error=')) {
-    const errorParams = new URLSearchParams(hash.slice(1));
-    console.error(`[IMS] Auth error: ${errorParams.get('error')}`);
-    history.replaceState(null, '', window.location.pathname + window.location.search);
-  }
-
-  // Check existing token
+  // Check existing token expiry
   const expiry = Number(localStorage.getItem(EXPIRY_KEY) || 0);
   if (isSignedIn() && expiry && Date.now() > expiry - 300000) {
-    // Token expired — clear and require re-sign-in
     console.log('[IMS] Token expired — sign in again');
     signOut();
   } else if (isSignedIn()) {
