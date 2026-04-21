@@ -15,7 +15,7 @@ const IMS_TOKEN_URL = 'https://ims-na1.adobelogin.com/ims/token/v3';
 const IMS_SCOPE = 'openid,AdobeID,additional_info.projectedProductContext,additional_info.ownerOrg,read_organizations,aem.frontend.all';
 
 // Will be updated when you create the new OAuth Single-Page App credential
-const IMS_CLIENT_ID = 'compass1';
+const IMS_CLIENT_ID = '11f136d2a27aba7a99dc6d31159f4311';
 
 const PROFILE_STORAGE_KEY = 'ew-ims-profile';
 const TOKEN_KEY = 'ew-ims-token';
