@@ -1,18 +1,15 @@
 /*
- * IMS Authentication Module — Adobe IMS (Implicit Flow)
+ * IMS Authentication Module — Adobe IMS (Authorization Code Flow via Worker)
  *
- * Matches the EXCAT/Sliccy auth pattern:
- * 1. Build IMS authorize URL with client_id + redirect_uri
- * 2. Open in popup (or redirect)
- * 3. IMS returns token in URL hash (#access_token=...)
- * 4. Parse token from hash, store in localStorage
- *
- * No CF Worker needed for auth. Token comes directly from Adobe IMS.
+ * Flow:
+ * 1. Open popup to Worker /ims/login (passes return_to URL)
+ * 2. Worker redirects to IMS authorize with response_type=code
+ * 3. IMS redirects back to Worker /ims/callback with auth code
+ * 4. Worker exchanges code for token (server-side, secret never exposed)
+ * 5. Worker redirects popup back to Compass with #ims_token=...
+ * 6. Compass parses token from hash, stores in localStorage
+ * 7. Main window picks up token via storage event, popup closes
  */
-
-const IMS_CLIENT_ID = '11f136d2a27aba7a99dc6d31159f4311';
-const IMS_SCOPE = 'openid,AdobeID,additional_info.projectedProductContext,additional_info.ownerOrg,read_organizations,aem.frontend.all';
-const IMS_AUTHORIZE_URL = 'https://ims-na1.adobelogin.com/ims/authorize/v2';
 
 const IMS_WORKER = localStorage.getItem('ew-ims-proxy')
   || 'https://compass-ims-proxy.compass-xsc.workers.dev';
@@ -43,28 +40,20 @@ export function getProfile() {
 export function isSignedIn() { return !!getToken(); }
 export function getAuthMethod() { return authMethod; }
 
-/* ─── Build IMS Authorize URL ─── */
+/* ─── Build Worker Login URL ─── */
 
-function buildAuthorizeUrl(redirectUri) {
-  const params = new URLSearchParams({
-    client_id: IMS_CLIENT_ID,
-    scope: IMS_SCOPE,
-    response_type: 'token',
-    redirect_uri: redirectUri,
-    code_challenge_method: 'plain',
-    use_ms_for_expiry: 'true',
-  });
-  return `${IMS_AUTHORIZE_URL}?${params}`;
+function buildLoginUrl() {
+  const returnTo = window.location.origin + window.location.pathname;
+  const params = new URLSearchParams({ return_to: returnTo });
+  return `${IMS_WORKER}/ims/login?${params}`;
 }
 
-/* ─── Sign In (Adobe IMS popup — implicit flow) ─── */
+/* ─── Sign In (Adobe IMS via Worker authorization_code flow) ─── */
 
 export async function signIn() {
   console.log('[IMS] Opening Adobe sign-in...');
 
-  // The redirect_uri is the current page — IMS returns #access_token=... in the hash
-  const redirectUri = window.location.origin + window.location.pathname;
-  const authorizeUrl = buildAuthorizeUrl(redirectUri);
+  const authorizeUrl = buildLoginUrl();
 
   // Open in popup
   const w = 500;
@@ -169,11 +158,11 @@ export async function handlePkceCallback() { return false; }
 /* ─── Init ─── */
 
 export async function loadIms() {
-  // Check for token from IMS redirect (#access_token=... in URL hash)
+  // Check for token from Worker callback (#ims_token=... in URL hash)
   const hash = window.location.hash;
-  if (hash.includes('access_token=')) {
+  if (hash.includes('ims_token=')) {
     const tokenParams = new URLSearchParams(hash.slice(1));
-    const token = tokenParams.get('access_token');
+    const token = tokenParams.get('ims_token');
     const expiresIn = tokenParams.get('expires_in');
     if (token) {
       localStorage.setItem(TOKEN_KEY, token);
