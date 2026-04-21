@@ -260,15 +260,20 @@ function updateAuthUI() {
       if (userAvatar) userAvatar.textContent = initials;
       if (userName) userName.textContent = profile.displayName;
       if (userEmail) userEmail.textContent = profile.email || '';
-    } else if (signedIn) {
-      // Signed in via S2S service account
+    } else if (signedIn && getAuthMethod() === 'user') {
+      // Signed in with user-level OAuth — show avatar but keep Sign In for menu
       authBtn.textContent = '';
       authBtn.classList.add('signed-in', 'avatar-mode');
-      authBtn.title = 'Signed in — Adobe S2S';
-      authBtn.innerHTML = '<span class="auth-avatar">A</span>';
-      if (userAvatar) userAvatar.textContent = 'A';
-      if (userName) userName.textContent = 'AEM Service Account';
-      if (userEmail) userEmail.textContent = 'S2S · Adobe IMS';
+      authBtn.title = 'Signed in — Adobe IMS (user-level)';
+      authBtn.innerHTML = '<span class="auth-avatar">✓</span>';
+      if (userAvatar) userAvatar.textContent = '✓';
+      if (userName) userName.textContent = 'Adobe User';
+      if (userEmail) userEmail.textContent = 'User-level IMS · Full access';
+    } else if (signedIn) {
+      // Signed in via S2S — show "Sign In" to upgrade to user-level
+      authBtn.classList.remove('signed-in', 'avatar-mode');
+      authBtn.innerHTML = 'Sign In';
+      authBtn.title = 'Sign in with Adobe ID for full access (currently using service account)';
     } else {
       // Not signed in — show "Sign In" text button
       authBtn.classList.remove('signed-in', 'avatar-mode');
