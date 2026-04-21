@@ -590,8 +590,8 @@ main>div+div{border-top:1px solid #f0f0f0}
 
 /* ─── GET /ims/login — Redirect to Adobe IMS for user-level auth ─── */
 
-const COMPASS_OAUTH_CLIENT_ID = '8477ad6112764435814b12d28a778647';
-const COMPASS_OAUTH_USER_SCOPE = 'AdobeID,openid';
+const COMPASS_OAUTH_CLIENT_ID = '11f136d2a27aba7a99dc6d31159f4311';
+const COMPASS_OAUTH_USER_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext,aem.frontend.all';
 
 async function handleImsLogin(request) {
   const url = new URL(request.url);
