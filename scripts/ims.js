@@ -70,7 +70,15 @@ function base64url(bytes) {
 export async function signIn() {
   console.log('[IMS] Opening Adobe sign-in (PKCE)...');
 
-  // Generate PKCE pair
+  // Open popup IMMEDIATELY (must be synchronous from user click or browser blocks it)
+  const w = 500;
+  const h = 700;
+  const left = Math.round((screen.width - w) / 2);
+  const top = Math.round((screen.height - h) / 2);
+  const popup = window.open('about:blank', 'adobeSignIn',
+    `width=${w},height=${h},left=${left},top=${top}`);
+
+  // Generate PKCE pair (async — but popup is already open)
   const codeVerifier = generateVerifier();
   const codeChallenge = await computeChallenge(codeVerifier);
 
@@ -90,19 +98,15 @@ export async function signIn() {
 
   const authorizeUrl = `${IMS_AUTHORIZE_URL}?${params}`;
 
-  // Open in popup
-  const w = 500;
-  const h = 700;
-  const left = Math.round((screen.width - w) / 2);
-  const top = Math.round((screen.height - h) / 2);
-  const popup = window.open(authorizeUrl, 'adobeSignIn',
-    `width=${w},height=${h},left=${left},top=${top}`);
-
   if (!popup) {
+    // Popup was blocked — redirect the page instead
     console.warn('[IMS] Popup blocked — redirecting');
     window.location.href = authorizeUrl;
     return true;
   }
+
+  // Navigate the already-open popup to IMS
+  popup.location.href = authorizeUrl;
 
   // Wait for token via storage event (popup writes to same-origin localStorage)
   return new Promise((resolve) => {
