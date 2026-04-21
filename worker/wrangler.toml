@@ -4,13 +4,15 @@ compatibility_date = "2024-01-01"
 
 # Deploy:  npx wrangler deploy
 #
-# Adobe IMS Secrets:
-#   npx wrangler secret put IMS_CLIENT_ID
-#   npx wrangler secret put IMS_CLIENT_SECRET
+# Adobe IMS Secrets (same OAuth credential for S2S + user auth):
+#   npx wrangler secret put IMS_CLIENT_ID          — OAuth client ID
+#   npx wrangler secret put IMS_CLIENT_SECRET       — OAuth client secret (used by /ims/callback fallback)
+#   npx wrangler secret put COMPASS_OAUTH_SECRET    — (optional) overrides IMS_CLIENT_SECRET for /ims/callback
 #
 # GitHub OAuth App Secrets:
 #   npx wrangler secret put GITHUB_CLIENT_ID
 #   npx wrangler secret put GITHUB_CLIENT_SECRET
 #
-# GitHub OAuth App settings (github.com/settings/developers):
-#   Callback URL: https://compass-ims-proxy.compass-xsc.workers.dev/github/callback
+# Callback URLs (register in respective developer consoles):
+#   GitHub:  https://compass-ims-proxy.compass-xsc.workers.dev/github/callback
+#   Adobe:   https://compass-ims-proxy.compass-xsc.workers.dev/ims/callback

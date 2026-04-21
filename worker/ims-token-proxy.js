@@ -601,15 +601,17 @@ async function handleImsLogin(request) {
     return new Response('Invalid return_to URL', { status: 400 });
   }
 
+  // HMAC-signed state for CSRF protection (stateless — works across all Worker isolates)
+  const state = await signState({ returnTo, exp: Date.now() + STATE_TTL_MS, nonce: crypto.randomUUID() });
+
   const callbackUrl = `${url.origin}/ims/callback`;
 
-  // OAuth Web App uses authorization_code flow (not implicit)
   const params = new URLSearchParams({
     client_id: COMPASS_OAUTH_CLIENT_ID,
     scope: COMPASS_OAUTH_USER_SCOPE,
     response_type: 'code',
     redirect_uri: callbackUrl,
-    state: encodeURIComponent(returnTo),
+    state,
   });
 
   return Response.redirect(
@@ -625,7 +627,6 @@ async function handleImsCallback(request) {
   const code = url.searchParams.get('code');
   const error = url.searchParams.get('error');
   const state = url.searchParams.get('state');
-  const returnTo = state ? decodeURIComponent(state) : ALLOWED_RETURN_URLS[0];
 
   if (error) {
     return new Response(`Adobe sign-in error: ${error} — ${url.searchParams.get('error_description') || ''}`, {
@@ -633,11 +634,20 @@ async function handleImsCallback(request) {
     });
   }
 
-  if (!code) {
-    return new Response('Sign-in failed. No authorization code received.', {
+  if (!code || !state) {
+    return new Response('Sign-in failed. Missing authorization code or state.', {
       status: 400, headers: { 'Content-Type': 'text/plain' },
     });
   }
+
+  // Verify HMAC-signed state (CSRF protection)
+  const payload = await verifyState(state);
+  if (!payload) {
+    return new Response('Invalid or expired state. Please try signing in again.', {
+      status: 403, headers: { 'Content-Type': 'text/plain' },
+    });
+  }
+  const { returnTo } = payload;
 
   // Exchange authorization code for access token (server-side — secret never exposed)
   try {
@@ -645,7 +655,7 @@ async function handleImsCallback(request) {
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       client_id: COMPASS_OAUTH_CLIENT_ID,
-      client_secret: typeof COMPASS_OAUTH_SECRET !== 'undefined' ? COMPASS_OAUTH_SECRET : '',
+      client_secret: typeof COMPASS_OAUTH_SECRET !== 'undefined' ? COMPASS_OAUTH_SECRET : IMS_CLIENT_SECRET,
       code,
       redirect_uri: callbackUrl,
     });
