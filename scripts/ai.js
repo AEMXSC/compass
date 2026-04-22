@@ -30,6 +30,7 @@ const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
 const MODEL_FAST = 'claude-haiku-4-5-20251001'; // 3-5x faster for simple edits
 const STORAGE_KEY = 'ew-claude-key';
+const HTML_TRUNCATE_THRESHOLD = 15000;
 
 export function getApiKey() {
   return localStorage.getItem(STORAGE_KEY) || null;
@@ -1848,7 +1849,7 @@ async function executeTool(name, input) {
           console.debug(`[get_page_content] Reading via AEM Content MCP: ${host}${pagePath}`);
           const result = await aemContent.getPage(host, pagePath);
           const html = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-          const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
+          const content = html.length > HTML_TRUNCATE_THRESHOLD ? html.slice(0, HTML_TRUNCATE_THRESHOLD) + '\n\n[... truncated]' : html;
           return JSON.stringify({
             url: pageUrl,
             source: 'AEM Content MCP',
@@ -1869,7 +1870,7 @@ async function executeTool(name, input) {
           console.debug(`[get_page_content] Reading via DA MCP: ${da.getOrg()}/${da.getRepo()}${daPath}`);
           const result = await da.getPage(`${daPath}.html`);
           const html = typeof result === 'string' ? result : JSON.stringify(result);
-          const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
+          const content = html.length > HTML_TRUNCATE_THRESHOLD ? html.slice(0, HTML_TRUNCATE_THRESHOLD) + '\n\n[... truncated]' : html;
           return JSON.stringify({
             url: pageUrl,
             source: 'DA MCP',
@@ -1892,7 +1893,7 @@ async function executeTool(name, input) {
           const html = await resp.text();
           const isJcrSite = currentSiteType === 'aem-cs';
           const etag = isJcrSite ? null : (resp.headers.get('etag') || null);
-          const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
+          const content = html.length > HTML_TRUNCATE_THRESHOLD ? html.slice(0, HTML_TRUNCATE_THRESHOLD) + '\n\n[... truncated]' : html;
           return JSON.stringify({
             url: pageUrl,
             source: 'aem.page (CDN fallback)',
@@ -4087,10 +4088,10 @@ async function executeTool(name, input) {
             .replace(/<[^>]+>/g, ' ')
             .replace(/\s+/g, ' ')
             .trim()
-            .slice(0, 15000);
+            .slice(0, HTML_TRUNCATE_THRESHOLD);
           return JSON.stringify({ url: input.url, type: 'text', content_length: clean.length, content: clean }, null, 2);
         }
-        return JSON.stringify({ url: input.url, type: contentType, content_length: text.length, content: text.slice(0, 15000) }, null, 2);
+        return JSON.stringify({ url: input.url, type: contentType, content_length: text.length, content: text.slice(0, HTML_TRUNCATE_THRESHOLD) }, null, 2);
       } catch (e) {
         return JSON.stringify({ error: `Fetch failed: ${e.message}`, url: input.url });
       }
@@ -4725,27 +4726,27 @@ Use these when users ask about:
 21. For documentation questions ("how do I...", "what is...", "show me docs on..."), call search_experience_league. For release notes ("what's new", "latest features"), call get_product_release_notes.
 22. For site health, performance, or SEO questions, call get_site_audit for scores and get_site_opportunities for recommendations. Use Spacecat tools BEFORE giving optimization advice.
 23. When users mention broken backlinks, 404s, or redirect chains, call get_site_audit with audit_type=broken-backlinks or get_site_opportunities with category=broken-backlinks.
-24. **BULK OPERATIONS**: When users say "all pages", "every page", "across the site", "update everywhere", or "change on all" — use \`batch_aem_update\`. ALWAYS call with confirmed=false first to show affected pages, then ask user to confirm before calling with confirmed=true. Never execute bulk updates without user confirmation.
-25. **ALT TEXT**: When users mention "ALT text", "accessibility", "image descriptions", "missing ALT", or "image audit" — use \`suggest_alt_text\` to analyze page images. Present suggestions as a table. Only call \`apply_alt_text\` after user approves specific suggestions.
-26. **ANALYTICS (CJA)**: For data questions — "How did we do?", "trend orders", "revenue by region", "why did X drop?" — use \`cja_visualize\`, \`cja_kpi_pulse\`, \`cja_executive_briefing\`, or \`cja_anomaly_triage\`. These connect to CJA data views.
-27. **JOURNEYS (AJO)**: For journey creation — "Create a welcome series", "Build a re-engagement drip" — use \`create_journey\`. For journey content — "Generate a push notification" — use \`generate_journey_content\`.
-28. **EXPERIMENTS**: For experiment analysis — "What did we learn?", "Why did variant A win?" — use \`analyze_experiment\`.
-29. **AUDIENCES (RT-CDP)**: For audience questions — "Show me our largest audiences", "Which audiences target California?" — use \`explore_audiences\`.
-30. **SPEED — PARALLEL CALLS**: When the user's request touches MULTIPLE products (e.g., "Create a page AND set up a journey to drive traffic to it"), call the tools in PARALLEL. Return multiple tool_use blocks in one response. Examples of parallel-safe combinations:
+24. **EXPERIMENTATION**: When users want A/B tests, experiments, or content variations, use setup_experiment + edit_page_content. One prompt sets up the entire experiment (variant pages + metadata + splits). This is FASTER than the UE extensions approach.
+25. **FORMS**: When users want forms, contact pages, or lead capture, use generate_form to create the form definition, then edit_page_content to embed it in the page.
+26. **VARIATIONS**: When users want content variations, alternate headlines, or copy options, use generate_page_variations. Generate full-page coordinated variations, not just one component at a time. If they also want to test them, chain with setup_experiment.
+27. **BULK OPERATIONS**: When users say "all pages", "every page", "across the site", "update everywhere", or "change on all" — use \`batch_aem_update\`. ALWAYS call with confirmed=false first to show affected pages, then ask user to confirm before calling with confirmed=true. Never execute bulk updates without user confirmation.
+28. **ALT TEXT**: When users mention "ALT text", "accessibility", "image descriptions", "missing ALT", or "image audit" — use \`suggest_alt_text\` to analyze page images. Present suggestions as a table. Only call \`apply_alt_text\` after user approves specific suggestions.
+29. **ANALYTICS (CJA)**: For data questions — "How did we do?", "trend orders", "revenue by region", "why did X drop?" — use \`cja_visualize\`, \`cja_kpi_pulse\`, \`cja_executive_briefing\`, or \`cja_anomaly_triage\`. These connect to CJA data views.
+30. **JOURNEYS (AJO)**: For journey creation — "Create a welcome series", "Build a re-engagement drip" — use \`create_journey\`. For journey content — "Generate a push notification" — use \`generate_journey_content\`.
+31. **EXPERIMENTS**: For experiment analysis — "What did we learn?", "Why did variant A win?" — use \`analyze_experiment\`.
+32. **AUDIENCES (RT-CDP)**: For audience questions — "Show me our largest audiences", "Which audiences target California?" — use \`explore_audiences\`.
+33. **SPEED — PARALLEL CALLS**: When the user's request touches MULTIPLE products (e.g., "Create a page AND set up a journey to drive traffic to it"), call the tools in PARALLEL. Return multiple tool_use blocks in one response. Examples of parallel-safe combinations:
     - \`aem_read\` + \`search_dam_assets\` (read page content while searching for images)
     - \`aem_write\` + \`create_workfront_task\` (update content while creating approval task)
     - \`cja_kpi_pulse\` + \`explore_audiences\` (get metrics while checking audiences)
     - \`suggest_alt_text\` + \`run_governance_check\` (accessibility + brand audit simultaneously)
-31. **INTENT CLARIFICATION**: Before executing, assess what the user is actually trying to accomplish. If the request is genuinely ambiguous and you cannot determine the right action from context (loaded page, connected site, conversation history), ask ONE short clarifying question. But NEVER ask when context already tells you the answer:
+34. **INTENT CLARIFICATION**: Before executing, assess what the user is actually trying to accomplish. If the request is genuinely ambiguous and you cannot determine the right action from context (loaded page, connected site, conversation history), ask ONE short clarifying question. But NEVER ask when context already tells you the answer:
     - ✅ ASK: "Make it look better" → "Do you want me to improve the copy, update the layout, or find a better hero image?"
     - ✅ ASK: "Fix this" → "What needs fixing — content accuracy, brand compliance, or accessibility?"
     - ✅ ASK: "Create a page" → "What should the page be about? Do you have a brief or should I base it on an existing page?"
     - ❌ DON'T ASK: "Update the hero" (page is loaded — just update it)
     - ❌ DON'T ASK: "Run a governance check" (clear intent — just do it)
     - ❌ DON'T ASK: "Change headline to X" (specific instruction — execute immediately)
-24. **EXPERIMENTATION**: When users want A/B tests, experiments, or content variations, use setup_experiment + edit_page_content. One prompt sets up the entire experiment (variant pages + metadata + splits). This is FASTER than the UE extensions approach.
-25. **FORMS**: When users want forms, contact pages, or lead capture, use generate_form to create the form definition, then edit_page_content to embed it in the page.
-26. **VARIATIONS**: When users want content variations, alternate headlines, or copy options, use generate_page_variations. Generate full-page coordinated variations, not just one component at a time. If they also want to test them, chain with setup_experiment.
 
 ## Capabilities — 50 Tools, 22 Agents, Full Adobe Stack
 - **Page Analysis**: Analyze EDS pages — structure, blocks, sections, metadata, performance
@@ -4980,7 +4981,7 @@ function buildSystemParts(context = {}) {
 You ALREADY have this page content. For DA edits, modify the HTML and call edit_page_content directly — no read call needed.
 
 \`\`\`html
-${context.pageHTML.slice(0, 15000)}
+${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
 \`\`\``;
     } else {
       pageContext += `\n\n*Page content not pre-loaded. Call get_page_content to read it.*`;

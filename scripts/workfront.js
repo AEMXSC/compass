@@ -59,11 +59,13 @@ async function wfFetch(path, opts = {}) {
     } catch { /* fall through */ }
   }
 
-  // Try API key
+  // Try API key (sent as header, not URL query param)
   if (apiKey) {
     try {
-      const sep = url.includes('?') ? '&' : '?';
-      const resp = await fetch(`${url}${sep}apiKey=${apiKey}`, opts);
+      const resp = await fetch(url, {
+        ...opts,
+        headers: { 'X-API-Key': apiKey, ...opts.headers },
+      });
       if (resp.ok || resp.status === 404) {
         wfAuthMode = 'apikey';
         return resp;

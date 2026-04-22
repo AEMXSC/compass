@@ -142,8 +142,9 @@ async function handleAuth(request) {
       return jsonResponse({ error: 'no_access_token', response: data }, 502, origin);
     }
 
-    // Cache it (expires_in is in milliseconds from IMS)
+    // Cache it
     cachedToken = data.access_token;
+    // Adobe IMS returns expires_in in milliseconds (not seconds per OAuth2 spec)
     tokenExpiry = now + (data.expires_in || 86400000);
 
     return jsonResponse({
