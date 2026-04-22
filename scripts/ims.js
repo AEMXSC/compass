@@ -1,15 +1,19 @@
 /*
- * IMS Authentication Module — Adobe imslib (recommended pattern)
+ * IMS Authentication Module — Hybrid (imslib + direct authorize)
  *
- * Uses Adobe's official browser auth library (imslib.min.js):
- * 1. Load imslib from auth.services.adobe.com
- * 2. Configure window.adobeid with client_id + callbacks
- * 3. imslib handles: login popup, token storage, refresh, profile
+ * Uses imslib for: token validation, auto-refresh, profile, sign-out
+ * Uses direct IMS authorize URL for: sign-in popup
  *
- * Client ID: aem-extension-builder (registered for Compass EDS origins)
+ * Why hybrid: imslib's signIn() fails to construct the authorize URL
+ * for aem-extension-builder from .aem.page origins (onError: 'http').
+ * But the direct authorize URL works (confirmed 302 → login page).
+ * imslib still handles token lifecycle after the initial sign-in.
+ *
+ * Client ID: aem-extension-builder (EDS origins registered by Zoran)
  */
 
 const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
+const IMS_AUTHORIZE_URL = 'https://ims-na1.adobelogin.com/ims/authorize/v2';
 const IMS_CLIENT_ID = 'aem-extension-builder';
 const IMS_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext,additional_info.ownerOrg,aem.frontend.all';
 const IMS_TIMEOUT = 8000;
@@ -58,7 +62,7 @@ function loadScript(src) {
   });
 }
 
-/* ─── Profile fetch from imslib ─── */
+/* ─── Profile sync from imslib ─── */
 
 function _syncProfile() {
   if (!window.adobeIMS) return;
@@ -80,16 +84,61 @@ function _syncProfile() {
   });
 }
 
-/* ─── Sign In ─── */
+/* ─── Sign In (direct authorize URL — imslib signIn fails for this client) ─── */
 
 export async function signIn() {
-  if (imsReady && window.adobeIMS) {
-    // imslib handles the popup internally (modalMode: true)
-    window.adobeIMS.signIn();
+  const redirectUri = window.location.origin + window.location.pathname;
+  const params = new URLSearchParams({
+    client_id: IMS_CLIENT_ID,
+    scope: IMS_SCOPE,
+    response_type: 'code',
+    redirect_uri: redirectUri,
+  });
+  const authorizeUrl = `${IMS_AUTHORIZE_URL}?${params}`;
+
+  // Open popup synchronously from click context (avoids browser blocking)
+  const w = 500;
+  const h = 700;
+  const left = Math.round((screen.width - w) / 2);
+  const top = Math.round((screen.height - h) / 2);
+  const popup = window.open(authorizeUrl, 'adobeSignIn',
+    `width=${w},height=${h},left=${left},top=${top}`);
+
+  if (!popup) {
+    console.warn('[IMS] Popup blocked — redirecting');
+    window.location.href = authorizeUrl;
     return true;
   }
-  console.warn('[IMS] imslib not ready — cannot sign in');
-  return false;
+
+  // Wait for token via storage event (popup writes to localStorage on callback)
+  return new Promise((resolve) => {
+    const onStorage = (e) => {
+      if (e.key === TOKEN_KEY && e.newValue) {
+        cleanup();
+        authMethod = 'user';
+        localStorage.setItem(AUTH_METHOD_KEY, 'user');
+        _syncProfile();
+        resolve(true);
+      }
+    };
+
+    const checkClosed = setInterval(() => {
+      if (popup.closed) {
+        cleanup();
+        resolve(isSignedIn());
+      }
+    }, 500);
+
+    const timeout = setTimeout(() => { cleanup(); resolve(false); }, 180000);
+
+    function cleanup() {
+      clearInterval(checkClosed);
+      clearTimeout(timeout);
+      window.removeEventListener('storage', onStorage);
+    }
+
+    window.addEventListener('storage', onStorage);
+  });
 }
 
 /* ─── Sign out ─── */
@@ -113,7 +162,7 @@ export function signOut() {
 export async function fetchUserProfile() {
   if (profile?.displayName) return profile;
 
-  // Try imslib profile first
+  // Try imslib profile
   if (imsReady && window.adobeIMS) {
     try {
       const p = await window.adobeIMS.getProfile();
@@ -129,7 +178,7 @@ export async function fetchUserProfile() {
         localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
         return profile;
       }
-    } catch { /* fall through to GitHub */ }
+    } catch { /* fall through */ }
   }
 
   // Fallback: GitHub identity
@@ -157,14 +206,36 @@ export async function fetchUserProfile() {
   return profile;
 }
 
+/* ─── Handle IMS callback (?code= in URL from authorize redirect) ─── */
+
+async function handleCallback() {
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get('code');
+  if (!code) return false;
+
+  // Exchange code for token via imslib if available, or store directly
+  // IMS redirected back with ?code= — imslib should pick this up via autoValidateToken
+  // Clean the URL so the code isn't visible
+  history.replaceState(null, '', url.pathname);
+
+  // If imslib is handling this (it intercepts ?code= on load), just return
+  // The onAccessToken callback will fire when imslib processes the code
+  return true;
+}
+
 /* ─── Init: Load imslib ─── */
 
 export async function loadIms() {
+  // Check for IMS callback first
+  await handleCallback();
+
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       console.warn('[IMS] imslib timeout');
       resolve({ anonymous: true, method: 'none' });
     }, IMS_TIMEOUT);
+
+    const redirectUri = window.location.origin + window.location.pathname;
 
     window.adobeid = {
       client_id: IMS_CLIENT_ID,
@@ -174,6 +245,7 @@ export async function loadIms() {
       environment: 'prod',
       useLocalStorage: true,
       modalMode: true,
+      redirect_uri: redirectUri,
 
       onReady: () => {
         clearTimeout(timeout);
@@ -182,6 +254,7 @@ export async function loadIms() {
         if (token?.token) {
           authMethod = 'user';
           localStorage.setItem(AUTH_METHOD_KEY, 'user');
+          localStorage.setItem(TOKEN_KEY, token.token);
           console.debug('[IMS] Signed in (existing token)');
           _syncProfile();
           resolve({ anonymous: false, method: 'user' });
@@ -191,23 +264,35 @@ export async function loadIms() {
         }
       },
 
-      onAccessToken: () => {
+      onAccessToken: (tokenInfo) => {
         authMethod = 'user';
         localStorage.setItem(AUTH_METHOD_KEY, 'user');
+        if (tokenInfo?.token) {
+          localStorage.setItem(TOKEN_KEY, tokenInfo.token);
+        }
         console.debug('[IMS] Sign-in complete');
         _syncProfile();
+
+        // If this is a popup, close it — main window picks up via storage event
+        if (window.opener) {
+          window.close();
+        }
       },
 
       onAccessTokenHasExpired: () => {
         console.debug('[IMS] Token expired');
         authMethod = 'none';
         localStorage.removeItem(AUTH_METHOD_KEY);
+        localStorage.removeItem(TOKEN_KEY);
         window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: false } }));
       },
 
       onError: (e) => {
         clearTimeout(timeout);
-        console.warn('[IMS] Error:', e);
+        console.warn('[IMS] imslib error:', e);
+        // Don't resolve as failure — imslib may still work for token management
+        // even if initial validation fails. Resolve as not-signed-in.
+        imsReady = true;
         resolve({ anonymous: true, method: 'none' });
       },
     };
