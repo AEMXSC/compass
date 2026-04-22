@@ -30,12 +30,13 @@ const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
 const MODEL_FAST = 'claude-haiku-4-5-20251001'; // 3-5x faster for simple edits
 const STORAGE_KEY = 'ew-claude-key';
-const _E = [18,14,64,76,22,7,78,76,7,6,66,88,94,62,18,22,10,21,2,87,124,82,84,11,21,75,44,26,10,76,30,13,54,89,7,2,54,44,35,111,115,87,115,6,18,53,11,123,30,26,12,0,59,9,25,10,33,26,86,18,47,102,95,82,116,110,45,31,11,24,16,64,20,110,22,11,49,26,26,73,49,6,17,107,68,111,127,70,24,14,47,31,76,44,82,104,2,44,5,70,9,49,19,86,40,74,115,113];
-const _P = 'aem-xsc-workspace-2024';
-function _dk() { return _E.map((c, i) => String.fromCharCode(c ^ _P.charCodeAt(i % _P.length))).join(''); }
 
 export function getApiKey() {
-  return localStorage.getItem(STORAGE_KEY) || _dk();
+  return localStorage.getItem(STORAGE_KEY) || null;
+}
+
+export function hasApiKey() {
+  return !!localStorage.getItem(STORAGE_KEY);
 }
 
 export function setApiKey(key) {
@@ -44,10 +45,6 @@ export function setApiKey(key) {
 
 export function removeApiKey() {
   localStorage.removeItem(STORAGE_KEY);
-}
-
-export function hasApiKey() {
-  return !!getApiKey();
 }
 
 /* ── Simple API call (no tools, no system prompt) ── */
@@ -1603,9 +1600,6 @@ export const TOOL_AGENT_MAP = {
   upload_asset: 'Discovery Agent',
   delete_asset: 'Discovery Agent',
   move_asset: 'Discovery Agent',
-  copy_asset: 'Discovery Agent',
-  create_dam_folder: 'Discovery Agent',
-  get_asset_renditions: 'Discovery Agent',
   add_to_collection: 'Discovery Agent',
 
   // ── Governance Agent (brand, compliance, content audit) ──
@@ -1625,12 +1619,8 @@ export const TOOL_AGENT_MAP = {
   get_audience_segments: 'Data Insights Agent',
   get_customer_profile: 'Data Insights Agent',
 
-  // ── Journey Agent (journeys, destinations, conflicts) ──
+  // ── Journey Agent (journeys) ──
   get_journey_status: 'Journey Agent',
-  analyze_journey_conflicts: 'Journey Agent',
-  list_destinations: 'Journey Agent',
-  list_destination_flow_runs: 'Journey Agent',
-  get_destination_health: 'Journey Agent',
 
   // ── Workfront Agent (tasks, projects, approvals) ──
   create_workfront_task: 'Workfront Agent',
@@ -1646,23 +1636,13 @@ export const TOOL_AGENT_MAP = {
   // ── Target Agent (A/B testing, personalization) ──
   create_ab_test: 'Target Agent',
   get_personalization_offers: 'Target Agent',
-  setup_experiment: 'Target Agent',
-  get_experiment_status: 'Target Agent',
 
   // ── Development Agent (pipelines, code) ──
   get_pipeline_status: 'Development Agent',
   analyze_pipeline_failure: 'Development Agent',
   sync_code: 'Development Agent',
 
-  // ── Sites Optimizer (SpaceCat — performance, SEO) ──
-  get_site_opportunities: 'Sites Optimizer',
-  get_site_audit: 'Sites Optimizer',
-
-  // ── Support Agent (tickets, docs, release notes) ──
-  create_support_ticket: 'Support Agent',
-  get_ticket_status: 'Support Agent',
-  search_experience_league: 'Support Agent',
-  get_product_release_notes: 'Support Agent',
+  // (Sites Optimizer and Support Agent entries moved to final section below)
 
   // ── Acrobat Agent (PDF extraction) ──
   extract_pdf_content: 'Acrobat Agent',
@@ -1682,10 +1662,7 @@ export const TOOL_AGENT_MAP = {
   switch_site: 'Site Management',
   get_site_info: 'Site Management',
 
-  // ── Other ──
-  generate_form: 'Experience Production Agent',
-  generate_page_variations: 'Content Optimization Agent',
-  check_citation_readability: 'LLM Optimizer',
+  // ── AEM Assets API ──
   copy_asset: 'AEM Assets API',
   create_dam_folder: 'AEM Assets API',
   get_asset_renditions: 'AEM Assets API',
@@ -1774,10 +1751,10 @@ function getDmDeliveryHost() {
 /** Ensure IMS auth is available — auto-refresh if expired/missing. */
 async function ensureAuth() {
   if (isSignedIn()) return true;
-  console.log('[AI] IMS token missing — auto-refreshing...');
+  console.debug('[AI] IMS token missing — auto-refreshing...');
   try {
     const ok = await signIn();
-    if (ok) console.log('[AI] IMS token refreshed successfully');
+    if (ok) console.debug('[AI] IMS token refreshed successfully');
     return ok;
   } catch (e) {
     console.warn('[AI] IMS auto-refresh failed:', e.message);
@@ -1868,7 +1845,7 @@ async function executeTool(name, input) {
       if (currentSiteType === 'aem-cs' && (await ensureAuth()) && window.__EW_AEM_HOST) {
         try {
           const host = window.__EW_AEM_HOST;
-          console.log(`[get_page_content] Reading via AEM Content MCP: ${host}${pagePath}`);
+          console.debug(`[get_page_content] Reading via AEM Content MCP: ${host}${pagePath}`);
           const result = await aemContent.getPage(host, pagePath);
           const html = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
           const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
@@ -1889,7 +1866,7 @@ async function executeTool(name, input) {
       if (currentSiteType !== 'aem-cs' && (await ensureAuth()) && da.getOrg() && da.getRepo()) {
         try {
           const daPath = pagePath.replace(/\.html$/, '');
-          console.log(`[get_page_content] Reading via DA MCP: ${da.getOrg()}/${da.getRepo()}${daPath}`);
+          console.debug(`[get_page_content] Reading via DA MCP: ${da.getOrg()}/${da.getRepo()}${daPath}`);
           const result = await da.getPage(`${daPath}.html`);
           const html = typeof result === 'string' ? result : JSON.stringify(result);
           const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
@@ -1970,7 +1947,7 @@ async function executeTool(name, input) {
         try {
           if (attempt > 0) {
             // Re-read page to get fresh ETag after conflict
-            console.log(`[patch] ETag conflict — re-reading page for fresh ETag (attempt ${attempt + 1})`);
+            console.debug(`[patch] ETag conflict — re-reading page for fresh ETag (attempt ${attempt + 1})`);
             const freshPage = await aemContent.getPage(host, input.page_path);
             lastEtag = freshPage?.etag;
             if (!lastEtag) throw new Error('Could not get fresh ETag after conflict');
@@ -2237,10 +2214,10 @@ async function executeTool(name, input) {
 
       // ── DA MCP write (primary — native path for DA-backed sites) ──
       // Requires IMS Bearer token. Auto-refresh if token missing/expired.
-      console.log(`[edit_page_content] ── START ── org=${org} repo=${repo} path=${htmlPath} htmlLen=${input.html?.length || 0} auth=${isSignedIn()} ghToken=${hasGitHubToken()}`);
+      console.debug(`[edit_page_content] ── START ── org=${org} repo=${repo} path=${htmlPath} htmlLen=${input.html?.length || 0} auth=${isSignedIn()} ghToken=${hasGitHubToken()}`);
       if (await ensureAuth()) {
         try {
-          console.log(`[edit_page_content] Writing via DA Admin API: ${da.getBasePath()}${htmlPath}`);
+          console.debug(`[edit_page_content] Writing via DA Admin API: ${da.getBasePath()}${htmlPath}`);
           await da.updatePage(htmlPath, input.html);
           // Direct PUT to admin.da.live — if it didn't throw, the write succeeded.
 
@@ -2249,7 +2226,7 @@ async function executeTool(name, input) {
             try {
               const previewResp = await da.previewPage(pagePath);
               previewStatus = previewResp.ok ? 'success' : `pending (${previewResp.status})`;
-              console.log('[edit_page_content] Preview trigger:', previewStatus);
+              console.debug('[edit_page_content] Preview trigger:', previewStatus);
             } catch (previewErr) {
               previewStatus = `pending: ${previewErr.message}`;
             }
@@ -2279,7 +2256,7 @@ async function executeTool(name, input) {
       if (hasGitHubToken()) {
         try {
           const result = await ghWriteContent(org, repo, pagePath, input.html, null, branch);
-          console.log('[edit_page_content] GitHub write:', result.commitSha);
+          console.debug('[edit_page_content] GitHub write:', result.commitSha);
 
           // Trigger preview — prefer IMS auth (required for DA-backed sites)
           // GitHub PAT alone gets 401 on admin.hlx.page for DA sites.
@@ -3442,7 +3419,7 @@ async function executeTool(name, input) {
         message: conflicts.length > 0
           ? `Found ${conflicts.length} conflict(s) for journey "${journeyName}". Review recommendations before activating.`
           : `No conflicts detected for journey "${journeyName}". Safe to activate.`,
-        _source: 'connected',
+        _source: 'simulated',
         source: 'Journey Agent — AJO Conflict Analysis',
       }, null, 2);
     }
@@ -3462,7 +3439,7 @@ async function executeTool(name, input) {
         assigned_team: input.product === 'AEM' ? 'AEM Cloud Service Support' : 'Experience Cloud Support',
         expected_response: input.priority === 'P1' ? '1 hour' : input.priority === 'P2' ? '4 hours' : '24 hours',
         message: `Support ticket ${caseId} created: "${input.subject}". Expected response within ${input.priority === 'P1' ? '1 hour' : input.priority === 'P2' ? '4 hours' : '24 hours'}.`,
-        _source: 'connected',
+        _source: 'simulated',
         source: 'Product Support Agent',
       }, null, 2);
     }
@@ -3492,7 +3469,7 @@ async function executeTool(name, input) {
         ],
         tracking_url: `https://experienceleague.adobe.com/home#/support/tickets/${caseId}`,
         message: `Case ${caseId} is in progress. Last update: fix deployed to stage, awaiting verification.`,
-        _source: 'connected',
+        _source: 'simulated',
         source: 'Product Support Agent',
       }, null, 2);
     }
@@ -3547,7 +3524,7 @@ async function executeTool(name, input) {
           content_type: r.type,
           last_updated: r.updated,
         })),
-        _source: 'connected',
+        _source: 'simulated',
         source: 'Experience League MCP — Prod',
       }, null, 2);
     }
@@ -3586,7 +3563,7 @@ async function executeTool(name, input) {
         product,
         timeframe,
         releases: results,
-        _source: 'connected',
+        _source: 'simulated',
         source: 'Experience League MCP — Prod',
       }, null, 2);
     }
@@ -4433,13 +4410,15 @@ async function executeTool(name, input) {
           return JSON.stringify({ error: 'No updates provided. Call suggest_alt_text first.' });
         }
 
+        const safePath = JSON.stringify(input.page_path);
         const code = `
-          const page = await aem.get('/adobe/pages/${input.page_path}/content');
-          await aem.patch('/adobe/pages/${input.page_path}/content',
+          const pagePath = ${safePath};
+          const page = await aem.get('/adobe/pages/' + pagePath + '/content');
+          await aem.patch('/adobe/pages/' + pagePath + '/content',
             ${JSON.stringify(patches)},
             { etag: page.etag }
           );
-          return { updated: ${patches.length}, page: '${input.page_path}' };
+          return { updated: ${patches.length}, page: pagePath };
         `;
 
         const result = await aemUnifiedMcp.callTool('write-api', {
@@ -5252,7 +5231,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const lastMsg = messages[messages.length - 1]?.content;
   const useFastModel = context.pageHTML && isSimpleEdit(typeof lastMsg === 'string' ? lastMsg : '');
   const model = useFastModel ? MODEL_FAST : MODEL;
-  if (useFastModel) console.log('[AI] Fast edit mode: using Haiku for speed');
+  if (useFastModel) console.debug('[AI] Fast edit mode: using Haiku for speed');
 
   let fullText = '';
   const MAX_TOOL_ROUNDS = 8;
@@ -5326,7 +5305,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   }
   } catch (err) {
     if (err.name === 'AbortError') {
-      console.log('[AI] Chat aborted by user');
+      console.debug('[AI] Chat aborted by user');
       return fullText;
     }
     throw err;

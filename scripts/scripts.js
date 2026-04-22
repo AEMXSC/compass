@@ -52,16 +52,21 @@ async function bootstrap() {
     appScript.src = '/scripts/app.js';
     document.body.appendChild(appScript);
 
-    console.log('[Compass] SPA shell loaded, app.js bootstrapping on EDS');
   } catch (err) {
     console.error('[Compass] Bootstrap failed:', err);
-    document.body.innerHTML = `
-      <div style="font-family:system-ui;color:#e34850;display:flex;align-items:center;justify-content:center;height:100vh;background:#1a1a1a">
-        <div style="text-align:center">
-          <h2>Compass failed to load</h2>
-          <p style="color:#888">${err.message}</p>
-        </div>
-      </div>`;
+    const errorDiv = document.createElement('div');
+    errorDiv.style.cssText = 'font-family:system-ui;color:#e34850;display:flex;align-items:center;justify-content:center;height:100vh;background:#1a1a1a';
+    const inner = document.createElement('div');
+    inner.style.textContent = 'center';
+    const h2 = document.createElement('h2');
+    h2.textContent = 'Compass failed to load';
+    const p = document.createElement('p');
+    p.style.color = '#888';
+    p.textContent = err.message;
+    inner.append(h2, p);
+    errorDiv.append(inner);
+    document.body.innerHTML = '';
+    document.body.append(errorDiv);
   }
 }
 

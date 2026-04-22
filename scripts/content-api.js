@@ -111,7 +111,7 @@ const server = createServer(async (req, res) => {
       if (!existsSync(dir)) await mkdir(dir, { recursive: true });
 
       await writeFile(fullPath, html, 'utf-8');
-      console.log(`[content-api] Wrote ${filePath} (${html.length} bytes)`);
+      console.debug(`[content-api] Wrote ${filePath} (${html.length} bytes)`);
       return json(res, 200, {
         status: 'written',
         path: filePath,
@@ -128,8 +128,8 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[content-api] Local content API running on http://localhost:${PORT}`);
-  console.log(`[content-api] Content root: ${CONTENT_ROOT}`);
-  console.log(`[content-api] PUT /api/content/{path} → writes to content folder`);
-  console.log(`[content-api] GET /api/content/{path} → reads content file`);
+  console.debug(`[content-api] Local content API running on http://localhost:${PORT}`);
+  console.debug(`[content-api] Content root: ${CONTENT_ROOT}`);
+  console.debug(`[content-api] PUT /api/content/{path} → writes to content folder`);
+  console.debug(`[content-api] GET /api/content/{path} → reads content file`);
 });

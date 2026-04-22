@@ -128,7 +128,7 @@ export function createMcpClient(endpointPath, label = 'MCP') {
           capabilities: {},
           clientInfo: { name: 'experience-workspace', version: '1.0.0' },
         });
-        console.log(`[${label}] Session initialized:`, initResult?.serverInfo?.name || 'unknown');
+        console.debug(`[${label}] Session initialized:`, initResult?.serverInfo?.name || 'unknown');
 
         await mcpRequest('notifications/initialized', {}, { isNotification: true });
 
@@ -138,7 +138,7 @@ export function createMcpClient(endpointPath, label = 'MCP') {
           for (const tool of toolsResult.tools) {
             toolSchemas[tool.name] = tool;
           }
-          console.log(`[${label}] Tools:`, Object.keys(toolSchemas).join(', '));
+          console.debug(`[${label}] Tools:`, Object.keys(toolSchemas).join(', '));
         }
         return true;
       } catch (err) {
@@ -235,6 +235,6 @@ export async function prewarmSessions() {
   const critical = [aemUnifiedMcp, discoveryMcp, governanceMcp, contentMcp];
   const results = await Promise.allSettled(critical.map((c) => c.initSession()));
   const ok = results.filter((r) => r.status === 'fulfilled').length;
-  console.log(`[MCP] Pre-warmed ${ok}/${critical.length} sessions`);
+  console.debug(`[MCP] Pre-warmed ${ok}/${critical.length} sessions`);
   return ok;
 }

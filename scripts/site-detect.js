@@ -105,7 +105,7 @@ export async function detectAndCacheSiteType(org, repo, branch = 'main') {
     window.__EW_AEM_HOST = null;
     window.__EW_CONTENT_ORG = null;
     window.__EW_CONTENT_REPO = null;
-    console.log('[SiteDetect] No fstab.yaml found, type: unknown');
+    console.debug('[SiteDetect] No fstab.yaml found, type: unknown');
     return 'unknown';
   }
 
@@ -117,7 +117,7 @@ export async function detectAndCacheSiteType(org, repo, branch = 'main') {
   window.__EW_CONTENT_REPO = contentRepo;
   window.__EW_FSTAB_URL = fstab.url;
 
-  console.log(`[SiteDetect] ${org}/${repo}: type=${siteType}, host=${aemHost || 'n/a'}, contentOrg=${contentOrg || 'n/a'}, contentRepo=${contentRepo || 'n/a'}`);
+  console.debug(`[SiteDetect] ${org}/${repo}: type=${siteType}, host=${aemHost || 'n/a'}, contentOrg=${contentOrg || 'n/a'}, contentRepo=${contentRepo || 'n/a'}`);
   return siteType;
 }
 

@@ -157,12 +157,6 @@ export async function fetchUserProfile() {
   return profile;
 }
 
-/* ─── Stubs for import compat ─── */
-
-export function getBookmarkletCode() { return ''; }
-export function relaySignIn() { return Promise.reject(new Error('not-implemented')); }
-export async function handlePkceCallback() { return false; }
-
 /* ─── Init: Load imslib ─── */
 
 export async function loadIms() {
@@ -188,11 +182,11 @@ export async function loadIms() {
         if (token?.token) {
           authMethod = 'user';
           localStorage.setItem(AUTH_METHOD_KEY, 'user');
-          console.log('[IMS] Signed in (existing token)');
+          console.debug('[IMS] Signed in (existing token)');
           _syncProfile();
           resolve({ anonymous: false, method: 'user' });
         } else {
-          console.log('[IMS] Ready — not signed in');
+          console.debug('[IMS] Ready — not signed in');
           resolve({ anonymous: true, method: 'none' });
         }
       },
@@ -200,12 +194,12 @@ export async function loadIms() {
       onAccessToken: () => {
         authMethod = 'user';
         localStorage.setItem(AUTH_METHOD_KEY, 'user');
-        console.log('[IMS] Sign-in complete');
+        console.debug('[IMS] Sign-in complete');
         _syncProfile();
       },
 
       onAccessTokenHasExpired: () => {
-        console.log('[IMS] Token expired');
+        console.debug('[IMS] Token expired');
         authMethod = 'none';
         localStorage.removeItem(AUTH_METHOD_KEY);
         window.dispatchEvent(new CustomEvent('ew-auth-change', { detail: { signedIn: false } }));

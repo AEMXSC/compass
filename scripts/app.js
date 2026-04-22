@@ -616,11 +616,11 @@ window.addEventListener('ew-auth-change', async (e) => {
     // Pre-warm DA MCP session so first edit is fast
     warmups.push(
       Promise.resolve(da.isAuthenticated())
-        .then((ok) => console.log('[Auth] DA MCP ready:', ok))
+        .then((ok) => console.debug('[Auth] DA MCP ready:', ok))
         .catch(() => {})
     );
 
-    console.log('[Auth] Signed in — warming sessions...');
+    console.debug('[Auth] Signed in — warming sessions...');
     await Promise.all(warmups);
   }
   updateAuthUI();
@@ -805,7 +805,7 @@ async function fetchPageHTML(url) {
       const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
       const result = await da.getPage(`${path}.html`);
       if (typeof result === 'string' && result.length > 0) {
-        console.log(`[fetchPageHTML] DA Admin API: ${path} (${result.length} chars)`);
+        console.debug(`[fetchPageHTML] DA Admin API: ${path} (${result.length} chars)`);
         return result;
       }
     } catch (e) { console.warn('[fetchPageHTML] DA Admin API failed:', e.message); }
@@ -2914,7 +2914,7 @@ function navigateToPage(path) {
   cachedPageHTML = null;
   cachedPageUrl = null;
   ensurePageContext().then(() => {
-    if (cachedPageHTML) console.log(`[NAV] Page content pre-cached: ${path} (${cachedPageHTML.length} chars)`);
+    if (cachedPageHTML) console.debug(`[NAV] Page content pre-cached: ${path} (${cachedPageHTML.length} chars)`);
   }).catch(() => { /* non-blocking */ });
 }
 // Expose for ai.js tool handlers
@@ -3105,7 +3105,7 @@ async function loadFileTree() {
     if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
     const data = await resp.json();
     const items = data.tree || [];
-    console.log(`[FileTree] GitHub tree: ${items.length} items from ${ghOrg}/${ghRepo}`);
+    console.debug(`[FileTree] GitHub tree: ${items.length} items from ${ghOrg}/${ghRepo}`);
 
     const root = buildTreeFromGitHub(items);
     fileTreeEl.innerHTML = '';
@@ -3336,7 +3336,7 @@ async function connectCustomSite(input) {
   try {
   // Parse the input (URL or org/repo)
   const parsed = parseConnectInput(input);
-  console.log('[EW] parseConnectInput result:', JSON.stringify(parsed));
+  console.debug('[EW] parseConnectInput result:', JSON.stringify(parsed));
   if (parsed.error) {
     if (statusEl) {
       statusEl.textContent = parsed.message;
@@ -3383,7 +3383,7 @@ async function connectCustomSite(input) {
     if (!edsWorks) {
       // EDS preview doesn't exist — use author URL for JCR preview
       previewOrigin = `https://${parsed.aemHost}`;
-      console.log(`[EW] JCR site: EDS preview unavailable, using author URL: ${previewOrigin}`);
+      console.debug(`[EW] JCR site: EDS preview unavailable, using author URL: ${previewOrigin}`);
     }
   }
 
@@ -3437,22 +3437,22 @@ async function connectCustomSite(input) {
   if (parsed.aemHost) {
     window.__EW_AEM_HOST = `https://${parsed.aemHost}`;
     window.__EW_SITE_TYPE = 'aem-cs';
-    console.log(`[EW] AEM CS site: ${parsed.aemHost} — site type set to aem-cs`);
+    console.debug(`[EW] AEM CS site: ${parsed.aemHost} — site type set to aem-cs`);
   }
 
   // Reconfigure DA client (skip for known JCR sites — DA won't work)
   if (!parsed.jcr) {
     da.configure({ org, repo, branch });
-    console.log(`[EW] DA client reconfigured: ${org}/${repo} (${branch}), da.getOrg()=${da.getOrg()}, da.getRepo()=${da.getRepo()}`);
+    console.debug(`[EW] DA client reconfigured: ${org}/${repo} (${branch}), da.getOrg()=${da.getOrg()}, da.getRepo()=${da.getRepo()}`);
   } else {
-    console.log(`[EW] JCR site — DA client not configured. AEM Content MCP tools available via ${parsed.aemHost}`);
+    console.debug(`[EW] JCR site — DA client not configured. AEM Content MCP tools available via ${parsed.aemHost}`);
   }
 
   // Detect site type (DA vs AEM CS) via fstab.yaml — AWAIT so AI knows the type before first prompt
   // Skip if already set from author URL
   const detectedType = parsed.aemHost ? 'aem-cs' : await detectAndCacheSiteType(org, repo, branch);
   const typeLabel = detectedType === 'aem-cs' ? 'AEM CS (xwalk)' : detectedType === 'da' ? 'DA' : detectedType;
-  console.log(`[EW] Site type: ${typeLabel}`);
+  console.debug(`[EW] Site type: ${typeLabel}`);
 
   // Update UI (home view elements may not exist when switching from toolbar)
   if (statusEl) {
@@ -3510,7 +3510,7 @@ async function connectCustomSite(input) {
     if (previewFrame) {
       previewFrame.removeAttribute('srcdoc');
       previewFrame.src = previewUrl;
-      console.log(`[EW] JCR preview via Worker proxy: ${previewUrl}`);
+      console.debug(`[EW] JCR preview via Worker proxy: ${previewUrl}`);
     }
 
     // Store the preview base URL for auto-refresh after writes
@@ -3563,7 +3563,7 @@ async function connectCustomSite(input) {
     siteType: window.__EW_SITE_TYPE || 'unknown',
   });
   if (mem?.lastPrompts?.length) {
-    console.log(`[Memory] Restored project memory for ${org}/${repo}:`, mem);
+    console.debug(`[Memory] Restored project memory for ${org}/${repo}:`, mem);
   }
 
   } catch (err) {
@@ -4293,7 +4293,7 @@ const COMPASS_WORKER = 'https://compass-ims-proxy.compass-xsc.workers.dev';
     // Validate and store async
     validateAndStoreGitHubToken(token).then((result) => {
       if (result.ok) {
-        console.log(`[GH] OAuth sign-in: ${result.login}`);
+        console.debug(`[GH] OAuth sign-in: ${result.login}`);
       } else {
         console.warn('[GH] OAuth token invalid:', result.error);
         const status = document.getElementById('githubMenuStatus');
@@ -5460,7 +5460,7 @@ async function init() {
   buildOrgSelector();
   initProfileGenerator();
 
-  console.log('[EW] init v25 — repo management, real branch picker, recent repos');
+  console.debug('[EW] init v25 — repo management, real branch picker, recent repos');
 
   // Render recent repos on home view
   renderRecentRepos();
@@ -5492,7 +5492,7 @@ async function init() {
   }
 
   if (ai.hasApiKey()) {
-    console.log(`Claude API key found — live AI mode${AEM_ORG.name ? ` for ${AEM_ORG.name}` : ''}`);
+    console.debug(`Claude API key found — live AI mode${AEM_ORG.name ? ` for ${AEM_ORG.name}` : ''}`);
   }
 
   // Context prefetch: pre-discover all AEM environments (like Adobe's AI Assistant pattern)
@@ -5537,7 +5537,7 @@ async function prefetchAemEnvironments() {
       }
     }
 
-    console.log(`[Compass] Prefetched ${envList.length} AEM environments`, Object.keys(window.__AEM_ENV_BY_AUTHOR));
+    console.debug(`[Compass] Prefetched ${envList.length} AEM environments`, Object.keys(window.__AEM_ENV_BY_AUTHOR));
   } catch (err) {
     console.warn('[Compass] Environment prefetch failed:', err.message);
     window.__AEM_ENVIRONMENTS = [];

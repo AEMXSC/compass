@@ -54,7 +54,7 @@ async function wfFetch(path, opts = {}) {
         return resp;
       }
       if (resp.status === 401 || resp.status === 403) {
-        console.log('[WF] IMS token rejected, trying API key...');
+        console.debug('[WF] IMS token rejected, trying API key...');
       }
     } catch { /* fall through */ }
   }

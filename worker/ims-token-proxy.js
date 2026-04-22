@@ -449,7 +449,7 @@ async function handlePreview(request) {
         const resp = await fetch(publishCssUrl);
         if (resp.ok) {
           css = await resp.text();
-          console.log(`[Preview] CSS from publish: ${hrefVal} (${css.length} chars)`);
+          console.debug(`[Preview] CSS from publish: ${hrefVal} (${css.length} chars)`);
         }
       } catch { /* publish failed */ }
 
@@ -461,9 +461,9 @@ async function handlePreview(request) {
           });
           if (resp.ok) {
             css = await resp.text();
-            console.log(`[Preview] CSS from author: ${hrefVal} (${css.length} chars)`);
+            console.debug(`[Preview] CSS from author: ${hrefVal} (${css.length} chars)`);
           } else {
-            console.log(`[Preview] Author CSS ${resp.status}: ${authorCssUrl}`);
+            console.debug(`[Preview] Author CSS ${resp.status}: ${authorCssUrl}`);
           }
         } catch { /* author failed */ }
       }
@@ -474,7 +474,7 @@ async function handlePreview(request) {
         html = html.replace(match[0], `<style>/* ${hrefVal.split('/').pop()} */\n${css}</style>`);
         cssInlined = true;
       } else {
-        console.log(`[Preview] CSS unavailable: ${hrefVal} — removing link, fallback will apply`);
+        console.debug(`[Preview] CSS unavailable: ${hrefVal} — removing link, fallback will apply`);
         html = html.replace(match[0], '');
       }
     }
@@ -580,7 +580,7 @@ main>div+div{border-top:1px solid #f0f0f0}
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': cacheHeader,
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(request.headers.get('Origin') || '') ? request.headers.get('Origin') : ALLOWED_ORIGINS[0],
       },
     });
   } catch (err) {

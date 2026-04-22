@@ -15,9 +15,6 @@ let DA_ORG = '';
 let DA_REPO = '';
 let DA_BRANCH = 'main';
 
-/* MCP availability flag — starts null (unknown), set on first attempt */
-let mcpAvailable = null;
-
 export function configure({ org, repo, branch } = {}) {
   // Guard: reject values that look like URL artifacts (e.g. "https:" from bad parsing)
   const safe = /^[\w][\w.-]*$/;
@@ -39,27 +36,12 @@ function requireSite() {
   if (!DA_ORG || !DA_REPO) throw new Error('No site connected. Connect a site first before reading or writing content.');
 }
 
-/**
- * Check if MCP is available. Caches the result after first probe.
- */
-async function checkMcp() {
-  if (mcpAvailable !== null) return mcpAvailable;
-  try {
-    mcpAvailable = await mcp.isAvailable();
-    console.log(`[DA] MCP ${mcpAvailable ? 'available' : 'unavailable'} — using ${mcpAvailable ? 'MCP' : 'direct API'}`);
-  } catch {
-    mcpAvailable = false;
-    console.log('[DA] MCP unavailable — using direct API');
-  }
-  return mcpAvailable;
-}
-
-/* ─── Content operations — MCP first, fallback to direct ─── */
+/* ─── Content operations ─── */
 
 export async function listPages(path = '/') {
   requireSite();
   const url = `${getBasePath()}${path}`;
-  console.log(`[DA] Direct list: GET ${url}`);
+  console.debug(`[DA] Direct list: GET ${url}`);
   const resp = await fetchWithToken(url);
   if (!resp.ok) throw new Error(`DA list failed: ${resp.status}`);
   return resp.json();
@@ -68,7 +50,7 @@ export async function listPages(path = '/') {
 export async function getPage(path) {
   requireSite();
   const url = `${getBasePath()}${path}`;
-  console.log(`[DA] Direct read: GET ${url}`);
+  console.debug(`[DA] Direct read: GET ${url}`);
   const resp = await fetchWithToken(url);
   if (!resp.ok) throw new Error(`DA get failed: ${resp.status}`);
   const contentType = resp.headers.get('content-type');
@@ -96,7 +78,7 @@ async function directWrite(path, html) {
   const formData = new FormData();
   formData.append('data', blob, path.split('/').pop());
 
-  console.log(`[DA] Direct write: PUT ${url} (${html.length} chars)`);
+  console.debug(`[DA] Direct write: PUT ${url} (${html.length} chars)`);
   const resp = await fetchWithToken(url, {
     method: 'PUT',
     body: formData,
@@ -105,14 +87,14 @@ async function directWrite(path, html) {
     const errText = await resp.text().catch(() => '');
     throw new Error(`DA write failed: ${resp.status} ${errText.slice(0, 200)}`);
   }
-  console.log(`[DA] Direct write succeeded: ${resp.status}`);
+  console.debug(`[DA] Direct write succeeded: ${resp.status}`);
   return resp;
 }
 
 export async function deletePage(path) {
   requireSite();
   const url = `${getBasePath()}${path}`;
-  console.log(`[DA] Direct delete: DELETE ${url}`);
+  console.debug(`[DA] Direct delete: DELETE ${url}`);
   const resp = await fetchWithToken(url, { method: 'DELETE' });
   if (!resp.ok) throw new Error(`DA delete failed: ${resp.status}`);
   return resp;
@@ -227,6 +209,5 @@ export function isAuthenticated() {
  * Force MCP re-check (e.g. after sign-in).
  */
 export function resetMcpState() {
-  mcpAvailable = null;
   mcp.resetSession();
 }
