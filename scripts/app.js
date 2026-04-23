@@ -4584,27 +4584,17 @@ document.getElementById('userOrgSwitchBtn')?.addEventListener('click', () => {
   if (listEl.style.display === 'none') {
     const orgs = getUserOrgs();
     const active = getActiveOrg();
-    listEl.innerHTML = orgs.length > 0
-      ? orgs.map((o) => `<button data-org-id="${escapeHtml(o.id)}" class="${o.id === active?.id ? 'active' : ''}">${escapeHtml(o.name)}</button>`).join('')
-      : '<div style="padding:8px;font-size:11px;color:var(--text-muted)">No organizations available</div>';
+    // Sign out + sign in to switch org at the IMS login page
+    listEl.innerHTML = '<button class="switch-org-action">Sign in to a different organization</button>';
     listEl.style.display = '';
-    listEl.querySelectorAll('button').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        listEl.style.display = 'none';
-        const menu = document.getElementById('userMenu');
-        if (menu) menu.classList.remove('visible');
-        const targetOrg = btn.dataset.orgId;
-        // imslib switchProfile switches the active org without full re-auth
-        if (window.adobeIMS?.switchProfile) {
-          showToast(`Switching to "${btn.textContent}"...`, 'info');
-          window.adobeIMS.switchProfile(targetOrg);
-        } else {
-          showToast(`Switching org... Sign in again and select "${btn.textContent}"`, 'info');
-          signOut();
-          updateAuthUI();
-          setTimeout(() => signIn(), 500);
-        }
-      });
+    listEl.querySelector('.switch-org-action')?.addEventListener('click', () => {
+      listEl.style.display = 'none';
+      const menu = document.getElementById('userMenu');
+      if (menu) menu.classList.remove('visible');
+      showToast('Signing out to switch organization...', 'info');
+      signOut();
+      updateAuthUI();
+      setTimeout(() => signIn(), 500);
     });
   } else {
     listEl.style.display = 'none';
