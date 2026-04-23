@@ -4584,17 +4584,22 @@ document.getElementById('userOrgSwitchBtn')?.addEventListener('click', () => {
   if (listEl.style.display === 'none') {
     const orgs = getUserOrgs();
     const active = getActiveOrg();
-    // Sign out + sign in to switch org at the IMS login page
+    // Clear local auth state and redirect to IMS login to pick a new org
     listEl.innerHTML = '<button class="switch-org-action">Sign in to a different organization</button>';
     listEl.style.display = '';
     listEl.querySelector('.switch-org-action')?.addEventListener('click', () => {
       listEl.style.display = 'none';
       const menu = document.getElementById('userMenu');
       if (menu) menu.classList.remove('visible');
-      showToast('Signing out to switch organization...', 'info');
-      signOut();
-      updateAuthUI();
-      setTimeout(() => signIn(), 500);
+      // Clear local tokens without calling imslib.signOut() (which redirects to logout page)
+      localStorage.removeItem('ew-ims-token');
+      localStorage.removeItem('ew-ims-expiry');
+      localStorage.removeItem('ew-ims-profile');
+      localStorage.removeItem('ew-ims-method');
+      // Redirect straight to IMS sign-in
+      if (window.adobeIMS) {
+        window.adobeIMS.signIn();
+      }
     });
   } else {
     listEl.style.display = 'none';
