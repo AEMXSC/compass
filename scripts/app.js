@@ -3706,7 +3706,6 @@ async function connectCustomSite(input) {
     const codeBase = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
 
     // Build the full-mode preview URL — Worker serves complete page with scripts proxied
-    const token = getToken();
     const previewParams = new URLSearchParams({
       mode: 'full',
       publish: publishUrl,
@@ -3714,6 +3713,10 @@ async function connectCustomSite(input) {
       path: jcrPath + '.html',
       codeBase,
     });
+    // Pass IMS token so Worker can fetch from author tier (unpublished content)
+    // Token sent via query param because iframe can't set Authorization headers
+    const token = getToken();
+    if (token) previewParams.set('token', token);
     previewParams.set('_t', Date.now());
     const fullPreviewUrl = `${WORKER_BASE}/preview?${previewParams}`;
 
@@ -3730,7 +3733,7 @@ async function connectCustomSite(input) {
     navigateToPage(parsed.path || '/');
   }
 
-  // Refresh JCR preview after edits — just reload the Worker full-mode URL with cache bust
+  // Refresh JCR preview after edits — reload the Worker full-mode URL with cache bust
   window.__refreshJcrPreview = () => {
     const cfg = window.__JCR_PREVIEW_CONFIG;
     if (!cfg || !previewFrame) return;
@@ -3743,6 +3746,8 @@ async function connectCustomSite(input) {
       codeBase: cfg.codeBase,
       _t: Date.now(),
     });
+    const tk = getToken();
+    if (tk) params.set('token', tk);
     previewFrame.removeAttribute('srcdoc');
     previewFrame.src = `${cfg.workerBase}/preview?${params}`;
   };

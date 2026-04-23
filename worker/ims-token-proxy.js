@@ -415,8 +415,11 @@ async function handlePreview(request) {
     return new Response('Invalid URL', { status: 400 });
   }
 
-  // Resolve auth token: prefer user token from browser, fall back to S2S
-  const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '') || null;
+  // Resolve auth token: prefer user token (header or query param), fall back to S2S
+  // Query param used because iframe.src can't set Authorization headers
+  const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
+    || url.searchParams.get('token')
+    || null;
   let authToken = userToken;
   let authLevel = userToken ? 'user' : 'none';
 
@@ -475,11 +478,20 @@ async function handlePreview(request) {
 
     if (!html) {
       const resp = await fetch(pageUrl);
-      if (!resp.ok) {
-        return new Response(`Publish tier returned ${resp.status} for ${pageUrl}`, { status: 502 });
+      if (resp.ok) {
+        html = await resp.text();
+        htmlSource = 'publish';
       }
-      html = await resp.text();
-      htmlSource = 'publish';
+    }
+
+    if (!html) {
+      const hint = authToken
+        ? 'Page not found on author or publish tier. Check the content path.'
+        : 'Page not found on publish tier. Sign in to access author content (unpublished pages).';
+      return new Response(
+        `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center;max-width:500px"><h2 style="color:#e5e7eb">Page not found</h2><p>${hint}</p><p style="font-size:12px;color:#64748b">${pagePath}</p></div></body></html>`,
+        { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+      );
     }
 
     // Raw mode: return HTML with minimal processing (for client-side EDS decoration)
