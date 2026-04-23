@@ -3475,6 +3475,7 @@ function parseConnectInput(input) {
   // 4. /content/ path = JCR/UE site — auto-resolve from known sites or known AEM instances
   //    Covers: author-p* URLs, UE editor URLs (both experience.adobe.com and author-hosted /ui#/), bare /content/ paths
   const contentMatch = trimmed.match(/\/content\/([^/]+)/);
+  const fullContentPath = trimmed.match(/(\/content\/[^\s?#]*)/)?.[1]?.replace(/\.html$/, '') || '';
   const authorHostMatch = trimmed.match(/(author-p\d+-e\d+)\.adobeaemcloud\.com/);
   if (contentMatch || authorHostMatch) {
     const siteName = contentMatch?.[1];
@@ -3484,15 +3485,14 @@ function parseConnectInput(input) {
     if (siteName) {
       const knownSite = resolveSite(siteName);
       if (knownSite) {
-        return { org: knownSite.org, repo: knownSite.repo, branch: knownSite.branch, aemHost: authorHost, jcr: !!authorHost };
+        return { org: knownSite.org, repo: knownSite.repo, branch: knownSite.branch, aemHost: authorHost, jcr: !!authorHost, path: fullContentPath };
       }
     }
 
     // XSC Showcase instance (author-p153659-e1614585) — we have S2S access to all sites
     if (authorHost?.startsWith('author-p153659-e1614585')) {
       if (siteName) {
-        // Best-guess EDS mapping: site name = repo, try common orgs
-        return { org: 'aem-showcase', repo: siteName, branch: 'main', aemHost: authorHost, jcr: true };
+        return { org: 'aem-showcase', repo: siteName, branch: 'main', aemHost: authorHost, jcr: true, path: fullContentPath };
       }
       return { error: 'jcr', message: 'AEM Showcase instance detected — add /content/{sitename}/ to the URL so Compass can identify the site.' };
     }
@@ -3613,8 +3613,7 @@ async function connectCustomSite(input) {
   };
   // Set the initial page path from the URL
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
-    const contentPathMatch = input.match(/(\/content\/[^\s?#]*)/);
-    const contentPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '';
+    const contentPath = parsed.path || '';
     PREVIEW_URL = previewOrigin + (contentPath || '/');
   } else {
     // EDS/DA sites: use the path from the pasted URL (e.g. /solutions/customer-experience)
@@ -3675,8 +3674,7 @@ async function connectCustomSite(input) {
 
   // For JCR/xwalk sites: fetch HTML via Worker proxy, render in srcdoc with EDS scripts
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
-    const contentPathMatch = input.match(/(\/content\/[^\s?#]*)/);
-    const jcrPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '/content';
+    const jcrPath = parsed.path || '/content';
     activeResourcePath = jcrPath;
 
     if (previewUrlText) previewUrlText.textContent = `${parsed.aemHost}${jcrPath}`;
