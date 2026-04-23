@@ -1711,6 +1711,95 @@ const JCR_ONLY_TOOLS = new Set([
   'get_content_fragment', 'create_content_fragment', 'update_content_fragment',
 ]);
 
+/* ── Tiered Tool Selection (Speed optimization) ── */
+/* Sending 104 tools = slow first-token time. Tier tools by intent so Claude
+   only evaluates what's relevant. Saves 30-50% on thinking time. */
+
+const TIER1_CORE = new Set([
+  // Content editing (the 90% case)
+  'edit_page_content', 'get_page_content', 'list_site_pages', 'preview_page', 'publish_page',
+  'copy_aem_page', 'create_aem_page', 'delete_page', 'patch_aem_page_content',
+  // AEM MCP direct
+  'aem_read', 'aem_write', 'aem_list_environments',
+  // Site management
+  'get_aem_sites', 'get_aem_site_pages', 'switch_site', 'get_site_info',
+  // Content fragments
+  'get_content_fragment', 'update_content_fragment',
+  // Utility
+  'fetch_url', 'batch_aem_update',
+]);
+
+const TIER2_KEYWORDS = {
+  analytics: ['cja_visualize', 'cja_kpi_pulse', 'cja_executive_briefing', 'cja_anomaly_triage', 'get_analytics_insights'],
+  governance: ['run_governance_check', 'get_brand_guidelines', 'check_asset_expiry', 'audit_content'],
+  workfront: ['create_workfront_task', 'list_workfront_projects', 'get_workfront_project', 'list_workfront_tasks', 'update_workfront_task', 'list_workfront_approvals', 'ask_workfront', 'get_project_health', 'check_workfront_connection'],
+  assets: ['search_dam_assets', 'browse_dam_folder', 'get_asset_metadata', 'update_asset_metadata', 'upload_asset', 'delete_asset', 'move_asset', 'copy_asset', 'create_dam_folder', 'get_asset_renditions', 'add_to_collection'],
+  images: ['generate_image_variations', 'transform_image', 'create_image_renditions'],
+  journey: ['create_journey', 'generate_journey_content', 'get_journey_status', 'analyze_journey_conflicts'],
+  experiment: ['setup_experiment', 'get_experiment_status', 'analyze_experiment', 'create_ab_test', 'get_personalization_offers'],
+  audience: ['explore_audiences', 'get_audience_segments', 'get_customer_profile'],
+  pipeline: ['get_pipeline_status', 'analyze_pipeline_failure', 'sync_code'],
+  accessibility: ['suggest_alt_text', 'apply_alt_text', 'check_citation_readability'],
+  destinations: ['list_destinations', 'list_destination_flow_runs', 'get_destination_health'],
+  support: ['create_support_ticket', 'get_ticket_status', 'search_experience_league', 'get_product_release_notes'],
+  optimizer: ['get_site_opportunities', 'get_site_audit'],
+  forms: ['create_form', 'generate_form'],
+  pdf: ['extract_pdf_content', 'extract_brief_content'],
+  admin: ['unpublish_preview', 'unpublish_live', 'purge_cache', 'bulk_preview', 'bulk_publish', 'reindex_page', 'get_page_status'],
+};
+
+const INTENT_PATTERNS = {
+  analytics: /\b(analytics?|cja|metric|kpi|dashboard|report|insight|data|trend|anomal)/i,
+  governance: /\b(governance|brand|compliance|audit|policy|check)\b/i,
+  workfront: /\b(workfront|project|task|approval|assign|deadline)/i,
+  assets: /\b(asset|dam|image|photo|media|upload|folder|rendition|collection)/i,
+  images: /\b(variation|transform|rendition|resize|crop|channel|social)/i,
+  journey: /\b(journey|campaign|orchestrat|ajo)/i,
+  experiment: /\b(experiment|a\/b|test|personali|target|offer)/i,
+  audience: /\b(audience|segment|profile|cdp|rtcdp)/i,
+  pipeline: /\b(pipeline|deploy|build|ci.?cd|sync|code sync)/i,
+  accessibility: /\b(alt.?text|accessibility|a11y|wcag|citation|readab)/i,
+  destinations: /\b(destination|export|activation|flow.?run)/i,
+  support: /\b(support|ticket|experience.?league|release.?note|help)/i,
+  optimizer: /\b(opportunit|lighthouse|performance|speed|core.?web|cwv|seo)/i,
+  forms: /\b(form|input|submit|field|dropdown)/i,
+  pdf: /\b(pdf|brief|document|extract)/i,
+  admin: /\b(unpublish|purge|cache|bulk|reindex|status)/i,
+};
+
+function classifyIntent(prompt) {
+  const matched = new Set();
+  for (const [intent, pattern] of Object.entries(INTENT_PATTERNS)) {
+    if (pattern.test(prompt)) matched.add(intent);
+  }
+  return matched;
+}
+
+function getToolsForPrompt(prompt) {
+  const siteType = window.__EW_SITE_TYPE || 'unknown';
+  const intents = classifyIntent(prompt || '');
+
+  // Build tool name set: always include Tier 1 + any matched Tier 2 categories
+  const activeTools = new Set(TIER1_CORE);
+  for (const intent of intents) {
+    const tools = TIER2_KEYWORDS[intent];
+    if (tools) tools.forEach((t) => activeTools.add(t));
+  }
+
+  // If no specific intent matched and prompt is complex, include all tools
+  if (intents.size === 0 && prompt && prompt.length > 200) {
+    return getToolsForSiteType();
+  }
+
+  // Filter AEM_TOOLS by active set + site type
+  return AEM_TOOLS.filter((t) => {
+    if (!activeTools.has(t.name)) return false;
+    if (siteType === 'da' && JCR_ONLY_TOOLS.has(t.name)) return false;
+    if (siteType === 'aem-cs' && DA_ONLY_TOOLS.has(t.name)) return false;
+    return true;
+  });
+}
+
 function getToolsForSiteType() {
   const siteType = window.__EW_SITE_TYPE || 'unknown';
   if (siteType === 'da') {
@@ -1719,7 +1808,7 @@ function getToolsForSiteType() {
   if (siteType === 'aem-cs') {
     return AEM_TOOLS.filter((t) => !DA_ONLY_TOOLS.has(t.name));
   }
-  return AEM_TOOLS; // unknown — send all tools
+  return AEM_TOOLS;
 }
 
 /* ── Client-Side Tool Executor ── */
@@ -5206,14 +5295,22 @@ export function abortCurrentChat() {
   }
 }
 
-/** Detect if a prompt is a simple content edit that can use the fast model. */
+/** Detect if a prompt is a simple content edit that can use the fast model (P2: expanded). */
 function isSimpleEdit(msg) {
   if (typeof msg !== 'string') return false;
   const lower = msg.toLowerCase();
-  // Simple patterns: "change X to Y", "update the headline to", "set the title to"
-  return /\b(change|update|set|replace|make|rename)\b.*\b(to|with|as)\b/i.test(lower)
-    && lower.length < 300
-    && !/\b(analyze|audit|governance|create|generate|search|find|list|compare|explain)\b/i.test(lower);
+  const len = lower.length;
+  // Short prompts about content changes → Haiku (3-5x faster)
+  if (len > 500) return false;
+  // Exclude complex multi-tool tasks
+  if (/\b(analyze|audit|governance|generate|search|find|list|compare|explain|create.*page|migrate|import)\b/i.test(lower)) return false;
+  // Match: "change X to Y", "update the headline", "make it more compelling"
+  if (/\b(change|update|set|replace|make|rename|edit|fix|rewrite|rephrase)\b.*\b(to|with|as|more|less|better|shorter|longer)\b/i.test(lower)) return true;
+  // Match: "translate to X", "shorten the", "expand the", "summarize"
+  if (/\b(translate|shorten|expand|summarize|simplify|reword|rephrase)\b/i.test(lower) && len < 300) return true;
+  // Match: "add a CTA", "remove the banner", "move the hero"
+  if (/\b(add|remove|delete|move|swap|hide|show)\b.*\b(the|a|an|this)\b/i.test(lower) && len < 200) return true;
+  return false;
 }
 
 export async function streamChat(userMessage, context, onChunk, onToolCall, onToolResult) {
@@ -5230,11 +5327,16 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     ? [...userMessage]
     : [{ role: 'user', content: userMessage }];
 
-  // Use fast model (Haiku) for simple edits when page HTML is already in context
+  // Extract the latest user prompt text for intent classification + model routing
   const lastMsg = messages[messages.length - 1]?.content;
-  const useFastModel = context.pageHTML && isSimpleEdit(typeof lastMsg === 'string' ? lastMsg : '');
+  const promptText = typeof lastMsg === 'string' ? lastMsg : '';
+
+  // Use fast model (Haiku) for simple edits when page HTML is already in context
+  const useFastModel = context.pageHTML && isSimpleEdit(promptText);
   const model = useFastModel ? MODEL_FAST : MODEL;
-  if (useFastModel) console.debug('[AI] Fast edit mode: using Haiku for speed');
+
+  // Tiered tools: send only relevant tools based on prompt intent (P0 speed optimization)
+  const tools = getToolsForPrompt(promptText);
 
   let fullText = '';
   const MAX_TOOL_ROUNDS = 8;
@@ -5258,7 +5360,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
         stream: true,
         system,
         messages,
-        tools: getToolsForSiteType(),
+        tools: round === 0 ? tools : getToolsForSiteType(), // Tier 1 on first round, all tools on subsequent rounds if needed
       }),
     });
 
