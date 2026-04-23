@@ -3448,10 +3448,11 @@ let customSiteConnected = false;
 function parseConnectInput(input) {
   const trimmed = input.trim();
 
-  // 1. EDS preview/live URLs: {branch}--{repo}--{org}.aem.page or .aem.live or .hlx.page or .hlx.live
-  const edsMatch = trimmed.match(/(\w[\w-]*)--(\w[\w-]*)--(\w[\w-]*)\.(aem|hlx)\.(page|live)/);
+  // 1. EDS preview/live URLs: {branch}--{repo}--{org}.aem.page/path or .aem.live/path
+  const edsMatch = trimmed.match(/(\w[\w-]*)--(\w[\w-]*)--(\w[\w-]*)\.(aem|hlx)\.(page|live)(\/[^\s?#]*)?/);
   if (edsMatch) {
-    return { branch: edsMatch[1], repo: edsMatch[2], org: edsMatch[3] };
+    const path = edsMatch[6] ? edsMatch[6].replace(/\/$/, '') || '/' : '/';
+    return { branch: edsMatch[1], repo: edsMatch[2], org: edsMatch[3], path };
   }
 
   // 2. DA editor URLs: https://da.live/edit#/org/repo/...
@@ -3610,14 +3611,15 @@ async function connectCustomSite(input) {
     daOrg: org,
     daRepo: repo,
   };
-  // For JCR author URLs, include the content path; for EDS, just root
+  // Set the initial page path from the URL
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
-    // Extract content path from original input (e.g. /content/wknd-universal/language-masters/en)
     const contentPathMatch = input.match(/(\/content\/[^\s?#]*)/);
     const contentPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '';
     PREVIEW_URL = previewOrigin + (contentPath || '/');
   } else {
-    PREVIEW_URL = previewOrigin + '/';
+    // EDS/DA sites: use the path from the pasted URL (e.g. /solutions/customer-experience)
+    const initialPath = parsed.path || '/';
+    PREVIEW_URL = previewOrigin + initialPath;
   }
   customSiteConnected = true;
   window.__EW_ORG = AEM_ORG;
@@ -3762,7 +3764,7 @@ async function connectCustomSite(input) {
       window.__JCR_PREVIEW_URL = fallbackUrl;
     }
   } else {
-    navigateToPage('/');
+    navigateToPage(parsed.path || '/');
   }
 
   // Global function for AI tool handlers to trigger xwalk preview refresh after edits
