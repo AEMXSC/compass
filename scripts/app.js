@@ -3597,7 +3597,7 @@ function runGovernance() {
 }
 
 function requireApiKey() {
-  addMessage('assistant', md('**API key required.** Open ⚙ Settings and enter your Claude API key to use this feature.'));
+  addMessage('assistant', md('**API key required.** <a href="#" onclick="document.getElementById(\'settingsPanel\')?.classList.add(\'visible\');return false" style="color:var(--brand);text-decoration:underline;cursor:pointer">Open ⚙ Settings</a> and enter your Claude API key, or paste it directly in the chat.'));
 }
 
 function runLLMO() {
@@ -3878,6 +3878,16 @@ chatInput?.addEventListener('input', () => updateSlashAutocomplete(chatInput.val
 function handleUserInput() {
   const text = chatInput.value.trim();
   if (!text && !pendingFile) return;
+
+  // Auto-detect API key pasted in chat (sk-ant-...)
+  if (text.startsWith('sk-ant-') && text.length > 20) {
+    ai.setApiKey(text);
+    chatInput.value = '';
+    autoResizeChatInput();
+    updateAuthUI();
+    showToast('API key saved!', 'success');
+    return;
+  }
 
   // Check for slash commands first
   if (text.startsWith('/') && handleSlashCommand(text)) {
