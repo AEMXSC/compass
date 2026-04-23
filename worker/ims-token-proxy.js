@@ -82,6 +82,9 @@ async function route(request) {
   if (url.pathname === '/mcp' && request.method === 'POST') {
     return handleMcpProxy(request);
   }
+  if (url.pathname === '/asset' && request.method === 'GET') {
+    return handleAssetProxy(request);
+  }
   if (url.pathname === '/ims/login' && request.method === 'GET') {
     return handleImsLogin(request);
   }
@@ -500,6 +503,73 @@ async function handlePreview(request) {
       });
     }
 
+    // Full mode: serve complete page with scripts — rewrite asset URLs to /asset proxy
+    // This lets the iframe load from the Worker origin (same-origin = no CORS/X-Frame-Options)
+    const fullMode = url.searchParams.get('mode') === 'full';
+    if (fullMode) {
+      const workerOrigin = url.origin;
+      const codeBase = url.searchParams.get('codeBase') || '';
+
+      // Rewrite <script src> and <link href> to proxy through /asset
+      html = html.replace(
+        /(<(?:script|link)[^>]*(?:src|href)=["'])([^"']+)(["'])/gi,
+        (match, prefix, assetPath, suffix) => {
+          // Skip data: URLs, inline scripts, and anchors
+          if (assetPath.startsWith('data:') || assetPath.startsWith('#') || assetPath.startsWith('javascript:')) return match;
+
+          let resolvedUrl;
+          if (assetPath.startsWith('http://') || assetPath.startsWith('https://')) {
+            // Absolute URL — proxy if it's an allowed origin
+            try {
+              const h = new URL(assetPath).hostname;
+              if (h.endsWith('.adobeaemcloud.com') || h.endsWith('.aem.page') || h.endsWith('.aem.live')) {
+                resolvedUrl = assetPath;
+              } else {
+                return match; // External CDN — don't proxy
+              }
+            } catch { return match; }
+          } else if (assetPath.startsWith('/.resource/')) {
+            // xwalk EDS scripts on author tier
+            resolvedUrl = `${authorBase}${assetPath}`;
+          } else if (assetPath.startsWith('/etc.clientlibs/') || assetPath.startsWith('/etc/')) {
+            // Traditional AEM clientlibs — public on publish
+            resolvedUrl = `${publishUrl}${assetPath}`;
+          } else if (assetPath.startsWith('/') && codeBase) {
+            // Relative path with code repo — EDS scripts/styles/blocks
+            resolvedUrl = `${codeBase}${assetPath}`;
+          } else if (assetPath.startsWith('/')) {
+            // Relative path without code repo — resolve against publish
+            resolvedUrl = `${publishUrl}${assetPath}`;
+          } else {
+            return match; // Relative without leading / — skip
+          }
+
+          return `${prefix}${workerOrigin}/asset?url=${encodeURIComponent(resolvedUrl)}${suffix}`;
+        },
+      );
+
+      // Add <base> for images (resolve /content/dam/ paths to publish)
+      html = html.replace(/<head([^>]*)>/, `<head$1><base href="${publishUrl}/">`);
+
+      // Strip UE instrumentation only (NOT scripts)
+      html = html.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');
+      html = html.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
+
+      const cacheHeader = cacheBust ? 'no-store, no-cache' : 'public, max-age=60';
+      const respOrigin = request.headers.get('Origin') || '';
+      return new Response(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': cacheHeader,
+          'X-Preview-Auth': authLevel,
+          'X-Preview-Source': htmlSource,
+          'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(respOrigin) ? respOrigin : ALLOWED_ORIGINS[0],
+          'Access-Control-Expose-Headers': 'X-Preview-Auth, X-Preview-Source',
+        },
+      });
+    }
+
     // Standard mode: inline CSS, strip scripts/UE attributes, inject fallback CSS
 
     // Step 2: Inline CSS — try publish first, then author with token
@@ -604,6 +674,75 @@ main>div+div{border-top:1px solid #f0f0f0}
     });
   } catch (err) {
     return new Response(`Preview error: ${err.message}`, { status: 502 });
+  }
+}
+
+/* ─── GET /asset — Proxy static assets (JS/CSS/fonts) from AEM or EDS CDN ─── */
+/* Allows scripts to load same-origin in the preview iframe, bypassing CORS. */
+
+async function handleAssetProxy(request) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin) && origin) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const url = new URL(request.url);
+  const targetUrl = url.searchParams.get('url');
+  if (!targetUrl) {
+    return new Response('Missing ?url= parameter', { status: 400 });
+  }
+
+  // Validate: only proxy from AEM and EDS origins
+  let target;
+  try {
+    target = new URL(targetUrl);
+  } catch {
+    return new Response('Invalid URL', { status: 400 });
+  }
+  const host = target.hostname;
+  const allowed = host.endsWith('.adobeaemcloud.com')
+    || host.endsWith('.aem.page') || host.endsWith('.aem.live')
+    || host.endsWith('.hlx.page') || host.endsWith('.hlx.live');
+  if (!allowed) {
+    return new Response('Only AEM and EDS origins allowed', { status: 403 });
+  }
+
+  // Author tier needs auth, publish/CDN don't
+  const needsAuth = host.includes('author-');
+  const headers = {};
+  if (needsAuth) {
+    const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    if (userToken) {
+      headers.Authorization = `Bearer ${userToken}`;
+    } else if (cachedToken) {
+      headers.Authorization = `Bearer ${cachedToken}`;
+    }
+  }
+
+  try {
+    const resp = await fetch(targetUrl, { headers });
+    if (!resp.ok) {
+      return new Response(`Upstream ${resp.status}`, { status: resp.status });
+    }
+
+    const contentType = resp.headers.get('Content-Type') || 'application/octet-stream';
+    const body = await resp.arrayBuffer();
+
+    // Cache CDN assets aggressively, author assets briefly
+    const isEds = host.endsWith('.aem.page') || host.endsWith('.aem.live');
+    const cacheTime = isEds ? 3600 : 300;
+
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': `public, max-age=${cacheTime}`,
+        'Access-Control-Allow-Origin': origin || '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      },
+    });
+  } catch (err) {
+    return new Response(`Asset proxy error: ${err.message}`, { status: 502 });
   }
 }
 

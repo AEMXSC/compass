@@ -3689,7 +3689,9 @@ async function connectCustomSite(input) {
   // Update contextual prompt chips for the connected site
   if (typeof updateContextChips === 'function') updateContextChips();
 
-  // For JCR/xwalk sites: fetch HTML via Worker proxy, render in srcdoc with EDS scripts
+  // For JCR/xwalk sites: use Worker /preview?mode=full for pixel-perfect rendering
+  // Worker proxies the complete page and rewrites script/CSS URLs to /asset proxy
+  // so everything loads same-origin (bypasses X-Frame-Options and CORS)
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
     const jcrPath = parsed.path || '/content';
     activeResourcePath = jcrPath;
@@ -3697,131 +3699,52 @@ async function connectCustomSite(input) {
     if (previewUrlText) previewUrlText.textContent = `${parsed.aemHost}${jcrPath}`;
     if (previewDot) previewDot.classList.add('connected');
 
-    // Show loading state
-    if (previewFrame) {
-      previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
-        <div style="text-align:center"><p>Loading preview...</p><p style="font-size:12px;opacity:.6">${jcrPath}</p></div></body></html>`;
-    }
-
     const WORKER_BASE = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
     const authorHost = parsed.aemHost;
     const publishUrl = `https://${authorHost.replace('author-', 'publish-')}`;
     const authorUrl = `https://${authorHost}`;
     const codeBase = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
 
-    // Store preview config for re-fetching after edits
-    window.__JCR_PREVIEW_CONFIG = { workerBase: WORKER_BASE, publishUrl, authorUrl, jcrPath, codeBase, org, repo, branch };
-
-    // Try xwalk srcdoc preview: fetch raw HTML + render with EDS scripts from code repo
+    // Build the full-mode preview URL — Worker serves complete page with scripts proxied
     const token = getToken();
-    const fetchHeaders = token ? { Authorization: `Bearer ${token}` } : {};
-    const rawUrl = `${WORKER_BASE}/preview?mode=raw&publish=${encodeURIComponent(publishUrl)}&author=${encodeURIComponent(authorUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`;
+    const previewParams = new URLSearchParams({
+      mode: 'full',
+      publish: publishUrl,
+      author: authorUrl,
+      path: jcrPath + '.html',
+      codeBase,
+    });
+    if (cacheBust) previewParams.set('_t', Date.now());
+    const fullPreviewUrl = `${WORKER_BASE}/preview?${previewParams}`;
 
-    try {
-      const resp = await fetch(rawUrl, { headers: fetchHeaders });
-      if (resp.ok) {
-        let rawHtml = await resp.text();
-        const authLevel = resp.headers.get('X-Preview-Auth') || 'public';
-        const htmlSource = resp.headers.get('X-Preview-Source') || 'publish';
-
-        // Strip UE instrumentation client-side (raw mode doesn't strip)
-        rawHtml = rawHtml.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');
-        rawHtml = rawHtml.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
-        rawHtml = rawHtml.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width[^<]*|image-left|image-right|cta-button[^<]*|text-center|light|dark|hidden|teaser-card|teaser-overlay[^<]*|teaserStyle|ctastyle|style)\s*<\/div>/gi, '');
-        rawHtml = rawHtml.replace(/<div>\s*(title|videoReference|imageRef|buttonText|video|bg-default|bg-dark|bg-light|description|altText|linkUrl|linkText|eyebrow|subtitle|fragmentRef|teaserStyle|displayStyle|herolayout|sectionStyle)\s*<\/div>/gi, '');
-        rawHtml = rawHtml.replace(/<div>\s*([a-z][a-zA-Z]{2,19})\s*<\/div>/g, (m, word) => /^[a-z]+[A-Z]/.test(word) ? '' : m);
-        rawHtml = rawHtml.replace(/<div>\s*<\/div>/g, '');
-
-        // Extract <body> content (between <body> and </body>)
-        const bodyMatch = rawHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-        const bodyContent = bodyMatch ? bodyMatch[1] : rawHtml;
-
-        // Build srcdoc with EDS scripts from code repo for pixel-perfect decoration
-        if (previewFrame) {
-          previewFrame.removeAttribute('src');
-          previewFrame.srcdoc = `<!DOCTYPE html><html>
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <base href="${publishUrl}/">
-  <link rel="stylesheet" href="${codeBase}/styles/styles.css">
-  <script>window.hlx = window.hlx || {}; window.hlx.codeBasePath = '${codeBase}';</script>
-  <script src="${codeBase}/scripts/aem.js" type="module"><\/script>
-  <script src="${codeBase}/scripts/scripts.js" type="module"><\/script>
-</head>
-<body>
-  ${bodyContent}
-</body></html>`;
-        }
-
-        // Update preview quality indicator
-        const qualityLabel = htmlSource === 'author' ? 'Author preview' : 'Publish preview';
-        const authLabel = authLevel === 'user' ? 'IMS' : authLevel === 's2s' ? 'S2S' : '';
-        if (previewUrlText) previewUrlText.textContent = `${parsed.aemHost}${jcrPath} · ${qualityLabel}${authLabel ? ` (${authLabel})` : ''}`;
-
-        // Store for auto-refresh after writes
-        window.__JCR_PREVIEW_URL = rawUrl;
-      } else {
-        // Fallback: standard Worker preview (inlined CSS, no JS decoration)
-        const fallbackUrl = `${WORKER_BASE}/preview?publish=${encodeURIComponent(publishUrl)}&author=${encodeURIComponent(authorUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`;
-        if (previewFrame) {
-          previewFrame.removeAttribute('srcdoc');
-          previewFrame.src = fallbackUrl;
-        }
-        window.__JCR_PREVIEW_URL = fallbackUrl;
-      }
-    } catch {
-      // Network error — use standard Worker preview
-      const fallbackUrl = `${WORKER_BASE}/preview?publish=${encodeURIComponent(publishUrl)}&author=${encodeURIComponent(authorUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`;
-      if (previewFrame) {
-        previewFrame.removeAttribute('srcdoc');
-        previewFrame.src = fallbackUrl;
-      }
-      window.__JCR_PREVIEW_URL = fallbackUrl;
+    // Load in iframe — Worker origin, no X-Frame-Options issue
+    if (previewFrame) {
+      previewFrame.removeAttribute('srcdoc');
+      previewFrame.src = fullPreviewUrl;
     }
+
+    // Store config for refresh after edits
+    window.__JCR_PREVIEW_CONFIG = { workerBase: WORKER_BASE, publishUrl, authorUrl, jcrPath, codeBase, org, repo, branch };
+    window.__JCR_PREVIEW_URL = fullPreviewUrl;
   } else {
     navigateToPage(parsed.path || '/');
   }
 
-  // Global function for AI tool handlers to trigger xwalk preview refresh after edits
-  window.__refreshJcrPreview = async () => {
+  // Refresh JCR preview after edits — just reload the Worker full-mode URL with cache bust
+  window.__refreshJcrPreview = () => {
     const cfg = window.__JCR_PREVIEW_CONFIG;
     if (!cfg || !previewFrame) return;
     showToast('Updating preview...', 'info');
-    try {
-      const token = getToken();
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const rawUrl = `${cfg.workerBase}/preview?mode=raw&publish=${encodeURIComponent(cfg.publishUrl)}&author=${encodeURIComponent(cfg.authorUrl)}&path=${encodeURIComponent(cfg.jcrPath + '.html')}&_t=${Date.now()}`;
-      const resp = await fetch(rawUrl, { headers });
-      if (!resp.ok) throw new Error(`Worker returned ${resp.status}`);
-      let rawHtml = await resp.text();
-      // Strip UE instrumentation
-      rawHtml = rawHtml.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');
-      rawHtml = rawHtml.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
-      rawHtml = rawHtml.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width[^<]*|image-left|image-right|cta-button[^<]*|text-center|light|dark|hidden|teaser-card|teaser-overlay[^<]*|teaserStyle|ctastyle|style)\s*<\/div>/gi, '');
-      rawHtml = rawHtml.replace(/<div>\s*([a-z][a-zA-Z]{2,19})\s*<\/div>/g, (m, word) => /^[a-z]+[A-Z]/.test(word) ? '' : m);
-      rawHtml = rawHtml.replace(/<div>\s*<\/div>/g, '');
-      const bodyMatch = rawHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-      const bodyContent = bodyMatch ? bodyMatch[1] : rawHtml;
-      previewFrame.removeAttribute('src');
-      previewFrame.srcdoc = `<!DOCTYPE html><html>
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <base href="${cfg.publishUrl}/">
-  <link rel="stylesheet" href="${cfg.codeBase}/styles/styles.css">
-  <script>window.hlx = window.hlx || {}; window.hlx.codeBasePath = '${cfg.codeBase}';</script>
-  <script src="${cfg.codeBase}/scripts/aem.js" type="module"><\/script>
-  <script src="${cfg.codeBase}/scripts/scripts.js" type="module"><\/script>
-</head>
-<body>${bodyContent}</body></html>`;
-      showToast('Preview updated', 'success');
-    } catch (err) {
-      console.warn('[Preview] Refresh failed:', err.message);
-      // Fallback: reload Worker proxy URL
-      if (window.__JCR_PREVIEW_URL) {
-        previewFrame.removeAttribute('srcdoc');
-        previewFrame.src = window.__JCR_PREVIEW_URL + '&_t=' + Date.now();
-      }
-    }
+    const params = new URLSearchParams({
+      mode: 'full',
+      publish: cfg.publishUrl,
+      author: cfg.authorUrl,
+      path: cfg.jcrPath + '.html',
+      codeBase: cfg.codeBase,
+      _t: Date.now(),
+    });
+    previewFrame.removeAttribute('srcdoc');
+    previewFrame.src = `${cfg.workerBase}/preview?${params}`;
   };
 
   loadResources();
