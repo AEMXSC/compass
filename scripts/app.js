@@ -1476,6 +1476,80 @@ const TOOL_RENDERERS = {
         ${result.live_url ? `<a href="${result.live_url}" target="_blank" rel="noopener" class="page-card-link">Open live page →</a>` : ''}
       </div>`;
   },
+
+  /* ─ Analytics Agent: KPI Pulse Metric Cards ─ */
+  cja_kpi_pulse(result) {
+    const metrics = result.metrics || result.kpis || result.data;
+    if (!metrics) return null;
+    const period = result.period || result.timeframe || '';
+
+    // Handle both array and object formats from CJA MCP
+    const entries = Array.isArray(metrics)
+      ? metrics
+      : Object.entries(metrics).map(([k, v]) => ({ label: k, value: v?.value ?? v, change: v?.change, trend: v?.trend }));
+
+    if (!entries.length) return null;
+
+    const cards = entries.slice(0, 6).map((m) => {
+      const label = m.label || m.name || m.metric || '';
+      const value = m.value ?? m.total ?? '—';
+      const change = m.change || m.delta || m.percent_change;
+      const trend = m.trend || (change > 0 ? 'up' : change < 0 ? 'down' : '');
+      const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '';
+      const trendColor = trend === 'up' ? '#22c55e' : trend === 'down' ? '#ef4444' : 'var(--text-muted)';
+      const changeText = change != null ? `${change > 0 ? '+' : ''}${typeof change === 'number' ? change.toFixed(1) : change}%` : '';
+      return `<div class="metric-card">
+        <div class="metric-label">${escapeHtml(String(label))}</div>
+        <div class="metric-value">${escapeHtml(String(value))} ${changeText ? `<span style="font-size:12px;color:${trendColor}">${trendIcon} ${changeText}</span>` : ''}</div>
+        ${m.source ? `<div class="metric-source">${escapeHtml(String(m.source))}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    return `
+      <div class="result-card">
+        <div class="result-card-header">
+          <span class="result-card-icon">📊</span>
+          <span class="result-card-title">KPI Pulse${period ? ` — ${escapeHtml(String(period))}` : ''}</span>
+        </div>
+        <div class="metric-grid">${cards}</div>
+      </div>`;
+  },
+
+  /* ─ Analytics Agent: Executive Briefing ─ */
+  cja_executive_briefing(result) {
+    const metrics = result.metrics || result.kpis || result.highlights;
+    const summary = result.summary || result.narrative || result.briefing || '';
+    const drivers = result.drivers || result.top_drivers || [];
+
+    let metricsHtml = '';
+    if (metrics) {
+      const entries = Array.isArray(metrics)
+        ? metrics
+        : Object.entries(metrics).map(([k, v]) => ({ label: k, value: v?.value ?? v, change: v?.change }));
+      metricsHtml = `<div class="metric-grid">${entries.slice(0, 4).map((m) => {
+        const change = m.change || m.delta;
+        const changeColor = change > 0 ? '#22c55e' : change < 0 ? '#ef4444' : 'var(--text-muted)';
+        const changeText = change != null ? `${change > 0 ? '+' : ''}${typeof change === 'number' ? change.toFixed(1) : change}%` : '';
+        return `<div class="metric-card">
+          <div class="metric-label">${escapeHtml(String(m.label || m.name || ''))}</div>
+          <div class="metric-value">${escapeHtml(String(m.value ?? '—'))} ${changeText ? `<span style="font-size:12px;color:${changeColor}">${changeText}</span>` : ''}</div>
+        </div>`;
+      }).join('')}</div>`;
+    }
+
+    const driversHtml = drivers.length ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)"><strong>Top Drivers:</strong> ${drivers.map((d) => escapeHtml(String(d.name || d))).join(' · ')}</div>` : '';
+
+    return `
+      <div class="result-card">
+        <div class="result-card-header">
+          <span class="result-card-icon">📈</span>
+          <span class="result-card-title">Executive Briefing${result.period ? ` — ${escapeHtml(String(result.period))}` : ''}</span>
+        </div>
+        ${metricsHtml}
+        ${summary ? `<div style="margin-top:8px;font-size:13px;line-height:1.6;color:var(--text-primary)">${md(String(summary))}</div>` : ''}
+        ${driversHtml}
+      </div>`;
+  },
 };
 
 /* ── Contextual Suggestion Engine ── */
@@ -3893,7 +3967,34 @@ function matchSpecializedFlow(text) {
 /* ── Slash Commands — intercept /commands before AI ── */
 const SLASH_COMMANDS = {
   '/blocks': { description: 'List available blocks for this site', prompt: 'Show me all available blocks for this site with descriptions' },
-  '/mcp': { description: 'Show MCP connection status', action: () => { addMessage('assistant', md(`**MCP Connections**\n- AEM Unified: ${window.__AEM_ENVIRONMENTS ? '✅ Connected' : '⏳ Connecting...'}\n- Environments: ${(window.__AEM_ENVIRONMENTS || []).length} discovered\n- Auth: ${isSignedIn() ? '✅ Adobe IMS' : '❌ Not signed in'}`)); } },
+  '/mcp': { description: 'Show MCP connection status', action: () => {
+    const envs = window.__AEM_ENVIRONMENTS || [];
+    const connected = !!envs.length;
+    const auth = isSignedIn();
+    addRawHTML(`
+      ${buildAgentHeader('Adobe Agent')}
+        <div class="message-content">
+          <strong>MCP Connection Status</strong>
+          <div class="metric-grid">
+            <div class="metric-card">
+              <div class="metric-label">AEM Unified</div>
+              <div class="metric-value">${connected ? '✅ Connected' : '⏳ Connecting'}</div>
+              <div class="metric-source">mcp.adobeaemcloud.com</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Environments</div>
+              <div class="metric-value">${envs.length}</div>
+              <div class="metric-source">discovered via Discovery MCP</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Auth</div>
+              <div class="metric-value">${auth ? '✅ Adobe IMS' : '❌ Not signed in'}</div>
+              <div class="metric-source">aem-extension-builder</div>
+            </div>
+          </div>
+        </div>
+      </div>`);
+  } },
   '/sites': { description: 'List known AEM sites', prompt: 'List all known AEM sites I can connect to' },
   '/governance': { description: 'Run brand compliance check', prompt: 'Run a full governance check on the current page' },
   '/audit': { description: 'Run content audit', prompt: 'Audit this page for content quality, readability, and accessibility' },
