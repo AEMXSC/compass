@@ -1917,6 +1917,9 @@ async function handleRealChat(text, file) {
 
   const streamEl = addStreamMessage('Experience Agent');
 
+  // P3: Optimistic intent detection — parse streamed text for change intent
+  let intentShown = false;
+
   try {
     const rawResponse = await ai.streamChat(
       conversationHistory,
@@ -1924,6 +1927,23 @@ async function handleRealChat(text, file) {
       (chunk, full) => {
         streamEl.innerHTML = md(full);
         scrollChat();
+
+        // P3: Detect "I'll change X to Y" / "Changed to: Y" patterns in streamed text
+        // Flash the preview panel to signal an incoming change
+        if (!intentShown && full.length > 30) {
+          const changeMatch = full.match(/(?:chang(?:e|ed|ing)\s+(?:the\s+)?(?:headline|title|heading|hero|text|copy|cta|button)\s+(?:to|from)[\s:]+[""]([^""]+)[""]|Changed\s+to:\s*[""]?([^"""\n]+))/i);
+          if (changeMatch) {
+            intentShown = true;
+            const newValue = changeMatch[1] || changeMatch[2] || '';
+            if (newValue && previewFrame) {
+              // Flash preview border to signal incoming change
+              previewFrame.style.outline = '2px solid var(--accent)';
+              previewFrame.style.outlineOffset = '-2px';
+              setTimeout(() => { previewFrame.style.outline = ''; previewFrame.style.outlineOffset = ''; }, 3000);
+              showToast(`Preview updating: "${newValue.slice(0, 50)}${newValue.length > 50 ? '...' : ''}"`, 'info');
+            }
+          }
+        }
       },
       onToolCall,
       onToolResult,
@@ -3788,6 +3808,14 @@ async function connectCustomSite(input) {
   };
 
   loadResources();
+
+  // P4: Parallel pre-warming on site connect (non-blocking)
+  // Fire all warmup tasks concurrently — none blocks UI or each other
+  Promise.allSettled([
+    ensurePageContext(),                            // Pre-fetch page HTML into cache
+    isSignedIn() ? prewarmSessions() : null,        // Pre-warm MCP sessions
+    isSignedIn() ? prefetchAemEnvironments() : null, // Pre-discover AEM environments
+  ].filter(Boolean)).catch(() => { /* non-blocking */ });
 
   // Populate branch select — real branches from GitHub API
   const branchSelect = document.getElementById('branchSelect');
