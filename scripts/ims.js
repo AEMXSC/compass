@@ -236,66 +236,68 @@ function dispatchAuthEvent(signedIn) {
 function syncImsProfile() {
   if (!window.adobeIMS) return;
 
-  // Fetch profile and orgs in parallel
-  const profilePromise = window.adobeIMS.getProfile().catch(() => null);
-  const orgsPromise = window.adobeIMS.getOrganizations().catch(() => null);
-
-  Promise.all([profilePromise, orgsPromise])
-    .then(([p, orgs]) => {
+  window.adobeIMS.getProfile()
+    .then((p) => {
       if (p) {
         profile = buildAdobeProfile(p);
         localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
-        // Extract orgs from multiple sources (imslib API, profile PPC, token)
-        parseOrganizations(orgs, p);
       }
-      dispatchAuthEvent(true);
+      // Fetch orgs from IMS REST API (same pattern as da.live/nx)
+      return fetchOrgsFromIms();
     })
+    .then(() => dispatchAuthEvent(true))
     .catch(() => dispatchAuthEvent(true));
 }
 
-function parseOrganizations(orgs, profileData) {
-  // Strategy 1: imslib getOrganizations() (requires gnav/account_cluster.read scope)
-  if (Array.isArray(orgs) && orgs.length > 0) {
-    userOrgs = orgs.map((o) => ({
-      id: o.org || o.id || '',
-      name: o.org_name || o.name || o.org || '',
-      active: !!o.active,
-    }));
-    activeOrg = userOrgs.find((o) => o.active) || userOrgs[0] || null;
-    return;
-  }
+async function fetchOrgsFromIms() {
+  const token = getToken();
+  if (!token) return;
 
-  // Strategy 2: profile's projectedProductContext (available with our scopes)
-  const ppc = profileData?.projectedProductContext;
-  if (Array.isArray(ppc) && ppc.length > 0) {
-    const orgMap = new Map();
-    for (const entry of ppc) {
-      // PPC entries have nested prodCtx or flat structure
-      const ctx = entry.prodCtx || entry;
-      const id = ctx.ownerOrg || ctx.imsOrgId || '';
-      const name = ctx.ownerOrgName || ctx.orgName || id.split('@')[0] || '';
-      if (id && !orgMap.has(id)) orgMap.set(id, { id, name, active: false });
-    }
-    userOrgs = [...orgMap.values()];
-    if (userOrgs.length > 0) {
-      userOrgs[0].active = true;
-      activeOrg = userOrgs[0];
-    }
-    return;
-  }
-
-  // Strategy 3: decode the IMS access token (JWT contains org claim)
+  // Strategy 1: IMS organizations/v5 endpoint (da.live pattern)
   try {
-    const token = getToken();
-    if (token) {
+    const resp = await fetch(
+      `https://ims-na1.adobelogin.com/ims/organizations/v5?client_id=${IMS_CLIENT_ID}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (resp.ok) {
+      const orgs = await resp.json();
+      if (Array.isArray(orgs) && orgs.length > 0) {
+        userOrgs = orgs.map((o) => ({
+          id: o.orgRef?.ident || o.orgId || '',
+          name: o.orgName || o.name || '',
+          active: !!o.current,
+        }));
+        activeOrg = userOrgs.find((o) => o.active) || userOrgs[0] || null;
+        return;
+      }
+    }
+  } catch { /* endpoint not available for this scope */ }
+
+  // Strategy 2: imslib getOrganizations()
+  try {
+    const orgs = await window.adobeIMS.getOrganizations();
+    if (Array.isArray(orgs) && orgs.length > 0) {
+      userOrgs = orgs.map((o) => ({
+        id: o.org || o.id || '',
+        name: o.org_name || o.name || o.org || '',
+        active: !!o.active,
+      }));
+      activeOrg = userOrgs.find((o) => o.active) || userOrgs[0] || null;
+      return;
+    }
+  } catch { /* imslib method failed */ }
+
+  // Strategy 3: decode org from the IMS access token
+  try {
+    if (token && token.includes('.')) {
       const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      const orgId = payload.as || payload.iss || '';
+      const orgId = payload.as || '';
       if (orgId.includes('@AdobeOrg')) {
         userOrgs = [{ id: orgId, name: orgId.split('@')[0], active: true }];
         activeOrg = userOrgs[0];
       }
     }
-  } catch { /* token not JWT or not parseable */ }
+  } catch { /* token not decodable */ }
 }
 
 function buildAdobeProfile(p) {
