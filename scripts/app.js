@@ -231,7 +231,7 @@ const AGENT_ROLES = {
   'Data Insights Agent': 'Customer Analytics',
   'LLM Optimizer': 'AI Readiness',
   'Adobe Agent': 'AEM Cloud Service',
-  'Compass': 'AI Assistant',
+  'Compass': 'AI Navigator',
 };
 
 const AGENT_COLORS = {
