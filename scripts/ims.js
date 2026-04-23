@@ -238,32 +238,64 @@ function syncImsProfile() {
 
   // Fetch profile and orgs in parallel
   const profilePromise = window.adobeIMS.getProfile().catch(() => null);
-  const orgsPromise = window.adobeIMS.getOrganizations().catch(() => []);
+  const orgsPromise = window.adobeIMS.getOrganizations().catch(() => null);
 
   Promise.all([profilePromise, orgsPromise])
     .then(([p, orgs]) => {
       if (p) {
         profile = buildAdobeProfile(p);
         localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
+        // Extract orgs from multiple sources (imslib API, profile PPC, token)
+        parseOrganizations(orgs, p);
       }
-      parseOrganizations(orgs);
       dispatchAuthEvent(true);
     })
     .catch(() => dispatchAuthEvent(true));
 }
 
-function parseOrganizations(orgs) {
-  if (!Array.isArray(orgs) || orgs.length === 0) return;
+function parseOrganizations(orgs, profileData) {
+  // Strategy 1: imslib getOrganizations() (requires gnav/account_cluster.read scope)
+  if (Array.isArray(orgs) && orgs.length > 0) {
+    userOrgs = orgs.map((o) => ({
+      id: o.org || o.id || '',
+      name: o.org_name || o.name || o.org || '',
+      active: !!o.active,
+    }));
+    activeOrg = userOrgs.find((o) => o.active) || userOrgs[0] || null;
+    return;
+  }
 
-  userOrgs = orgs.map((o) => ({
-    id: o.org || o.id || '',
-    name: o.org_name || o.name || o.org || '',
-    active: !!o.active,
-  }));
+  // Strategy 2: profile's projectedProductContext (available with our scopes)
+  const ppc = profileData?.projectedProductContext;
+  if (Array.isArray(ppc) && ppc.length > 0) {
+    const orgMap = new Map();
+    for (const entry of ppc) {
+      // PPC entries have nested prodCtx or flat structure
+      const ctx = entry.prodCtx || entry;
+      const id = ctx.ownerOrg || ctx.imsOrgId || '';
+      const name = ctx.ownerOrgName || ctx.orgName || id.split('@')[0] || '';
+      if (id && !orgMap.has(id)) orgMap.set(id, { id, name, active: false });
+    }
+    userOrgs = [...orgMap.values()];
+    if (userOrgs.length > 0) {
+      userOrgs[0].active = true;
+      activeOrg = userOrgs[0];
+    }
+    return;
+  }
 
-  // imslib marks the active org
-  const current = userOrgs.find((o) => o.active);
-  activeOrg = current || userOrgs[0] || null;
+  // Strategy 3: decode the IMS access token (JWT contains org claim)
+  try {
+    const token = getToken();
+    if (token) {
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const orgId = payload.as || payload.iss || '';
+      if (orgId.includes('@AdobeOrg')) {
+        userOrgs = [{ id: orgId, name: orgId.split('@')[0], active: true }];
+        activeOrg = userOrgs[0];
+      }
+    }
+  } catch { /* token not JWT or not parseable */ }
 }
 
 function buildAdobeProfile(p) {
