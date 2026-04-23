@@ -186,14 +186,101 @@ function md(text) {
     .replace(/\n/g, '<br>');
 }
 
+/* ── Agent Identity System ── */
+const AGENT_ICONS = {
+  'Experience Production Agent': '📝',
+  'Governance Agent': '🛡',
+  'Governance Scanner': '🛡',
+  'Analytics Agent': '📊',
+  'Journey Agent': '🗺',
+  'Discovery Agent': '🔍',
+  'Content Advisor Agent': '♿',
+  'Content Optimization Agent': '✨',
+  'Workfront Agent': '📋',
+  'Target Agent': '🎯',
+  'Development Agent': '🔧',
+  'Acrobat Agent': '📄',
+  'Experimentation Agent': '🧪',
+  'Audience Agent': '👥',
+  'Data Insights Agent': '📈',
+  'LLM Optimizer': '🤖',
+  'Forms Agent': '📝',
+  'Admin API': '⚙',
+  'Site Management': '🌐',
+  'AEM Assets API': '🖼',
+  'Web Research': '🔗',
+  'Adobe Agent': '◆',
+  'Compass': '🧭',
+};
+
+const AGENT_ROLES = {
+  'Experience Production Agent': 'Content Author',
+  'Governance Agent': 'Brand Compliance',
+  'Governance Scanner': 'Brand Compliance',
+  'Analytics Agent': 'CJA Insights',
+  'Journey Agent': 'AJO Orchestration',
+  'Discovery Agent': 'Asset Discovery',
+  'Content Advisor Agent': 'Accessibility',
+  'Content Optimization Agent': 'Variant Generation',
+  'Workfront Agent': 'Project Management',
+  'Target Agent': 'Personalization',
+  'Development Agent': 'CI/CD Pipeline',
+  'Acrobat Agent': 'PDF Processing',
+  'Experimentation Agent': 'A/B Testing',
+  'Audience Agent': 'RT-CDP Segments',
+  'Data Insights Agent': 'Customer Analytics',
+  'LLM Optimizer': 'AI Readiness',
+  'Adobe Agent': 'AEM Cloud Service',
+  'Compass': 'AI Assistant',
+};
+
+const AGENT_COLORS = {
+  'Experience Production Agent': '#818cf8',
+  'Governance Agent': '#f59e0b',
+  'Governance Scanner': '#f59e0b',
+  'Analytics Agent': '#06b6d4',
+  'Journey Agent': '#8b5cf6',
+  'Discovery Agent': '#22c55e',
+  'Content Advisor Agent': '#ec4899',
+  'Workfront Agent': '#f97316',
+  'Target Agent': '#ef4444',
+  'Development Agent': '#14b8a6',
+  'Adobe Agent': '#e34850',
+  'Compass': '#818cf8',
+};
+
+function buildAgentHeader(agentName) {
+  if (!agentName) agentName = 'Compass';
+  const icon = AGENT_ICONS[agentName] || '◆';
+  const role = AGENT_ROLES[agentName] || '';
+  const color = AGENT_COLORS[agentName] || 'var(--accent-light, #818cf8)';
+  const isAdobe = ['Adobe Agent', 'Admin API', 'Site Management', 'AEM Assets API'].includes(agentName);
+  const isMcp = ['Analytics Agent', 'Journey Agent', 'Audience Agent', 'Target Agent', 'Data Insights Agent'].includes(agentName);
+
+  let tags = '';
+  if (isAdobe) tags += '<span class="agent-tag adobe">Adobe</span>';
+  if (isMcp) tags += '<span class="agent-tag mcp">MCP</span>';
+
+  return `<div class="agent-avatar">${icon}</div>
+    <div class="agent-body" style="border-left-color: ${color}">
+      <div class="agent-header">
+        <span class="agent-name" style="color: ${color}">${escapeHtml(agentName)}</span>
+        ${role ? `<span class="agent-role">${escapeHtml(role)}</span>` : ''}
+        ${tags}
+      </div>`;
+}
+
 /* ── Chat Primitives ── */
 function addMessage(type, html, agentBadge) {
   const msg = document.createElement('div');
   msg.classList.add('message', type);
-  let inner = '';
-  if (agentBadge) inner += `<div class="agent-badge">${agentBadge}</div>`;
-  inner += `<div class="message-content">${html}</div>`;
-  msg.innerHTML = inner;
+  if (type === 'assistant' && agentBadge) {
+    msg.innerHTML = `${buildAgentHeader(agentBadge)}<div class="message-content">${html}</div></div>`;
+  } else if (type === 'assistant') {
+    msg.innerHTML = `${buildAgentHeader('Compass')}<div class="message-content">${html}</div></div>`;
+  } else {
+    msg.innerHTML = `<div class="message-content">${html}</div>`;
+  }
   chatMessages.appendChild(msg);
   scrollChat();
   return msg;
@@ -211,27 +298,23 @@ function addRawHTML(html) {
 function addTyping() {
   const el = document.createElement('div');
   el.classList.add('message', 'assistant');
-  el.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+  el.innerHTML = `${buildAgentHeader('Compass')}<div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
   el.id = 'typingIndicator';
   chatMessages.appendChild(el);
   scrollChat();
-  // Toggle send button to stop mode
   if (window.__compassSetGenerating) window.__compassSetGenerating(true);
 }
 
 function removeTyping() {
   document.getElementById('typingIndicator')?.remove();
-  // Toggle send button back to send mode
   if (window.__compassSetGenerating) window.__compassSetGenerating(false);
 }
 
 function addStreamMessage(agentBadge) {
   const msg = document.createElement('div');
   msg.classList.add('message', 'assistant');
-  let inner = '';
-  if (agentBadge) inner += `<div class="agent-badge">${agentBadge}</div>`;
-  inner += '<div class="message-content stream-content"></div>';
-  msg.innerHTML = inner;
+  const name = agentBadge || 'Compass';
+  msg.innerHTML = `${buildAgentHeader(name)}<div class="message-content stream-content"></div></div>`;
   chatMessages.appendChild(msg);
   scrollChat();
   return msg.querySelector('.stream-content');

@@ -1363,6 +1363,71 @@ textarea:focus-visible,
   animation: msgIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.message.assistant {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 4px 0;
+}
+
+.message.assistant .agent-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-tertiary, #2a2a2e);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.message.assistant .agent-body {
+  flex: 1;
+  min-width: 0;
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+}
+
+.message.assistant .agent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.message.assistant .agent-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-light, #818cf8);
+}
+
+.message.assistant .agent-role {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.message.assistant .agent-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid;
+  line-height: 1.6;
+}
+
+.message.assistant .agent-tag.adobe { color: #e34850; border-color: color-mix(in srgb, #e34850 40%, transparent); background: color-mix(in srgb, #e34850 8%, transparent); }
+.message.assistant .agent-tag.mcp { color: var(--accent-light, #818cf8); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.message.assistant .agent-tag.da { color: #22c55e; border-color: color-mix(in srgb, #22c55e 40%, transparent); background: color-mix(in srgb, #22c55e 8%, transparent); }
+.message.assistant .agent-tag.time { color: var(--text-muted); border-color: var(--border); background: transparent; font-weight: 400; }
+
 @keyframes msgIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -1384,7 +1449,7 @@ textarea:focus-visible,
 .message.assistant .message-content {
   background: transparent;
   color: var(--text-primary);
-  padding: 4px 2px;
+  padding: 4px 0;
 }
 
 .message.user .message-content {
@@ -1396,6 +1461,39 @@ textarea:focus-visible,
   border-radius: 18px 18px 4px 18px;
   padding: 10px 16px;
   box-shadow: 0 1px 4px rgba(74, 92, 219, 0.2);
+}
+
+/* Structured metric cards (Summit-style) */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.metric-card {
+  background: var(--bg-primary, #1a1a1e);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.metric-card .metric-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.metric-card .metric-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.metric-card .metric-source {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 /* ─── Page Created Card (Claude.ai MCP style) ─── */
@@ -1497,29 +1595,9 @@ textarea:focus-visible,
   color: var(--accent);
 }
 
-/* Agent Badge */
+/* Agent Badge (legacy — kept for backward compat, hidden by new layout) */
 .message .agent-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-  padding: 0;
-  background: none;
-  border-radius: 0;
-}
-
-.message .agent-badge::before {
-  content: '';
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-  flex-shrink: 0;
+  display: none;
 }
 
 /* Typing Indicator */
