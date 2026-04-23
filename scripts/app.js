@@ -3714,7 +3714,7 @@ async function connectCustomSite(input) {
       path: jcrPath + '.html',
       codeBase,
     });
-    if (cacheBust) previewParams.set('_t', Date.now());
+    previewParams.set('_t', Date.now());
     const fullPreviewUrl = `${WORKER_BASE}/preview?${previewParams}`;
 
     // Load in iframe — Worker origin, no X-Frame-Options issue
