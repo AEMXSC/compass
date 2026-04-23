@@ -1853,54 +1853,16 @@ async function handleRealChat(text, file) {
         }, 1500);
       }
 
-      // Content saved — refresh preview immediately.
+      // Content saved — refresh preview.
       if (result._action === 'refresh_preview' && result._preview_path) {
         const path = result._preview_path;
-        const previewUrl = AEM_ORG.previewOrigin + path;
         activeResourcePath = path;
-        let optimisticDone = false;
+        showToast(`Page ${path} saved — refreshing preview...`, 'success');
 
-        // Step 1: Optimistic render — fetch fresh HTML from DA Admin API (instant)
-        if (previewFrame && isSignedIn() && da.getOrg()) {
-          try {
-            const htmlPath = (path === '/' ? '/index' : path) + '.html';
-            const freshHTML = await da.getPage(htmlPath);
-            if (typeof freshHTML === 'string' && freshHTML.length > 0) {
-              const base = AEM_ORG.previewOrigin;
-              previewFrame.removeAttribute('src');
-              previewFrame.srcdoc = `<!DOCTYPE html><html><head>
-                <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-                <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
-                <script src="${base}/scripts/aem.js" type="module"><\/script>
-                <script src="${base}/scripts/scripts.js" type="module"><\/script>
-              </head><body><header></header><main>${freshHTML}</main><footer></footer></body></html>`;
-              cachedPageHTML = freshHTML;
-              cachedPageUrl = previewUrl;
-              optimisticDone = true;
-              showToast(`Page ${path} saved — preview updated`, 'success');
-            }
-          } catch (e) {
-            console.warn('[Preview] Optimistic render failed:', e.message);
-          }
-        }
-
-        // Step 2: Force iframe reload — EDS CDN may take 2-5s to propagate
-        if (!optimisticDone && previewFrame) {
-          showToast(`Page ${path} saved — refreshing preview...`, 'info');
-        }
-        // First reload after preview API has time to propagate
-        setTimeout(() => {
-          if (previewFrame) {
-            previewFrame.removeAttribute('srcdoc');
-            previewFrame.src = previewUrl + (previewUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
-          }
-        }, optimisticDone ? 5000 : 2000);
-        // Second reload as safety net (CDN can be slow)
-        setTimeout(() => {
-          if (previewFrame && !previewFrame.srcdoc) {
-            previewFrame.src = previewUrl + (previewUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
-          }
-        }, 8000);
+        // Reload preview after CDN propagation (preview API was already triggered by edit_page_content)
+        setTimeout(() => navigateToPage(path), 2000);
+        // Safety net reload
+        setTimeout(() => navigateToPage(path), 7000);
       }
 
       // Auth required — no write happened, tell the user clearly
@@ -3110,7 +3072,12 @@ function navigateToPage(path) {
     });
   }
 
-  if (previewFrame) previewFrame.src = url;
+  if (previewFrame) {
+    // Cache-bust to ensure fresh content (EDS CDN may cache aggressively)
+    const bustUrl = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+    previewFrame.removeAttribute('srcdoc');
+    previewFrame.src = bustUrl;
+  }
   if (previewUrlText) previewUrlText.textContent = url.replace(/^https?:\/\//, '');
   if (previewDot) previewDot.classList.add('connected');
   updateBreadcrumb(path);
