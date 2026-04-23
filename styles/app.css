@@ -1700,6 +1700,18 @@ textarea:focus-visible,
   35% { opacity: 1; transform: translateY(-3px); }
 }
 
+.thinking-pulse {
+  display: inline-block;
+  font-size: 13px;
+  color: var(--text-muted);
+  animation: thinkPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes thinkPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
 /* ─── Input Area ─── */
 .input-area {
   padding: 12px 20px 16px;

@@ -1884,15 +1884,23 @@ async function handleRealChat(text, file) {
           }
         }
 
-        // Step 2: Always force CDN reload after delay (catches cases where optimistic didn't fire)
-        // Also swaps from srcdoc to real CDN URL once propagation is done.
-        const reloadDelay = optimisticDone ? 5000 : 500;
+        // Step 2: Force iframe reload — EDS CDN may take 2-5s to propagate
+        if (!optimisticDone && previewFrame) {
+          showToast(`Page ${path} saved — refreshing preview...`, 'info');
+        }
+        // First reload after preview API has time to propagate
         setTimeout(() => {
           if (previewFrame) {
             previewFrame.removeAttribute('srcdoc');
             previewFrame.src = previewUrl + (previewUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
           }
-        }, reloadDelay);
+        }, optimisticDone ? 5000 : 2000);
+        // Second reload as safety net (CDN can be slow)
+        setTimeout(() => {
+          if (previewFrame && !previewFrame.srcdoc) {
+            previewFrame.src = previewUrl + (previewUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
+          }
+        }, 8000);
       }
 
       // Auth required — no write happened, tell the user clearly
@@ -1923,14 +1931,22 @@ async function handleRealChat(text, file) {
 
   const streamEl = addStreamMessage('Experience Agent');
 
+  // Show thinking indicator immediately so user knows something is happening
+  streamEl.innerHTML = '<span class="thinking-pulse">Thinking...</span>';
+
   // P3: Optimistic intent detection — parse streamed text for change intent
   let intentShown = false;
+  let firstChunkReceived = false;
 
   try {
     const rawResponse = await ai.streamChat(
       conversationHistory,
       ctx,
       (chunk, full) => {
+        if (!firstChunkReceived) {
+          firstChunkReceived = true;
+          streamEl.innerHTML = '';
+        }
         streamEl.innerHTML = md(full);
         scrollChat();
 
