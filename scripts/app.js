@@ -3639,42 +3639,142 @@ async function connectCustomSite(input) {
   // Update contextual prompt chips for the connected site
   if (typeof updateContextChips === 'function') updateContextChips();
 
-  // For JCR sites where iframe can't load (X-Frame-Options), fetch rendered HTML
-  // from the publish tier and render as srcdoc with <base> pointing to publish.
+  // For JCR/xwalk sites: fetch HTML via Worker proxy, render in srcdoc with EDS scripts
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
     const contentPathMatch = input.match(/(\/content\/[^\s?#]*)/);
     const jcrPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '/content';
     activeResourcePath = jcrPath;
 
-    // Update preview URL bar
     if (previewUrlText) previewUrlText.textContent = `${parsed.aemHost}${jcrPath}`;
     if (previewDot) previewDot.classList.add('connected');
 
     // Show loading state
     if (previewFrame) {
       previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
-        <div style="text-align:center"><p>Loading JCR page preview...</p><p style="font-size:12px">${jcrPath}</p></div></body></html>`;
+        <div style="text-align:center"><p>Loading preview...</p><p style="font-size:12px;opacity:.6">${jcrPath}</p></div></body></html>`;
     }
 
-    // Use CF Worker /preview proxy — fetches HTML from publish, inlines CSS from author,
-    // strips scripts/metadata, returns self-contained HTML. No CORS, no X-Frame-Options issues.
     const WORKER_BASE = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
     const authorHost = parsed.aemHost;
     const publishUrl = `https://${authorHost.replace('author-', 'publish-')}`;
     const authorUrl = `https://${authorHost}`;
-    const previewUrl = `${WORKER_BASE}/preview?publish=${encodeURIComponent(publishUrl)}&author=${encodeURIComponent(authorUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`;
+    const codeBase = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
 
-    if (previewFrame) {
-      previewFrame.removeAttribute('srcdoc');
-      previewFrame.src = previewUrl;
-      console.debug(`[EW] JCR preview via Worker proxy: ${previewUrl}`);
+    // Store preview config for re-fetching after edits
+    window.__JCR_PREVIEW_CONFIG = { workerBase: WORKER_BASE, publishUrl, authorUrl, jcrPath, codeBase, org, repo, branch };
+
+    // Try xwalk srcdoc preview: fetch raw HTML + render with EDS scripts from code repo
+    const token = getToken();
+    const fetchHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+    const rawUrl = `${WORKER_BASE}/preview?mode=raw&publish=${encodeURIComponent(publishUrl)}&author=${encodeURIComponent(authorUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`;
+
+    try {
+      const resp = await fetch(rawUrl, { headers: fetchHeaders });
+      if (resp.ok) {
+        let rawHtml = await resp.text();
+        const authLevel = resp.headers.get('X-Preview-Auth') || 'public';
+        const htmlSource = resp.headers.get('X-Preview-Source') || 'publish';
+
+        // Strip UE instrumentation client-side (raw mode doesn't strip)
+        rawHtml = rawHtml.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');
+        rawHtml = rawHtml.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
+        rawHtml = rawHtml.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width[^<]*|image-left|image-right|cta-button[^<]*|text-center|light|dark|hidden|teaser-card|teaser-overlay[^<]*|teaserStyle|ctastyle|style)\s*<\/div>/gi, '');
+        rawHtml = rawHtml.replace(/<div>\s*(title|videoReference|imageRef|buttonText|video|bg-default|bg-dark|bg-light|description|altText|linkUrl|linkText|eyebrow|subtitle|fragmentRef|teaserStyle|displayStyle|herolayout|sectionStyle)\s*<\/div>/gi, '');
+        rawHtml = rawHtml.replace(/<div>\s*([a-z][a-zA-Z]{2,19})\s*<\/div>/g, (m, word) => /^[a-z]+[A-Z]/.test(word) ? '' : m);
+        rawHtml = rawHtml.replace(/<div>\s*<\/div>/g, '');
+
+        // Extract <body> content (between <body> and </body>)
+        const bodyMatch = rawHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+        const bodyContent = bodyMatch ? bodyMatch[1] : rawHtml;
+
+        // Build srcdoc with EDS scripts from code repo for pixel-perfect decoration
+        if (previewFrame) {
+          previewFrame.removeAttribute('src');
+          previewFrame.srcdoc = `<!DOCTYPE html><html>
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="${publishUrl}/">
+  <link rel="stylesheet" href="${codeBase}/styles/styles.css">
+  <script>window.hlx = window.hlx || {}; window.hlx.codeBasePath = '${codeBase}';</script>
+  <script src="${codeBase}/scripts/aem.js" type="module"><\/script>
+  <script src="${codeBase}/scripts/scripts.js" type="module"><\/script>
+</head>
+<body>
+  ${bodyContent}
+</body></html>`;
+        }
+
+        // Update preview quality indicator
+        const qualityLabel = htmlSource === 'author' ? 'Author preview' : 'Publish preview';
+        const authLabel = authLevel === 'user' ? 'IMS' : authLevel === 's2s' ? 'S2S' : '';
+        if (previewUrlText) previewUrlText.textContent = `${parsed.aemHost}${jcrPath} · ${qualityLabel}${authLabel ? ` (${authLabel})` : ''}`;
+
+        // Store for auto-refresh after writes
+        window.__JCR_PREVIEW_URL = rawUrl;
+      } else {
+        // Fallback: standard Worker preview (inlined CSS, no JS decoration)
+        const fallbackUrl = `${WORKER_BASE}/preview?publish=${encodeURIComponent(publishUrl)}&author=${encodeURIComponent(authorUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`;
+        if (previewFrame) {
+          previewFrame.removeAttribute('srcdoc');
+          previewFrame.src = fallbackUrl;
+        }
+        window.__JCR_PREVIEW_URL = fallbackUrl;
+      }
+    } catch {
+      // Network error — use standard Worker preview
+      const fallbackUrl = `${WORKER_BASE}/preview?publish=${encodeURIComponent(publishUrl)}&author=${encodeURIComponent(authorUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`;
+      if (previewFrame) {
+        previewFrame.removeAttribute('srcdoc');
+        previewFrame.src = fallbackUrl;
+      }
+      window.__JCR_PREVIEW_URL = fallbackUrl;
     }
-
-    // Store the preview base URL for auto-refresh after writes
-    window.__JCR_PREVIEW_URL = previewUrl;
   } else {
     navigateToPage('/');
   }
+
+  // Global function for AI tool handlers to trigger xwalk preview refresh after edits
+  window.__refreshJcrPreview = async () => {
+    const cfg = window.__JCR_PREVIEW_CONFIG;
+    if (!cfg || !previewFrame) return;
+    showToast('Updating preview...', 'info');
+    try {
+      const token = getToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const rawUrl = `${cfg.workerBase}/preview?mode=raw&publish=${encodeURIComponent(cfg.publishUrl)}&author=${encodeURIComponent(cfg.authorUrl)}&path=${encodeURIComponent(cfg.jcrPath + '.html')}&_t=${Date.now()}`;
+      const resp = await fetch(rawUrl, { headers });
+      if (!resp.ok) throw new Error(`Worker returned ${resp.status}`);
+      let rawHtml = await resp.text();
+      // Strip UE instrumentation
+      rawHtml = rawHtml.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');
+      rawHtml = rawHtml.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
+      rawHtml = rawHtml.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width[^<]*|image-left|image-right|cta-button[^<]*|text-center|light|dark|hidden|teaser-card|teaser-overlay[^<]*|teaserStyle|ctastyle|style)\s*<\/div>/gi, '');
+      rawHtml = rawHtml.replace(/<div>\s*([a-z][a-zA-Z]{2,19})\s*<\/div>/g, (m, word) => /^[a-z]+[A-Z]/.test(word) ? '' : m);
+      rawHtml = rawHtml.replace(/<div>\s*<\/div>/g, '');
+      const bodyMatch = rawHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+      const bodyContent = bodyMatch ? bodyMatch[1] : rawHtml;
+      previewFrame.removeAttribute('src');
+      previewFrame.srcdoc = `<!DOCTYPE html><html>
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="${cfg.publishUrl}/">
+  <link rel="stylesheet" href="${cfg.codeBase}/styles/styles.css">
+  <script>window.hlx = window.hlx || {}; window.hlx.codeBasePath = '${cfg.codeBase}';</script>
+  <script src="${cfg.codeBase}/scripts/aem.js" type="module"><\/script>
+  <script src="${cfg.codeBase}/scripts/scripts.js" type="module"><\/script>
+</head>
+<body>${bodyContent}</body></html>`;
+      showToast('Preview updated', 'success');
+    } catch (err) {
+      console.warn('[Preview] Refresh failed:', err.message);
+      // Fallback: reload Worker proxy URL
+      if (window.__JCR_PREVIEW_URL) {
+        previewFrame.removeAttribute('srcdoc');
+        previewFrame.src = window.__JCR_PREVIEW_URL + '&_t=' + Date.now();
+      }
+    }
+  };
+
   loadResources();
 
   // Populate branch select — real branches from GitHub API

@@ -370,7 +370,19 @@ async function handleMcpProxy(request) {
 }
 
 /* ─── GET /preview — Full-page proxy for AEM JCR/xwalk content ─── */
-/* Fetches HTML from publish (public), CSS from author (S2S auth), returns self-contained page */
+/*
+ * Fetches page HTML and optionally inlines CSS. Supports three auth tiers:
+ *   1. User IMS token (passed via Authorization header from browser)
+ *   2. S2S cached token (service account — for author CSS)
+ *   3. Public publish tier (no auth — fallback)
+ *
+ * Query params:
+ *   publish  - Publish tier base URL (required)
+ *   author   - Author tier base URL (optional, derived from publish if omitted)
+ *   path     - JCR content path with .html (required)
+ *   mode     - "raw" returns HTML without stripping scripts/UE attributes (for client-side EDS decoration)
+ *   _t       - Cache-bust timestamp (disables caching)
+ */
 
 async function handlePreview(request) {
   const url = new URL(request.url);
@@ -378,12 +390,13 @@ async function handlePreview(request) {
   const authorUrl = url.searchParams.get('author');
   const pagePath = url.searchParams.get('path');
   const cacheBust = url.searchParams.get('_t');
+  const rawMode = url.searchParams.get('mode') === 'raw';
 
   if (!publishUrl || !pagePath) {
     return new Response('Missing ?publish= and ?path= params', { status: 400 });
   }
 
-  // Validate hosts — only allow adobeaemcloud.com (prevents S2S token leak to arbitrary hosts)
+  // Validate hosts — only allow adobeaemcloud.com
   try {
     const pubHost = new URL(publishUrl).hostname;
     if (!pubHost.endsWith('.adobeaemcloud.com')) {
@@ -399,120 +412,151 @@ async function handlePreview(request) {
     return new Response('Invalid URL', { status: 400 });
   }
 
-  try {
-    // Step 1: Fetch HTML from publish tier (public, no auth)
-    const pageUrl = `${publishUrl}${pagePath}`;
-    const htmlResp = await fetch(pageUrl);
-    if (!htmlResp.ok) {
-      return new Response(`Publish tier returned ${htmlResp.status} for ${pageUrl}`, { status: 502 });
-    }
-    let html = await htmlResp.text();
+  // Resolve auth token: prefer user token from browser, fall back to S2S
+  const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '') || null;
+  let authToken = userToken;
+  let authLevel = userToken ? 'user' : 'none';
 
-    // Step 2: Ensure we have an S2S token for author CSS fetch
+  // If no user token, try S2S
+  if (!authToken) {
     const now = Date.now();
     if (!cachedToken || tokenExpiry <= now + 300000) {
-      const body = new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: IMS_CLIENT_ID,
-        client_secret: IMS_CLIENT_SECRET,
-        scope: IMS_SCOPE,
-      });
-      const imsResp = await fetch(IMS_TOKEN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body,
-      });
-      if (imsResp.ok) {
-        const data = await imsResp.json();
-        if (data.access_token) {
-          cachedToken = data.access_token;
-          tokenExpiry = now + (data.expires_in || 86400000);
+      try {
+        const body = new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: IMS_CLIENT_ID,
+          client_secret: IMS_CLIENT_SECRET,
+          scope: IMS_SCOPE,
+        });
+        const imsResp = await fetch(IMS_TOKEN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        });
+        if (imsResp.ok) {
+          const data = await imsResp.json();
+          if (data.access_token) {
+            cachedToken = data.access_token;
+            // Adobe IMS returns expires_in in milliseconds (not seconds per OAuth2 spec)
+            tokenExpiry = now + (data.expires_in || 86400000);
+          }
         }
-      }
+      } catch { /* S2S unavailable */ }
+    }
+    if (cachedToken) {
+      authToken = cachedToken;
+      authLevel = 's2s';
+    }
+  }
+
+  const authorBase = authorUrl || publishUrl.replace('publish-', 'author-');
+
+  try {
+    // Step 1: Fetch HTML — try author first (if token available), fall back to publish
+    let html = null;
+    let htmlSource = 'publish';
+    const pageUrl = `${publishUrl}${pagePath}`;
+    const authorPageUrl = `${authorBase}${pagePath}`;
+
+    if (authToken) {
+      try {
+        const resp = await fetch(authorPageUrl, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        if (resp.ok) {
+          html = await resp.text();
+          htmlSource = 'author';
+        }
+      } catch { /* author fetch failed — fall back to publish */ }
     }
 
-    // Step 3: Inline CSS — try publish first (clientlibs are public), then author (.resource/ needs auth)
-    const authorBase = authorUrl || publishUrl.replace('publish-', 'author-');
-    let cssInlined = false;
-    // Match <link> with rel="stylesheet" in either attribute order
+    if (!html) {
+      const resp = await fetch(pageUrl);
+      if (!resp.ok) {
+        return new Response(`Publish tier returned ${resp.status} for ${pageUrl}`, { status: 502 });
+      }
+      html = await resp.text();
+      htmlSource = 'publish';
+    }
+
+    // Raw mode: return HTML with minimal processing (for client-side EDS decoration)
+    if (rawMode) {
+      // Only add <base> for asset resolution and strip empty whitespace
+      html = html.replace(/<head>/, `<head><base href="${publishUrl}/">`);
+      html = html.replace(/\n{3,}/g, '\n\n');
+
+      const cacheHeader = cacheBust ? 'no-store, no-cache' : 'public, max-age=60';
+      const origin = request.headers.get('Origin') || '';
+      return new Response(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': cacheHeader,
+          'X-Preview-Auth': authLevel,
+          'X-Preview-Source': htmlSource,
+          'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+          'Access-Control-Expose-Headers': 'X-Preview-Auth, X-Preview-Source',
+        },
+      });
+    }
+
+    // Standard mode: inline CSS, strip scripts/UE attributes, inject fallback CSS
+
+    // Step 2: Inline CSS — try publish first, then author with token
     const cssLinks = [...html.matchAll(/<link[^>]*(?:rel=["']stylesheet["'][^>]*href=["']([^"']+)["']|href=["']([^"']+)["'][^>]*rel=["']stylesheet["'])[^>]*\/?>/gi)];
     for (const match of cssLinks) {
       const hrefVal = match[1] || match[2];
       if (!hrefVal) continue;
 
-      // Try publish first (clientlibs at /etc.clientlibs/ are publicly accessible)
       const publishCssUrl = hrefVal.startsWith('http') ? hrefVal : `${publishUrl}${hrefVal}`;
       const authorCssUrl = hrefVal.startsWith('http') ? hrefVal : `${authorBase}${hrefVal}`;
 
       let css = null;
-      // Attempt 1: Fetch from publish tier (no auth — works for /etc.clientlibs/)
+      // Attempt 1: Publish tier (no auth — /etc.clientlibs/ are public)
       try {
         const resp = await fetch(publishCssUrl);
-        if (resp.ok) {
-          css = await resp.text();
-          console.debug(`[Preview] CSS from publish: ${hrefVal} (${css.length} chars)`);
-        }
+        if (resp.ok) css = await resp.text();
       } catch { /* publish failed */ }
 
-      // Attempt 2: Fetch from author tier with S2S token (for .resource/ paths)
-      if (!css && cachedToken) {
+      // Attempt 2: Author tier with token (for .resource/ paths)
+      if (!css && authToken) {
         try {
           const resp = await fetch(authorCssUrl, {
-            headers: { Authorization: `Bearer ${cachedToken}` },
+            headers: { Authorization: `Bearer ${authToken}` },
           });
-          if (resp.ok) {
-            css = await resp.text();
-            console.debug(`[Preview] CSS from author: ${hrefVal} (${css.length} chars)`);
-          } else {
-            console.debug(`[Preview] Author CSS ${resp.status}: ${authorCssUrl}`);
-          }
+          if (resp.ok) css = await resp.text();
         } catch { /* author failed */ }
       }
 
       if (css) {
-        // Fix relative url() references to point to publish (for images, fonts)
         css = css.replace(/url\(\s*["']?\//g, `url("${publishUrl}/`);
         html = html.replace(match[0], `<style>/* ${hrefVal.split('/').pop()} */\n${css}</style>`);
-        cssInlined = true;
       } else {
-        console.debug(`[Preview] CSS unavailable: ${hrefVal} — removing link, fallback will apply`);
         html = html.replace(match[0], '');
       }
     }
 
-    // Step 4: Strip <script> tags (won't execute properly out of context)
+    // Step 3: Strip scripts
     html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 
-    // Step 5: Strip xwalk UE instrumentation and section-metadata
-    // Remove data-aue-* attribute divs with raw property values
+    // Step 4: Strip xwalk UE instrumentation
     html = html.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');
-    // Remove section-metadata containers
     html = html.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
-    // Remove known style/layout property values
     html = html.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width|sec-full-width-background|image-left|image-right|cta-button[^<]*|text-center|light|dark|hidden|teaser-card|teaser-overlay|image-top|image-bottom|teaserStyle|ctastyle|style)\s*<\/div>/gi, '');
-    // Remove xwalk component field-name divs (camelCase/kebab-case property labels like "title", "videoReference", "imageRef", "bg-default")
-    // These are authoring model field names that show as raw text without JS decoration
     html = html.replace(/<div>\s*(title|videoReference|imageRef|buttonText|video|bg-default|bg-dark|bg-light|description|altText|linkUrl|linkText|eyebrow|subtitle|fragmentRef|teaserStyle|displayStyle|herolayout|sectionStyle)\s*<\/div>/gi, '');
-    // Generic catch-all: any div containing ONLY a single camelCase word (no spaces, no tags, 3-20 chars)
-    // This catches field names we didn't list explicitly
-    html = html.replace(/<div>\s*([a-z][a-zA-Z]{2,19})\s*<\/div>/g, (match, word) => {
-      // Only strip if it looks like a property name (camelCase or known pattern)
+    html = html.replace(/<div>\s*([a-z][a-zA-Z]{2,19})\s*<\/div>/g, (m, word) => {
       if (/^[a-z]+[A-Z]/.test(word) || /^(bg|sec|cta)-/.test(word)) return '';
-      return match; // Keep normal content like "Hello" or "Adventure"
+      return m;
     });
-    // Strip empty separator divs
     html = html.replace(/<div[^>]*class="[^"]*separator[^"]*"[^>]*>\s*<\/div>/gi, '<hr>');
-    // Strip divs that contain ONLY whitespace (leftover from stripped content)
     html = html.replace(/<div>\s*<\/div>/g, '');
-    // Clean up excessive blank lines from stripping
     html = html.replace(/\n{3,}/g, '\n\n');
 
-    // Step 6: Add <base> for images and relative links (publish tier serves these publicly)
+    // Step 5: Add <base> for images and relative links
     html = html.replace(/<head>/, `<head><base href="${publishUrl}/">`);
 
-    // Step 7: Comprehensive AEM/EDS fallback CSS (always inject — covers xwalk block types)
+    // Step 6: Inject fallback CSS
     const aemFallbackCss = `<style>
-/* Compass Preview — AEM Fallback Styles */
 :root{--brand:#1473e6;--bg:#fff;--text:#2c2c2c;--text-light:#666;--font:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;--max-w:1200px;--gap:2rem;--radius:8px}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:var(--font);color:var(--text);background:var(--bg);line-height:1.6}
@@ -521,67 +565,41 @@ a{color:var(--brand);text-decoration:none} a:hover{text-decoration:underline}
 h1{font-size:2.5rem;line-height:1.15;margin-bottom:.5rem}
 h2{font-size:2rem;line-height:1.2;margin-bottom:.5rem}
 h3{font-size:1.5rem;line-height:1.3;margin-bottom:.5rem}
-h4,h5,h6{font-size:1.1rem;margin-bottom:.25rem}
 p{margin-bottom:.75rem}
 hr{border:none;border-top:1px solid #e0e0e0;margin:2rem 0}
-
-/* Layout */
 main{max-width:var(--max-w);margin:0 auto;padding:0 var(--gap)}
 header,nav{padding:1rem var(--gap);background:#f5f5f5;display:flex;align-items:center;gap:1rem}
 footer{padding:2rem var(--gap);background:#1a1a1a;color:#ccc;font-size:.875rem}
-footer a{color:#aaa}
-
-/* Hero */
 .hero{position:relative;min-height:400px;display:flex;align-items:center;padding:3rem var(--gap);overflow:hidden}
 .hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1}
 .hero h1,.hero h2,.hero p{position:relative;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.5)}
 .hero h1{font-size:3rem}
-
-/* Cards */
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--gap);padding:var(--gap) 0}
 .cards>div{border:1px solid #e0e0e0;border-radius:var(--radius);overflow:hidden;background:#fff}
 .cards>div>div:last-child{padding:1rem}
-
-/* Columns */
 .columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--gap);padding:var(--gap) 0;align-items:center}
-
-/* Carousel */
 .carousel{overflow-x:auto;display:flex;gap:1rem;scroll-snap-type:x mandatory;padding:var(--gap) 0}
 .carousel>div{flex:0 0 80%;scroll-snap-align:start;border-radius:var(--radius);overflow:hidden}
-
-/* Teaser */
 .teaser{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap);padding:var(--gap) 0;align-items:center}
-
-/* Content Fragment */
-.content-fragment{padding:var(--gap);background:#f9f9f9;border-radius:var(--radius);margin:var(--gap) 0}
-
-/* Video */
 .video{position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:var(--radius)}
 .video iframe,.video video{position:absolute;top:0;left:0;width:100%;height:100%}
-
-/* Dynamic Media */
-.dynamicmedia-image img,.dynamicmedia-template img{width:100%;border-radius:var(--radius)}
-
-/* CTA buttons */
-a[href]:not([href="#"]){display:inline-block;padding:.5rem 1.5rem;background:var(--brand);color:#fff;border-radius:var(--radius);font-weight:600;text-decoration:none;margin:.25rem .25rem .25rem 0}
-
-/* Section spacing */
 main>div{padding:var(--gap) 0}
 main>div+div{border-top:1px solid #f0f0f0}
 </style>`;
     html = html.replace(/<head>/, `<head>${aemFallbackCss}`);
 
-    // Cache: 5min default, no-cache if _t= param present (post-write refresh)
-    const cacheHeader = cacheBust
-      ? 'no-store, no-cache, must-revalidate'
-      : 'public, max-age=300';
+    const cacheHeader = cacheBust ? 'no-store, no-cache, must-revalidate' : 'public, max-age=300';
+    const origin = request.headers.get('Origin') || '';
 
     return new Response(html, {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': cacheHeader,
-        'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(request.headers.get('Origin') || '') ? request.headers.get('Origin') : ALLOWED_ORIGINS[0],
+        'X-Preview-Auth': authLevel,
+        'X-Preview-Source': htmlSource,
+        'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+        'Access-Control-Expose-Headers': 'X-Preview-Auth, X-Preview-Source',
       },
     });
   } catch (err) {

@@ -4149,7 +4149,9 @@ async function executeTool(name, input) {
             const frame = document.querySelector('.preview-frame');
             if (frame) {
               // JCR preview via Worker proxy
-              if (window.__JCR_PREVIEW_URL) {
+              if (window.__JCR_PREVIEW_CONFIG) {
+                window.__refreshJcrPreview?.();
+              } else if (window.__JCR_PREVIEW_URL) {
                 frame.src = window.__JCR_PREVIEW_URL + '&_t=' + Date.now();
               }
               // DA/EDS preview via .aem.page iframe
