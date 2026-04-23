@@ -13,7 +13,7 @@
 // Different query strings (e.g., './da-client.js' vs './da-client.js?v=57') create
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile } from './ims.js';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs } from './ims.js';
 import * as ai from './ai.js';
 import { TOOL_AGENT_MAP } from './ai.js';
 import * as da from './da-client.js';
@@ -343,6 +343,15 @@ function updateAuthUI() {
       if (userAvatar) userAvatar.textContent = initials;
       if (userName) userName.textContent = profile.displayName;
       if (userEmail) userEmail.textContent = profile.email || '';
+      // Show active org
+      const org = getActiveOrg();
+      const orgEl = document.getElementById('userOrg');
+      if (orgEl && org) {
+        orgEl.textContent = org.name;
+        orgEl.style.display = '';
+      } else if (orgEl) {
+        orgEl.style.display = 'none';
+      }
     } else if (signedIn && getAuthMethod() === 'user') {
       // Signed in with user-level OAuth — show avatar but keep Sign In for menu
       authBtn.textContent = '';
@@ -3623,6 +3632,24 @@ async function connectCustomSite(input) {
   customSiteConnected = true;
   window.__EW_ORG = AEM_ORG;
 
+  // Org mismatch check: warn before agents waste time on 403s
+  if (isSignedIn() && parsed.jcr) {
+    const activeOrg = getActiveOrg();
+    if (activeOrg) {
+      // Check known org mappings for this AEM host
+      const KNOWN_ORG_MAP = {
+        'author-p153659-e1614585.adobeaemcloud.com': { id: '708E423B67F3C2050A495C27@AdobeOrg', name: 'AEM XSC Showcase' },
+      };
+      const expected = KNOWN_ORG_MAP[parsed.aemHost];
+      if (expected && activeOrg.id && !activeOrg.id.includes(expected.id.split('@')[0])) {
+        showToast(`Signed in to "${activeOrg.name}" but this site requires "${expected.name}". Switch org to edit.`, 'warn');
+        window.__ORG_MISMATCH = true;
+      } else {
+        window.__ORG_MISMATCH = false;
+      }
+    }
+  }
+
   // If parsed from a JCR/author URL, set the AEM host immediately (skip fstab detection)
   if (parsed.aemHost) {
     window.__EW_AEM_HOST = `https://${parsed.aemHost}`;
@@ -4551,6 +4578,35 @@ document.getElementById('userSignOutBtn')?.addEventListener('click', () => {
   if (menu) menu.classList.remove('visible');
   signOut();
   updateAuthUI();
+});
+
+// Org switcher: toggle org list
+document.getElementById('userOrgSwitchBtn')?.addEventListener('click', () => {
+  const listEl = document.getElementById('userOrgList');
+  if (!listEl) return;
+  if (listEl.style.display === 'none') {
+    const orgs = getUserOrgs();
+    const active = getActiveOrg();
+    listEl.innerHTML = orgs.length > 0
+      ? orgs.map((o) => `<button data-org-id="${escapeHtml(o.id)}" class="${o.id === active?.id ? 'active' : ''}">${escapeHtml(o.name)}</button>`).join('')
+      : '<div style="padding:8px;font-size:11px;color:var(--text-muted)">No organizations available</div>';
+    listEl.style.display = '';
+    listEl.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        // Re-sign-in with target org — imslib supports this via signIn()
+        // For now: sign out and sign back in (user selects org at IMS login)
+        listEl.style.display = 'none';
+        const menu = document.getElementById('userMenu');
+        if (menu) menu.classList.remove('visible');
+        showToast(`Switching org... Sign in again and select "${btn.textContent}"`, 'info');
+        signOut();
+        updateAuthUI();
+        setTimeout(() => signIn(), 500);
+      });
+    });
+  } else {
+    listEl.style.display = 'none';
+  }
 });
 // Close user menu when clicking outside
 document.addEventListener('click', (e) => {

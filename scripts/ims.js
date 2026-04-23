@@ -32,6 +32,8 @@ const STORAGE_KEYS = Object.freeze({
 let profile = null;
 let imsReady = false;
 let authMethod = localStorage.getItem(STORAGE_KEYS.METHOD) || 'none';
+let activeOrg = null;   // { id, name, type }
+let userOrgs = [];       // [{ id, name, type }, ...]
 
 /* ─── Public API: Token access ─── */
 
@@ -55,6 +57,9 @@ export function getProfile() {
   }
   return profile;
 }
+
+export function getActiveOrg() { return activeOrg; }
+export function getUserOrgs() { return userOrgs; }
 
 /* ─── Public API: Sign in (imslib redirect — no popup) ─── */
 
@@ -235,10 +240,31 @@ function syncImsProfile() {
       if (p) {
         profile = buildAdobeProfile(p);
         localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
+        extractOrgs(p);
       }
       dispatchAuthEvent(true);
     })
     .catch(() => dispatchAuthEvent(true));
+}
+
+function extractOrgs(p) {
+  // projectedProductContext contains org entitlements
+  const ppc = p.projectedProductContext || p.pac || [];
+  const orgMap = new Map();
+  for (const entry of ppc) {
+    const id = entry.prodCtx?.ownerOrg || entry.ownerOrg || '';
+    const name = entry.prodCtx?.ownerOrgName || entry.ownerOrgName || id;
+    if (id && !orgMap.has(id)) orgMap.set(id, { id, name, type: entry.prodCtx?.serviceCode || '' });
+  }
+  userOrgs = [...orgMap.values()];
+
+  // Active org: use ownerOrg from profile, or first org in list
+  const ownOrg = p.ownerOrg || p.countryCode;
+  if (ownOrg && orgMap.has(ownOrg)) {
+    activeOrg = orgMap.get(ownOrg);
+  } else if (userOrgs.length > 0) {
+    activeOrg = userOrgs[0];
+  }
 }
 
 function buildAdobeProfile(p) {
