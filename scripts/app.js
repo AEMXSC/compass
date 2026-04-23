@@ -274,10 +274,10 @@ function buildAgentHeader(agentName) {
 function addMessage(type, html, agentBadge) {
   const msg = document.createElement('div');
   msg.classList.add('message', type);
-  if (type === 'assistant' && agentBadge) {
-    msg.innerHTML = `${buildAgentHeader(agentBadge)}<div class="message-content">${html}</div></div>`;
-  } else if (type === 'assistant') {
-    msg.innerHTML = `${buildAgentHeader('Compass')}<div class="message-content">${html}</div></div>`;
+  if (type === 'assistant') {
+    msg.classList.add('has-agent');
+    const name = agentBadge || 'Compass';
+    msg.innerHTML = `${buildAgentHeader(name)}<div class="message-content">${html}</div></div>`;
   } else {
     msg.innerHTML = `<div class="message-content">${html}</div>`;
   }
@@ -297,7 +297,7 @@ function addRawHTML(html) {
 
 function addTyping() {
   const el = document.createElement('div');
-  el.classList.add('message', 'assistant');
+  el.classList.add('message', 'assistant', 'has-agent');
   el.innerHTML = `${buildAgentHeader('Compass')}<div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
   el.id = 'typingIndicator';
   chatMessages.appendChild(el);
@@ -312,7 +312,7 @@ function removeTyping() {
 
 function addStreamMessage(agentBadge) {
   const msg = document.createElement('div');
-  msg.classList.add('message', 'assistant');
+  msg.classList.add('message', 'assistant', 'has-agent');
   const name = agentBadge || 'Compass';
   msg.innerHTML = `${buildAgentHeader(name)}<div class="message-content stream-content"></div></div>`;
   chatMessages.appendChild(msg);
@@ -1769,14 +1769,19 @@ async function handleRealChat(text, file) {
     toolsCalled.add(toolName);
     const agentName = TOOL_AGENT_MAP[toolName] || 'Adobe Agent';
 
-    // Create a new collapsible container per agent
+    // Create a new collapsible container per agent with Summit-style identity
     if (!agentContainers[agentName]) {
       shownAgents.add(agentName);
+      const icon = AGENT_ICONS[agentName] || '◆';
+      const role = AGENT_ROLES[agentName] || '';
+      const color = AGENT_COLORS[agentName] || 'var(--accent-light, #818cf8)';
       toolContainer = addRawHTML(`
-        <div class="tool-group" data-agent="${agentName}">
+        <div class="tool-group" data-agent="${escapeHtml(agentName)}">
           <div class="tool-group-header" onclick="this.parentElement.classList.toggle('collapsed')">
+            <span class="tool-group-avatar">${icon}</span>
+            <span class="tool-group-agent" style="color:${color}">${escapeHtml(agentName)}</span>
+            ${role ? `<span class="tool-group-role">${escapeHtml(role)}</span>` : ''}
             <span class="tool-group-indicator"><span class="gen-dot active"></span></span>
-            <span class="tool-group-agent">${agentName}</span>
             <span class="tool-group-count"></span>
             <span class="tool-group-chevron">▾</span>
           </div>
@@ -1868,11 +1873,18 @@ async function handleRealChat(text, file) {
           }
         }
 
+        // Fallback: if optimistic render didn't fire, force iframe reload with cache bust
+        if (previewFrame && !previewFrame.srcdoc) {
+          const bustUrl = previewUrl + (previewUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
+          previewFrame.src = bustUrl;
+          showToast(`Page ${path} saved — refreshing preview`, 'success');
+        }
+
         // Step 2: Swap to real CDN URL after propagation (background, non-blocking)
         setTimeout(() => {
           if (previewFrame && previewFrame.srcdoc) {
             previewFrame.removeAttribute('srcdoc');
-            previewFrame.src = previewUrl;
+            previewFrame.src = previewUrl + '?_t=' + Date.now();
           }
         }, 5000);
       }

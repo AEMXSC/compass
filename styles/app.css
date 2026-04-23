@@ -1364,10 +1364,13 @@ textarea:focus-visible,
 }
 
 .message.assistant {
+  padding: 4px 0;
+}
+
+.message.assistant.has-agent {
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  padding: 4px 0;
 }
 
 .message.assistant .agent-avatar {
@@ -2649,12 +2652,20 @@ textarea:focus-visible,
   box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
 }
 
+.tool-group-avatar {
+  font-size: 14px;
+}
+
 .tool-group-agent {
-  font-weight: 600;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.tool-group-role {
+  font-size: 10px;
   color: var(--text-muted);
+  font-weight: 400;
   flex: 1;
 }
 
