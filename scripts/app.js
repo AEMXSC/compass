@@ -1853,20 +1853,21 @@ async function handleRealChat(text, file) {
         }, 1500);
       }
 
-      // Content saved — optimistic preview (like EW's instant Y.js updates).
-      // Render the new HTML immediately via srcdoc, then swap to real CDN once ready.
+      // Content saved — refresh preview immediately.
       if (result._action === 'refresh_preview' && result._preview_path) {
         const path = result._preview_path;
         const previewUrl = AEM_ORG.previewOrigin + path;
         activeResourcePath = path;
+        let optimisticDone = false;
 
-        // Step 1: Optimistic render — show new content instantly via DA Admin API
+        // Step 1: Optimistic render — fetch fresh HTML from DA Admin API (instant)
         if (previewFrame && isSignedIn() && da.getOrg()) {
           try {
             const htmlPath = (path === '/' ? '/index' : path) + '.html';
             const freshHTML = await da.getPage(htmlPath);
             if (typeof freshHTML === 'string' && freshHTML.length > 0) {
               const base = AEM_ORG.previewOrigin;
+              previewFrame.removeAttribute('src');
               previewFrame.srcdoc = `<!DOCTYPE html><html><head>
                 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
                 <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
@@ -1875,6 +1876,7 @@ async function handleRealChat(text, file) {
               </head><body><header></header><main>${freshHTML}</main><footer></footer></body></html>`;
               cachedPageHTML = freshHTML;
               cachedPageUrl = previewUrl;
+              optimisticDone = true;
               showToast(`Page ${path} saved — preview updated`, 'success');
             }
           } catch (e) {
@@ -1882,20 +1884,15 @@ async function handleRealChat(text, file) {
           }
         }
 
-        // Fallback: if optimistic render didn't fire, force iframe reload with cache bust
-        if (previewFrame && !previewFrame.srcdoc) {
-          const bustUrl = previewUrl + (previewUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
-          previewFrame.src = bustUrl;
-          showToast(`Page ${path} saved — refreshing preview`, 'success');
-        }
-
-        // Step 2: Swap to real CDN URL after propagation (background, non-blocking)
+        // Step 2: Always force CDN reload after delay (catches cases where optimistic didn't fire)
+        // Also swaps from srcdoc to real CDN URL once propagation is done.
+        const reloadDelay = optimisticDone ? 5000 : 500;
         setTimeout(() => {
-          if (previewFrame && previewFrame.srcdoc) {
+          if (previewFrame) {
             previewFrame.removeAttribute('srcdoc');
-            previewFrame.src = previewUrl + '?_t=' + Date.now();
+            previewFrame.src = previewUrl + (previewUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
           }
-        }, 5000);
+        }, reloadDelay);
       }
 
       // Auth required — no write happened, tell the user clearly
