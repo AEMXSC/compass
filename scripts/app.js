@@ -1853,16 +1853,26 @@ async function handleRealChat(text, file) {
         }, 1500);
       }
 
-      // Content saved — refresh preview.
+      // Content saved — refresh preview (works for both DA/EDS and JCR/xwalk sites).
       if (result._action === 'refresh_preview' && result._preview_path) {
         const path = result._preview_path;
         activeResourcePath = path;
         showToast(`Page ${path} saved — refreshing preview...`, 'success');
 
-        // Reload preview after CDN propagation (preview API was already triggered by edit_page_content)
-        setTimeout(() => navigateToPage(path), 2000);
-        // Safety net reload
-        setTimeout(() => navigateToPage(path), 7000);
+        const refreshPreview = () => {
+          // JCR/xwalk: re-fetch from Worker proxy with EDS scripts
+          if (window.__JCR_PREVIEW_CONFIG) {
+            window.__refreshJcrPreview?.();
+          } else {
+            // DA/EDS: reload .aem.page iframe
+            navigateToPage(path);
+          }
+        };
+
+        // Reload after CDN propagation
+        setTimeout(refreshPreview, 2000);
+        // Safety net
+        setTimeout(refreshPreview, 7000);
       }
 
       // Auth required — no write happened, tell the user clearly
