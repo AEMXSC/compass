@@ -69,6 +69,7 @@ export async function signIn() {
     scope: IMS_SCOPE,
     response_type: 'code',
     redirect_uri: redirectUri,
+    state: crypto.randomUUID(),
   });
   const authorizeUrl = `${IMS_AUTHORIZE_URL}?${params}`;
 
