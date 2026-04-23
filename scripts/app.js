@@ -4593,15 +4593,20 @@ document.getElementById('userOrgSwitchBtn')?.addEventListener('click', () => {
     listEl.style.display = '';
     listEl.querySelectorAll('button').forEach((btn) => {
       btn.addEventListener('click', () => {
-        // Re-sign-in with target org — imslib supports this via signIn()
-        // For now: sign out and sign back in (user selects org at IMS login)
         listEl.style.display = 'none';
         const menu = document.getElementById('userMenu');
         if (menu) menu.classList.remove('visible');
-        showToast(`Switching org... Sign in again and select "${btn.textContent}"`, 'info');
-        signOut();
-        updateAuthUI();
-        setTimeout(() => signIn(), 500);
+        const targetOrg = btn.dataset.orgId;
+        // imslib switchProfile switches the active org without full re-auth
+        if (window.adobeIMS?.switchProfile) {
+          showToast(`Switching to "${btn.textContent}"...`, 'info');
+          window.adobeIMS.switchProfile(targetOrg);
+        } else {
+          showToast(`Switching org... Sign in again and select "${btn.textContent}"`, 'info');
+          signOut();
+          updateAuthUI();
+          setTimeout(() => signIn(), 500);
+        }
       });
     });
   } else {

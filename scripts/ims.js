@@ -235,36 +235,35 @@ function dispatchAuthEvent(signedIn) {
 
 function syncImsProfile() {
   if (!window.adobeIMS) return;
-  window.adobeIMS.getProfile()
-    .then((p) => {
+
+  // Fetch profile and orgs in parallel
+  const profilePromise = window.adobeIMS.getProfile().catch(() => null);
+  const orgsPromise = window.adobeIMS.getOrganizations().catch(() => []);
+
+  Promise.all([profilePromise, orgsPromise])
+    .then(([p, orgs]) => {
       if (p) {
         profile = buildAdobeProfile(p);
         localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
-        extractOrgs(p);
       }
+      parseOrganizations(orgs);
       dispatchAuthEvent(true);
     })
     .catch(() => dispatchAuthEvent(true));
 }
 
-function extractOrgs(p) {
-  // projectedProductContext contains org entitlements
-  const ppc = p.projectedProductContext || p.pac || [];
-  const orgMap = new Map();
-  for (const entry of ppc) {
-    const id = entry.prodCtx?.ownerOrg || entry.ownerOrg || '';
-    const name = entry.prodCtx?.ownerOrgName || entry.ownerOrgName || id;
-    if (id && !orgMap.has(id)) orgMap.set(id, { id, name, type: entry.prodCtx?.serviceCode || '' });
-  }
-  userOrgs = [...orgMap.values()];
+function parseOrganizations(orgs) {
+  if (!Array.isArray(orgs) || orgs.length === 0) return;
 
-  // Active org: use ownerOrg from profile, or first org in list
-  const ownOrg = p.ownerOrg || p.countryCode;
-  if (ownOrg && orgMap.has(ownOrg)) {
-    activeOrg = orgMap.get(ownOrg);
-  } else if (userOrgs.length > 0) {
-    activeOrg = userOrgs[0];
-  }
+  userOrgs = orgs.map((o) => ({
+    id: o.org || o.id || '',
+    name: o.org_name || o.name || o.org || '',
+    active: !!o.active,
+  }));
+
+  // imslib marks the active org
+  const current = userOrgs.find((o) => o.active);
+  activeOrg = current || userOrgs[0] || null;
 }
 
 function buildAdobeProfile(p) {
