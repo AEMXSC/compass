@@ -310,27 +310,36 @@ async function handleMcpProxy(request) {
   const mcpEndpoint = url.searchParams.get('endpoint') || '/adobe/mcp/aem';
   const targetUrl = `https://mcp.adobeaemcloud.com${mcpEndpoint}`;
 
-  // Ensure we have an S2S token
-  const now = Date.now();
-  if (!cachedToken || tokenExpiry <= now + 300000) {
-    const body = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: IMS_CLIENT_ID,
-      client_secret: IMS_CLIENT_SECRET,
-      scope: IMS_SCOPE,
-    });
-    const imsResp = await fetch(IMS_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    });
-    if (imsResp.ok) {
-      const data = await imsResp.json();
-      if (data.access_token) {
-        cachedToken = data.access_token;
-        tokenExpiry = now + (data.expires_in || 86400000);
-      }
+  // Prefer user's IMS token (passed from browser), fall back to S2S
+  const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '') || null;
+  let mcpToken = userToken;
+
+  if (!mcpToken) {
+    // Fall back to S2S token
+    const now = Date.now();
+    if (!cachedToken || tokenExpiry <= now + 300000) {
+      try {
+        const body = new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: IMS_CLIENT_ID,
+          client_secret: IMS_CLIENT_SECRET,
+          scope: IMS_SCOPE,
+        });
+        const imsResp = await fetch(IMS_TOKEN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        });
+        if (imsResp.ok) {
+          const data = await imsResp.json();
+          if (data.access_token) {
+            cachedToken = data.access_token;
+            tokenExpiry = now + (data.expires_in || 86400000);
+          }
+        }
+      } catch { /* S2S unavailable */ }
     }
+    mcpToken = cachedToken;
   }
 
   // Forward the request to MCP, preserving session ID
@@ -338,7 +347,7 @@ async function handleMcpProxy(request) {
   const forwardHeaders = {
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream',
-    Authorization: `Bearer ${cachedToken}`,
+    Authorization: `Bearer ${mcpToken}`,
   };
 
   // Pass through the client's session ID if provided
