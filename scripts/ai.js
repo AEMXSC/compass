@@ -4116,9 +4116,14 @@ async function executeTool(name, input) {
 
     case 'check_citation_readability': {
       let pageUrl = input.url;
-      // If no URL provided, use the currently loaded page
+      // If no URL provided, derive the real page URL (not Worker proxy URL)
       if (!pageUrl) {
-        pageUrl = window.__EW_PREVIEW_URL || document.querySelector('.preview-frame')?.src || '';
+        const orgCtx = window.__EW_ORG || {};
+        if (orgCtx.previewOrigin) {
+          pageUrl = orgCtx.previewOrigin + (activeResourcePath || '/');
+        } else {
+          pageUrl = window.__EW_PREVIEW_URL || document.querySelector('.preview-frame')?.src || '';
+        }
       }
       if (!pageUrl || pageUrl === 'about:blank') {
         return JSON.stringify({ error: 'No URL to analyze. Provide a URL or load a page in the preview.' });
@@ -4134,13 +4139,27 @@ async function executeTool(name, input) {
       } catch { /* cross-origin */ }
 
       try {
-        // Build a fetch helper that uses DA Admin API (avoids CORS from github.io)
+        // Build a fetch helper — DA Admin API for DA sites, Worker proxy for JCR sites
         const fetchHTML = async (fetchUrl) => {
+          // DA site: use DA Admin API
           if (da.getOrg() && da.getRepo()) {
-            const u = new URL(fetchUrl);
-            const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
-            const html = await da.getPage(`${path}.html`);
-            if (typeof html === 'string' && html.length > 0) return html;
+            try {
+              const u = new URL(fetchUrl);
+              const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
+              const html = await da.getPage(`${path}.html`);
+              if (typeof html === 'string' && html.length > 0) return html;
+            } catch { /* fall through */ }
+          }
+          // JCR site: fetch from publish via Worker proxy
+          const aemHost = window.__EW_AEM_HOST;
+          if (aemHost) {
+            try {
+              const publishUrl = aemHost.replace('author-', 'publish-');
+              const jcrPath = window.__EW_ORG?.activePath || activeResourcePath || '/content';
+              const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+              const resp = await fetch(`${workerBase}/preview?mode=raw&publish=${encodeURIComponent(publishUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`);
+              if (resp.ok) return resp.text();
+            } catch { /* fall through */ }
           }
           return '';
         };
