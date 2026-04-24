@@ -549,11 +549,14 @@ async function handlePreview(request) {
                 return match; // External CDN — don't proxy
               }
             } catch { return match; }
-          } else if (assetPath.startsWith('/.resource/')) {
-            // xwalk EDS scripts on author tier
+          } else if (assetPath.includes('.resource/')) {
+            // xwalk EDS scripts/CSS on author tier (path: /content/{site}/.../en.resource/scripts/aem.js)
             resolvedUrl = `${authorBase}${assetPath}`;
           } else if (assetPath.startsWith('/etc.clientlibs/') || assetPath.startsWith('/etc/')) {
             // Traditional AEM clientlibs — public on publish
+            resolvedUrl = `${publishUrl}${assetPath}`;
+          } else if (assetPath.startsWith('/content/')) {
+            // Content paths (xwalk pages, fragment references) — resolve against publish
             resolvedUrl = `${publishUrl}${assetPath}`;
           } else if (assetPath.startsWith('/') && codeBase) {
             // Relative path with code repo — EDS scripts/styles/blocks
@@ -728,8 +731,8 @@ async function handleAssetProxy(request) {
     return new Response('Only AEM and EDS origins allowed', { status: 403 });
   }
 
-  // Author tier needs auth, publish/CDN don't
-  const needsAuth = host.includes('author-');
+  // Author tier and .resource/ paths need auth
+  const needsAuth = host.includes('author-') || targetUrl.includes('.resource/');
   const headers = {};
   if (needsAuth) {
     const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
