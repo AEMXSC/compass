@@ -1583,10 +1583,10 @@ export const TOOL_AGENT_MAP = {
   create_aem_page: 'Experience Production Agent',
   list_aem_pages: 'Experience Production Agent',
   // ── Unified AEM MCP (code-execution model) ──
-  aem_list_environments: 'Adobe Agent',
+  aem_list_environments: 'Discovery Agent',
   aem_lookup_api: 'Adobe Agent',
-  aem_read: 'Adobe Agent',
-  aem_write: 'Adobe Agent',
+  aem_read: 'Experience Production Agent',
+  aem_write: 'Experience Production Agent',
   aem_delete: 'Adobe Agent',
   batch_aem_update: 'Experience Production Agent',
   suggest_alt_text: 'Content Advisor Agent',
