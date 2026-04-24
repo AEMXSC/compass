@@ -344,23 +344,25 @@ async function handleMcpProxy(request) {
 
   // Forward the request to MCP, preserving session ID
   const incomingBody = await request.text();
-  const forwardHeaders = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json, text/event-stream',
-    Authorization: `Bearer ${mcpToken}`,
-  };
-
-  // Pass through the client's session ID if provided
   const clientSessionId = request.headers.get('mcp-session-id');
-  if (clientSessionId) {
-    forwardHeaders['Mcp-Session-Id'] = clientSessionId;
+
+  async function forwardToMcp(token) {
+    const headers = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      Authorization: `Bearer ${token}`,
+    };
+    if (clientSessionId) headers['Mcp-Session-Id'] = clientSessionId;
+    return fetch(targetUrl, { method: 'POST', headers, body: incomingBody });
   }
 
-  const mcpResp = await fetch(targetUrl, {
-    method: 'POST',
-    headers: forwardHeaders,
-    body: incomingBody,
-  });
+  // Try user token first, fall back to S2S on auth failure
+  let mcpResp = await forwardToMcp(mcpToken);
+
+  // If user token fails with 401/403 and we have S2S, retry with S2S
+  if ((mcpResp.status === 401 || mcpResp.status === 403) && userToken && cachedToken && cachedToken !== userToken) {
+    mcpResp = await forwardToMcp(cachedToken);
+  }
 
   // Capture session ID from MCP response
   const sessionId = mcpResp.headers.get('mcp-session-id') || '';
