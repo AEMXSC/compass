@@ -5374,14 +5374,17 @@ if (editInUEBtn) {
     const siteType = window.__EW_SITE_TYPE;
 
     if (siteType === 'aem-cs' && aemHost) {
-      // JCR/xwalk: open author-hosted Universal Editor with content path
-      // Format: https://{author-host}/ui#/@{ims-org}/aem/universal-editor/canvas/{author-host}{content-path}
+      // JCR/xwalk: author-hosted Universal Editor
+      // Format: https://{author-host}/ui#/@{org-slug}/aem/universal-editor/canvas/{author-host}{content-path}.html
       const host = aemHost.replace(/^https?:\/\//, '');
       const contentPath = path.startsWith('/content') ? path : `/content${path}`;
-      const ueUrl = `https://${host}/ui#/aem/universal-editor/canvas/${host}${contentPath}`;
+      const htmlPath = contentPath.endsWith('.html') ? contentPath : `${contentPath}.html`;
+      // Org slug for UE — stored in known-sites or derived from active org
+      const orgSlug = window.__EW_UE_ORG_SLUG || AEM_ORG.ueOrgSlug || 'aemshowcase2';
+      const ueUrl = `https://${host}/ui#/@${orgSlug}/aem/universal-editor/canvas/${host}${htmlPath}`;
       window.open(ueUrl, '_blank');
     } else {
-      // DA/EDS: open experience.adobe.com UE with preview URL
+      // DA/EDS: experience.adobe.com editor
       const ueUrl = `https://experience.adobe.com/#/@${AEM_ORG.orgId}/aem/editor/canvas/${AEM_ORG.previewOrigin}${path}`;
       window.open(ueUrl, '_blank');
     }

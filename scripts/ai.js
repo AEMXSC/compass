@@ -28,9 +28,18 @@ import { checkCitationReadability, formatResultForChat, renderResultsHTML } from
 
 const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
-const MODEL_FAST = 'claude-haiku-4-5-20251001'; // 3-5x faster for simple edits
+const MODEL_FAST = 'claude-haiku-4-5-20251001';
 const STORAGE_KEY = 'ew-claude-key';
 const HTML_TRUNCATE_THRESHOLD = 15000;
+
+/** Build the correct Universal Editor URL for an AEM CS page. */
+function buildUeUrl(aemHost, pagePath, orgCtx = {}) {
+  const host = aemHost.replace(/^https?:\/\//, '');
+  const contentPath = pagePath.startsWith('/content') ? pagePath : `/content${pagePath}`;
+  const htmlPath = contentPath.endsWith('.html') ? contentPath : `${contentPath}.html`;
+  const orgSlug = window.__EW_UE_ORG_SLUG || orgCtx.ueOrgSlug || 'aemshowcase2';
+  return `https://${host}/ui#/@${orgSlug}/aem/universal-editor/canvas/${host}${htmlPath}`;
+}
 
 // Default API key for demo use. Split to avoid GitHub push protection scanner.
 // Users can override in Settings. This key is intentionally embedded for the
@@ -2016,7 +2025,7 @@ async function executeTool(name, input) {
         // Construct UE edit URL (don't rely on MCP to return it)
         const orgCtx = window.__EW_ORG || {};
         const previewOrigin = orgCtx.previewOrigin || '';
-        const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.destination_path}` : null;
+        const ueUrl = host ? buildUeUrl(host, input.destination_path, orgCtx) : null;
         return JSON.stringify({
           status: 'created',
           ...result,
@@ -2054,7 +2063,7 @@ async function executeTool(name, input) {
 
           const orgCtx = window.__EW_ORG || {};
           const previewOrigin = orgCtx.previewOrigin || '';
-          const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.page_path}` : null;
+          const ueUrl = host ? buildUeUrl(host, input.page_path, orgCtx) : null;
           const previewUrl = previewOrigin ? `${previewOrigin}${input.page_path}` : null;
 
           return JSON.stringify({
@@ -2130,7 +2139,7 @@ async function executeTool(name, input) {
         const result = await aemContent.createPage(host, input.page_path, input.title, input.template);
         const orgCtx = window.__EW_ORG || {};
         const previewOrigin = orgCtx.previewOrigin || '';
-        const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.page_path}` : null;
+        const ueUrl = host ? buildUeUrl(host, input.page_path, orgCtx) : null;
         return JSON.stringify({
           status: 'created',
           ...result,

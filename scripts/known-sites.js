@@ -105,6 +105,7 @@ export const KNOWN_SITES = {
     vertical: 'Media / Lifestyle',
     aemHost: 'author-p153659-e1614585.adobeaemcloud.com',
     publishHost: 'publish-p153659-e1614585.adobeaemcloud.com',
+    ueOrgSlug: 'aemshowcase2',
     pages: [
       { path: '/index', title: 'Homepage', description: 'Hero, featured articles' },
       { path: '/language-masters/en', title: 'English (Language Master)', description: 'English language root' },
