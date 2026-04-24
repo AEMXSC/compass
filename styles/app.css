@@ -4496,6 +4496,18 @@ textarea:focus-visible,
   background: var(--bg-card);
 }
 
+.preview-action-open {
+  border: 1px solid var(--accent);
+  padding: 0 8px;
+  color: var(--accent-light);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.preview-action-open:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: #fff;
+}
+
 .preview-action-da,
 .preview-action-ue {
   border: 1px solid var(--border);

@@ -3724,9 +3724,9 @@ async function connectCustomSite(input) {
   // Update contextual prompt chips for the connected site
   if (typeof updateContextChips === 'function') updateContextChips();
 
-  // For JCR/xwalk sites: use Worker /preview?mode=full for pixel-perfect rendering
-  // Worker proxies the complete page and rewrites script/CSS URLs to /asset proxy
-  // so everything loads same-origin (bypasses X-Frame-Options and CORS)
+  // For JCR/xwalk sites: Worker proxy for content preview + punch-out for full preview
+  // Inline preview shows content structure with fallback CSS (enough to verify edits).
+  // "Open Preview" button opens the real page in a new tab (pixel-perfect).
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
     const jcrPath = parsed.path || '/content';
     activeResourcePath = jcrPath;
@@ -3738,47 +3738,43 @@ async function connectCustomSite(input) {
     const authorHost = parsed.aemHost;
     const publishUrl = `https://${authorHost.replace('author-', 'publish-')}`;
     const authorUrl = `https://${authorHost}`;
-    const codeBase = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
 
-    // Build the full-mode preview URL — Worker serves complete page with scripts proxied
+    // Standard Worker preview: content + inlined CSS + fallback styles (no scripts)
     const previewParams = new URLSearchParams({
-      mode: 'full',
       publish: publishUrl,
       author: authorUrl,
       path: jcrPath + '.html',
-      codeBase,
+      _t: Date.now(),
     });
-    // Pass IMS token so Worker can fetch from author tier (unpublished content)
-    // Token sent via query param because iframe can't set Authorization headers
     const token = getToken();
     if (token) previewParams.set('token', token);
-    previewParams.set('_t', Date.now());
-    const fullPreviewUrl = `${WORKER_BASE}/preview?${previewParams}`;
+    const inlinePreviewUrl = `${WORKER_BASE}/preview?${previewParams}`;
 
-    // Load in iframe — Worker origin, no X-Frame-Options issue
     if (previewFrame) {
       previewFrame.removeAttribute('srcdoc');
-      previewFrame.src = fullPreviewUrl;
+      previewFrame.src = inlinePreviewUrl;
     }
 
-    // Store config for refresh after edits
-    window.__JCR_PREVIEW_CONFIG = { workerBase: WORKER_BASE, publishUrl, authorUrl, jcrPath, codeBase, org, repo, branch };
-    window.__JCR_PREVIEW_URL = fullPreviewUrl;
+    // Store config for refresh + punch-out
+    window.__JCR_PREVIEW_CONFIG = {
+      workerBase: WORKER_BASE, publishUrl, authorUrl, jcrPath, org, repo, branch,
+      publishPageUrl: `${publishUrl}${jcrPath}.html`,
+      authorPageUrl: `${authorUrl}${jcrPath}.html`,
+    };
+    window.__JCR_PREVIEW_URL = inlinePreviewUrl;
   } else {
     navigateToPage(parsed.path || '/');
   }
 
-  // Refresh JCR preview after edits — reload the Worker full-mode URL with cache bust
+  // Refresh JCR preview after edits — reload Worker content preview with cache bust
   window.__refreshJcrPreview = () => {
     const cfg = window.__JCR_PREVIEW_CONFIG;
     if (!cfg || !previewFrame) return;
-    showToast('Updating preview...', 'info');
+    showToast('Page updated — open full preview for styled view', 'success');
     const params = new URLSearchParams({
-      mode: 'full',
       publish: cfg.publishUrl,
       author: cfg.authorUrl,
       path: cfg.jcrPath + '.html',
-      codeBase: cfg.codeBase,
       _t: Date.now(),
     });
     const tk = getToken();
@@ -4893,6 +4889,23 @@ if (connectSiteBtn) {
 }
 
 // Edit in DA button
+// Open Full Preview — punch-out to real page in new tab
+const openFullPreviewBtn = document.getElementById('openFullPreviewBtn');
+if (openFullPreviewBtn) {
+  openFullPreviewBtn.addEventListener('click', () => {
+    const cfg = window.__JCR_PREVIEW_CONFIG;
+    if (cfg) {
+      // JCR site: open publish page (or author if signed in)
+      const pageUrl = isSignedIn() ? cfg.authorPageUrl : cfg.publishPageUrl;
+      window.open(pageUrl, '_blank');
+    } else {
+      // DA/EDS site: open .aem.page URL
+      const path = activeResourcePath || '/';
+      window.open(AEM_ORG.previewOrigin + path, '_blank');
+    }
+  });
+}
+
 const editInDABtn = document.getElementById('editInDABtn');
 if (editInDABtn) {
   editInDABtn.addEventListener('click', () => {

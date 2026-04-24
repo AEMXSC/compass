@@ -681,8 +681,14 @@ footer{padding:2rem var(--gap);background:#1a1a1a;color:#ccc;font-size:.875rem}
 .video iframe,.video video{position:absolute;top:0;left:0;width:100%;height:100%}
 main>div{padding:var(--gap) 0}
 main>div+div{border-top:1px solid #f0f0f0}
+.compass-preview-banner{position:sticky;top:0;z-index:999;background:#1e293b;color:#94a3b8;font:12px/1.4 system-ui;padding:6px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #334155}
+.compass-preview-banner strong{color:#e2e8f0}
 </style>`;
     html = html.replace(/<head>/, `<head>${aemFallbackCss}`);
+
+    // Add content preview banner
+    const bannerHtml = `<div class="compass-preview-banner"><strong>Content preview</strong> — Use the Preview button in toolbar for the full styled page</div>`;
+    html = html.replace(/<body[^>]*>/, (m) => `${m}${bannerHtml}`);
 
     const cacheHeader = cacheBust ? 'no-store, no-cache, must-revalidate' : 'public, max-age=300';
     const origin = request.headers.get('Origin') || '';
