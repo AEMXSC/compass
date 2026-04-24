@@ -574,8 +574,28 @@ async function handlePreview(request) {
         },
       );
 
-      // Add <base> for images (resolve /content/dam/ paths to publish)
-      html = html.replace(/<head([^>]*)>/, `<head$1><base href="${publishUrl}/">`);
+      // Inject fetch interceptor BEFORE any scripts run.
+      // aem.js dynamically loads blocks via fetch('/blocks/hero/hero.js').
+      // With <base> pointing to publish, these resolve to publish (404 for .resource).
+      // The interceptor routes .resource/ and block paths through the /asset proxy.
+      const fetchInterceptor = `<script>
+(function(){
+  var W='${workerOrigin}',A='${authorBase}',C='${codeBase}',P='${publishUrl}';
+  var _f=window.fetch;
+  window.fetch=function(u,o){
+    if(typeof u==='string'){
+      if(u.includes('.resource/')){u=W+'/asset?url='+encodeURIComponent(A+u);}
+      else if(u.startsWith('/blocks/')||u.startsWith('/scripts/')||u.startsWith('/styles/')){
+        u=W+'/asset?url='+encodeURIComponent((C||P)+u);
+      }
+    }
+    return _f.call(this,u,o);
+  };
+})();
+<\/script>`;
+
+      // Add <base> for images + fetch interceptor before any other scripts
+      html = html.replace(/<head([^>]*)>/, `<head$1><base href="${publishUrl}/">${fetchInterceptor}`);
 
       // Strip UE instrumentation only (NOT scripts)
       html = html.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');

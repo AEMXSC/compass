@@ -3744,11 +3744,16 @@ async function connectCustomSite(input) {
     const publishUrl = `https://${authorHost.replace('author-', 'publish-')}`;
     const authorUrl = `https://${authorHost}`;
 
-    // Standard Worker preview: content + inlined CSS + fallback styles (no scripts)
+    const codeBase = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
+
+    // Full-mode Worker preview: keeps scripts, rewrites URLs to /asset proxy,
+    // injects fetch() interceptor so aem.js block loading routes through proxy
     const previewParams = new URLSearchParams({
+      mode: 'full',
       publish: publishUrl,
       author: authorUrl,
       path: jcrPath + '.html',
+      codeBase,
       _t: Date.now(),
     });
     const token = getToken();
@@ -3762,7 +3767,7 @@ async function connectCustomSite(input) {
 
     // Store config for refresh + punch-out
     window.__JCR_PREVIEW_CONFIG = {
-      workerBase: WORKER_BASE, publishUrl, authorUrl, jcrPath, org, repo, branch,
+      workerBase: WORKER_BASE, publishUrl, authorUrl, jcrPath, codeBase, org, repo, branch,
       publishPageUrl: `${publishUrl}${jcrPath}.html`,
       authorPageUrl: `${authorUrl}${jcrPath}.html`,
     };
@@ -3771,15 +3776,17 @@ async function connectCustomSite(input) {
     navigateToPage(parsed.path || '/');
   }
 
-  // Refresh JCR preview after edits — reload Worker content preview with cache bust
+  // Refresh JCR preview after edits
   window.__refreshJcrPreview = () => {
     const cfg = window.__JCR_PREVIEW_CONFIG;
     if (!cfg || !previewFrame) return;
-    showToast('Page updated — open full preview for styled view', 'success');
+    showToast('Updating preview...', 'info');
     const params = new URLSearchParams({
+      mode: 'full',
       publish: cfg.publishUrl,
       author: cfg.authorUrl,
       path: cfg.jcrPath + '.html',
+      codeBase: cfg.codeBase,
       _t: Date.now(),
     });
     const tk = getToken();
