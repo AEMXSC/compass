@@ -3707,9 +3707,14 @@ async function connectCustomSite(input) {
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Connected';
   }
 
-  // Update home badge
+  // Update home badge — show full URL (including JCR path) for easy re-editing
   if (homeSiteName) homeSiteName.textContent = `${org}/${repo}`;
-  if (homeSiteUrl) homeSiteUrl.textContent = previewOrigin.replace(/^https?:\/\//, '');
+  if (homeSiteUrl) {
+    const displayUrl = parsed.aemHost
+      ? `https://${parsed.aemHost}${parsed.path || ''}`
+      : `${previewOrigin}${parsed.path || '/'}`;
+    homeSiteUrl.textContent = displayUrl.replace(/^https?:\/\//, '');
+  }
 
   // Switch to editor and load
   activeResourcePath = null;
@@ -4874,6 +4879,20 @@ window.addEventListener('ew-switch-site', (e) => {
 });
 
 // Connect site input
+// Home site badge: click to populate connect input with current URL for editing
+const homeSiteBadge = document.getElementById('homeSiteBadge');
+if (homeSiteBadge) {
+  homeSiteBadge.addEventListener('click', () => {
+    const input = document.getElementById('connectSiteInput');
+    const urlText = document.getElementById('homeSiteUrl')?.textContent || '';
+    if (input && urlText) {
+      input.value = urlText;
+      input.focus();
+      input.select();
+    }
+  });
+}
+
 const connectSiteInput = document.getElementById('connectSiteInput');
 const connectSiteBtn = document.getElementById('connectSiteBtn');
 if (connectSiteInput) {
