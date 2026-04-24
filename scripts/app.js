@@ -4895,9 +4895,8 @@ if (openFullPreviewBtn) {
   openFullPreviewBtn.addEventListener('click', () => {
     const cfg = window.__JCR_PREVIEW_CONFIG;
     if (cfg) {
-      // JCR site: open publish page (or author if signed in)
-      const pageUrl = isSignedIn() ? cfg.authorPageUrl : cfg.publishPageUrl;
-      window.open(pageUrl, '_blank');
+      // JCR site: open publish page in new tab (full CSS/JS, no auth needed)
+      window.open(cfg.publishPageUrl, '_blank');
     } else {
       // DA/EDS site: open .aem.page URL
       const path = activeResourcePath || '/';
