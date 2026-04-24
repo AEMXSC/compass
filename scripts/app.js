@@ -166,24 +166,59 @@ function showToast(message, type = 'info', duration = TOAST_DURATION_MS) {
 }
 
 function md(text) {
-  // Escape HTML first to prevent XSS, then apply markdown transforms
-  return escapeHtml(text)
-    .replace(/### (.*?)(\n|$)/g, '<h3>$1</h3>')
-    .replace(/## (.*?)(\n|$)/g, '<h2>$1</h2>')
-    .replace(/# (.*?)(\n|$)/g, '<h1>$1</h1>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`(.*?)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, (_, text, url) => {
-      // Only allow http/https URLs — blocks javascript:, data:, etc.
-      if (/^https?:\/\//i.test(url)) return `<a href="${url}" target="_blank" rel="noopener">${text}</a>`;
-      return `${text} (${url})`;
-    })
-    .replace(/^[-*] (.+)/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
-    .replace(/<\/ul>\s*<ul>/g, '')
-    .replace(/\n{2,}/g, '<br><br>')
-    .replace(/\n/g, '<br>');
+  let html = escapeHtml(text);
+
+  // Fenced code blocks (```...```)
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => `<pre><code class="lang-${lang || 'text'}">${code.trim()}</code></pre>`);
+
+  // Headings (must be at line start)
+  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // Bold + italic
+  html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Links (http/https only)
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, (_, t, u) =>
+    /^https?:\/\//i.test(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : `${t} (${u})`);
+
+  // Horizontal rules
+  html = html.replace(/^---+$/gm, '<hr>');
+
+  // Blockquotes
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  html = html.replace(/<\/blockquote>\n<blockquote>/g, '\n');
+
+  // Numbered lists
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>[\s\S]*?<\/li>)(?=\n(?!\d+\. |[-*] )|\n*$)/g, (match) => {
+    if (match.includes('<li>')) return `<ol>${match}</ol>`;
+    return match;
+  });
+
+  // Unordered lists
+  html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+
+  // Wrap consecutive <li> in <ul> or <ol>
+  html = html.replace(/(?:^|\n)(<li>[\s\S]*?<\/li>)(?:\n|$)/g, (match) => {
+    if (match.includes('<ol>')) return match;
+    return `<ul>${match.trim()}</ul>`;
+  });
+  html = html.replace(/<\/ul>\s*<ul>/g, '');
+  html = html.replace(/<\/ol>\s*<ol>/g, '');
+
+  // Paragraphs and line breaks
+  html = html.replace(/\n{2,}/g, '<br><br>');
+  html = html.replace(/\n/g, '<br>');
+
+  return html;
 }
 
 /* ── Agent Identity System ── */
