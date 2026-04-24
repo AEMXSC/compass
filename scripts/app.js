@@ -5449,7 +5449,7 @@ if (previewSiteUrl && siteSwitchInput && previewUrlText) {
     if (e.target === siteSwitchInput) return; // already editing
     previewUrlText.style.display = 'none';
     siteSwitchInput.style.display = '';
-    siteSwitchInput.value = `${AEM_ORG.orgId}/${AEM_ORG.repo}`;
+    siteSwitchInput.value = previewUrlText.textContent || `${AEM_ORG.orgId}/${AEM_ORG.repo}`;
     siteSwitchInput.focus();
     siteSwitchInput.select();
     previewSiteUrl.classList.add('editing');
