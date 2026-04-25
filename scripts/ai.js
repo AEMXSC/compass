@@ -5066,7 +5066,8 @@ You have tools to read and edit page content. When asked to change content:
 2. If not, call get_page_content first, then edit_page_content with the modified HTML.
 3. Keep the existing HTML structure — only change the specific text/element requested.
 4. Always trigger preview after editing.
-Be concise. Execute immediately. Don't explain what you'll do — just do it.`;
+Be concise. Execute immediately. Don't explain what you'll do — just do it.
+IMPORTANT: If the page HTML is provided below, call edit_page_content DIRECTLY with the modified HTML. Do NOT call get_page_content first — you already have the content.`;
 
 function buildSystemParts(context = {}, { fast = false } = {}) {
   // Fast mode: minimal prompt for simple edits (Haiku — every token counts)
@@ -5393,11 +5394,13 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const model = useFastModel ? MODEL_FAST : MODEL;
   const system = buildSystemParts(context, { fast: useFastModel });
 
-  // Tiered tools: send only relevant tools based on prompt intent
-  const tools = getToolsForPrompt(promptText);
+  // Tiered tools: fast mode gets minimal tools, full mode gets intent-based
+  const tools = useFastModel
+    ? AEM_TOOLS.filter((t) => ['edit_page_content', 'get_page_content', 'preview_page', 'publish_page', 'list_site_pages'].includes(t.name))
+    : getToolsForPrompt(promptText);
 
   let fullText = '';
-  const MAX_TOOL_ROUNDS = 8;
+  const MAX_TOOL_ROUNDS = useFastModel ? 3 : 8;
 
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
