@@ -1692,42 +1692,71 @@ async function handleRealChat(text, file) {
         }, 1500);
       }
 
-      // Content saved — optimistic preview (like EW's instant Y.js updates).
-      // Render the new HTML immediately via srcdoc, then swap to real CDN once ready.
+      // Content saved — refresh preview to reflect changes.
       if (result._action === 'refresh_preview' && result._preview_path) {
         const path = result._preview_path;
         const previewUrl = AEM_ORG.previewOrigin + path;
         activeResourcePath = path;
 
-        // Step 1: Optimistic render — show new content instantly via DA Admin API
-        if (previewFrame && isSignedIn() && da.getOrg()) {
-          try {
-            const htmlPath = (path === '/' ? '/index' : path) + '.html';
-            const freshHTML = await da.getPage(htmlPath);
-            if (typeof freshHTML === 'string' && freshHTML.length > 0) {
-              const base = AEM_ORG.previewOrigin;
-              previewFrame.srcdoc = `<!DOCTYPE html><html><head>
-                <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-                <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
-                <script src="${base}/scripts/aem.js" type="module"><\/script>
-                <script src="${base}/scripts/scripts.js" type="module"><\/script>
-              </head><body><header></header><main>${freshHTML}</main><footer></footer></body></html>`;
-              cachedPageHTML = freshHTML;
-              cachedPageUrl = previewUrl;
-              showToast(`Page ${path} saved — preview updated`, 'success');
-            }
-          } catch (e) {
-            console.warn('[Preview] Optimistic render failed:', e.message);
-          }
-        }
+        const isJcr = window.__EW_SITE_TYPE === 'aem-cs' && AEM_ORG.previewOrigin?.includes('adobeaemcloud.com');
 
-        // Step 2: Swap to real CDN URL after propagation (background, non-blocking)
-        setTimeout(() => {
-          if (previewFrame && previewFrame.srcdoc) {
-            previewFrame.removeAttribute('srcdoc');
-            previewFrame.src = previewUrl;
+        if (isJcr && previewFrame) {
+          // JCR: reload the Worker-proxied iframe (add cache-bust to force fresh content)
+          const currentSrc = previewFrame.src || '';
+          if (currentSrc.includes('/preview?')) {
+            const refreshUrl = currentSrc.replace(/_t=\d+/, `_t=${Date.now()}`);
+            previewFrame.src = refreshUrl;
+          } else {
+            // Rebuild the Worker preview URL
+            const authorHost = (window.__EW_AEM_HOST || '').replace('https://', '');
+            const publishHost = authorHost.replace('author-', 'publish-');
+            const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+            const org = AEM_ORG.orgId || '';
+            const repo = AEM_ORG.repo || '';
+            const branch = AEM_ORG.branch || 'main';
+            const edsOrigin = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
+            const params = new URLSearchParams({
+              publish: `https://${publishHost}`,
+              author: `https://${authorHost}`,
+              path: `${path}.html`,
+              mode: 'hybrid',
+              codeBase: edsOrigin,
+              _t: Date.now().toString(),
+            });
+            previewFrame.src = `${workerBase}/preview?${params}`;
           }
-        }, 5000);
+          showToast(`Page ${path} updated — preview refreshing`, 'success');
+        } else {
+          // DA: optimistic render — show new content instantly via DA Admin API
+          if (previewFrame && isSignedIn() && da.getOrg()) {
+            try {
+              const htmlPath = (path === '/' ? '/index' : path) + '.html';
+              const freshHTML = await da.getPage(htmlPath);
+              if (typeof freshHTML === 'string' && freshHTML.length > 0) {
+                const base = AEM_ORG.previewOrigin;
+                previewFrame.srcdoc = `<!DOCTYPE html><html><head>
+                  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+                  <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
+                  <script src="${base}/scripts/aem.js" type="module"><\/script>
+                  <script src="${base}/scripts/scripts.js" type="module"><\/script>
+                </head><body><header></header><main>${freshHTML}</main><footer></footer></body></html>`;
+                cachedPageHTML = freshHTML;
+                cachedPageUrl = previewUrl;
+                showToast(`Page ${path} saved — preview updated`, 'success');
+              }
+            } catch (e) {
+              console.warn('[Preview] Optimistic render failed:', e.message);
+            }
+          }
+
+          // Swap to real CDN URL after propagation (background, non-blocking)
+          setTimeout(() => {
+            if (previewFrame && previewFrame.srcdoc) {
+              previewFrame.removeAttribute('srcdoc');
+              previewFrame.src = previewUrl;
+            }
+          }, 5000);
+        }
       }
 
       // Auth required — no write happened, tell the user clearly
@@ -3489,8 +3518,8 @@ async function connectCustomSite(input) {
 
   switchView('editor');
 
-  // For JCR sites where iframe can't load (X-Frame-Options), fetch rendered HTML
-  // from the publish tier and render as srcdoc with <base> pointing to publish.
+  // For JCR sites: load via CF Worker's full-mode preview proxy.
+  // Worker serves HTML from its own origin with scripts/CSS proxied, bypassing X-Frame-Options.
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
     const contentPathMatch = input.match(/(\/content\/[^\s?#]*)/);
     const jcrPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '/content';
@@ -3506,82 +3535,41 @@ async function connectCustomSite(input) {
         <div style="text-align:center"><p>Loading JCR page preview...</p><p style="font-size:12px">${jcrPath}</p></div></body></html>`;
     }
 
-    // Fetch rendered HTML from publish tier, CSS from author tier (with auth)
+    // Use the CF Worker's preview proxy: fetches HTML with S2S auth, inlines CSS,
+    // strips scripts/UE instrumentation, and adds fallback block styles.
+    // Served from Worker origin so no X-Frame-Options issue.
     (async () => {
       const authorHost = parsed.aemHost;
       const publishHost = authorHost.replace('author-', 'publish-');
-      const authorBase = `https://${authorHost}`;
       const publishBase = `https://${publishHost}`;
-      const pageUrl = `https://${publishHost}${jcrPath}.html`;
+      const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+
+      const previewParams = new URLSearchParams({
+        publish: publishBase,
+        author: `https://${authorHost}`,
+        path: `${jcrPath}.html`,
+        mode: 'hybrid',
+        codeBase: edsPreviewOrigin,
+        _t: Date.now().toString(),
+      });
+
+      const workerPreviewUrl = `${workerBase}/preview?${previewParams}`;
+      console.log(`[EW] JCR preview: loading hybrid-mode via Worker: ${workerPreviewUrl}`);
 
       try {
-        console.log(`[EW] JCR preview: fetching HTML from publish: ${pageUrl}`);
-        const resp = await fetch(pageUrl);
-        if (resp.ok) {
-          let html = await resp.text();
+        if (previewFrame) {
+          previewFrame.removeAttribute('srcdoc');
+          previewFrame.src = workerPreviewUrl;
 
-          // CSS: .resource/ paths only work on the author tier (404 on publish).
-          // Fetch CSS via CF Worker proxy (avoids CORS) with S2S auth, then inline as <style>.
-          const PROXY_BASE = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev') + '/proxy?url=';
-          const cssLinks = [...html.matchAll(/<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*\/?>/gi)];
-          for (const match of cssLinks) {
-            const cssHref = match[1].startsWith('http') ? match[1] : `${authorBase}${match[1]}`;
-            try {
-              const cssResp = await fetch(`${PROXY_BASE}${encodeURIComponent(cssHref)}`);
-              if (cssResp.ok) {
-                let css = await cssResp.text();
-                // Fix relative url() references to point to author host
-                css = css.replace(/url\(\s*["']?\//g, `url("${authorBase}/`);
-                html = html.replace(match[0], `<style>/* ${match[1]} */\n${css}</style>`);
-                console.log(`[EW] Inlined CSS from author via proxy: ${match[1]} (${css.length} chars)`);
-              } else {
-                console.warn(`[EW] CSS proxy fetch ${cssResp.status}: ${cssHref}`);
-              }
-            } catch (cssErr) {
-              console.warn(`[EW] CSS proxy fetch failed: ${cssErr.message}`);
-            }
-          }
+          // Cache page HTML for AI context
+          fetch(workerPreviewUrl).then((r) => r.ok ? r.text() : null).then((html) => {
+            if (html) cachedPageHTML = html;
+          }).catch(() => {});
 
-          // If no CSS was inlined, add a clean fallback stylesheet
-          if (!html.includes('/* /content/')) {
-            const fallbackCss = `<style>
-              :root{--color-brand:#1473e6;--color-bg:#fff;--color-text:#2c2c2c;--font-sans:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-              *{margin:0;padding:0;box-sizing:border-box}
-              body{font-family:var(--font-sans);color:var(--color-text);background:var(--color-bg);line-height:1.6}
-              main{max-width:1200px;margin:0 auto}
-              img{max-width:100%;height:auto;display:block}
-              h1,h2,h3,h4,h5,h6{margin:0.5em 0;line-height:1.2}
-              h1{font-size:2.5rem} h2{font-size:2rem} h3{font-size:1.5rem}
-              p{margin:0.5em 0}
-              a{color:var(--color-brand);text-decoration:none}
-              a:hover{text-decoration:underline}
-              section,div>div{padding:1rem 2rem}
-              [class]{display:block}
-              nav,header,footer{padding:1rem 2rem;background:#f5f5f5}
-            </style>`;
-            html = html.replace(/<head>/, `<head>${fallbackCss}`);
-          }
-
-          // <base> for images (publish tier serves images without auth)
-          html = html.replace(/<head>/, `<head><base href="${publishBase}/">`);
-          // Strip scripts and UE instrumentation (won't work in srcdoc null-origin)
-          html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
-          // Strip section-metadata divs (xwalk properties like "sec-spacing", "section-none", "overlay")
-          // These are container divs with class "section-metadata" that show as raw text without JS decoration
-          html = html.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
-          // Also strip standalone property divs that contain only xwalk keywords
-          html = html.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width|image-left|image-right|cta-button|text-center)\s*<\/div>/gi, '');
-
-          if (previewFrame) {
-            previewFrame.srcdoc = html;
-            cachedPageHTML = html;
-            console.log(`[EW] JCR preview rendered: ${jcrPath} (${html.length} chars)`);
-          }
-        } else {
-          throw new Error(`Publish tier returned ${resp.status}`);
+          console.log(`[EW] JCR preview: Worker proxy iframe set for ${jcrPath}`);
         }
       } catch (e) {
-        console.warn(`[EW] Publish tier fetch failed: ${e.message}. Trying AEM Content MCP...`);
+        console.warn(`[EW] JCR Worker preview failed: ${e.message}. Falling back to srcdoc...`);
         // Fallback: try AEM Content MCP for structured content
         try {
           if (!isSignedIn()) await signIn();

@@ -529,99 +529,13 @@ async function handlePreview(request) {
       });
     }
 
-    // Full mode: serve complete page with scripts — rewrite asset URLs to /asset proxy
-    // This lets the iframe load from the Worker origin (same-origin = no CORS/X-Frame-Options)
-    const fullMode = url.searchParams.get('mode') === 'full';
-    if (fullMode) {
-      const workerOrigin = url.origin;
-      const codeBase = url.searchParams.get('codeBase') || '';
-
-      // Rewrite <script src> and <link href> to proxy through /asset
-      html = html.replace(
-        /(<(?:script|link)[^>]*(?:src|href)=["'])([^"']+)(["'])/gi,
-        (match, prefix, assetPath, suffix) => {
-          // Skip data: URLs, inline scripts, and anchors
-          if (assetPath.startsWith('data:') || assetPath.startsWith('#') || assetPath.startsWith('javascript:')) return match;
-
-          let resolvedUrl;
-          if (assetPath.startsWith('http://') || assetPath.startsWith('https://')) {
-            // Absolute URL — proxy if it's an allowed origin
-            try {
-              const h = new URL(assetPath).hostname;
-              if (h.endsWith('.adobeaemcloud.com') || h.endsWith('.aem.page') || h.endsWith('.aem.live')) {
-                resolvedUrl = assetPath;
-              } else {
-                return match; // External CDN — don't proxy
-              }
-            } catch { return match; }
-          } else if (assetPath.includes('.resource/')) {
-            // xwalk EDS scripts/CSS on author tier (path: /content/{site}/.../en.resource/scripts/aem.js)
-            resolvedUrl = `${authorBase}${assetPath}`;
-          } else if (assetPath.startsWith('/etc.clientlibs/') || assetPath.startsWith('/etc/')) {
-            // Traditional AEM clientlibs — public on publish
-            resolvedUrl = `${publishUrl}${assetPath}`;
-          } else if (assetPath.startsWith('/content/')) {
-            // Content paths (xwalk pages, fragment references) — resolve against publish
-            resolvedUrl = `${publishUrl}${assetPath}`;
-          } else if (assetPath.startsWith('/') && codeBase) {
-            // Relative path with code repo — EDS scripts/styles/blocks
-            resolvedUrl = `${codeBase}${assetPath}`;
-          } else if (assetPath.startsWith('/')) {
-            // Relative path without code repo — resolve against publish
-            resolvedUrl = `${publishUrl}${assetPath}`;
-          } else {
-            return match; // Relative without leading / — skip
-          }
-
-          return `${prefix}${workerOrigin}/asset?url=${encodeURIComponent(resolvedUrl)}${suffix}`;
-        },
-      );
-
-      // Inject fetch interceptor BEFORE any scripts run.
-      // aem.js dynamically loads blocks via fetch('/blocks/hero/hero.js').
-      // With <base> pointing to publish, these resolve to publish (404 for .resource).
-      // The interceptor routes .resource/ and block paths through the /asset proxy.
-      const fetchInterceptor = `<script>
-(function(){
-  var W='${workerOrigin}',A='${authorBase}',C='${codeBase}',P='${publishUrl}';
-  var _f=window.fetch;
-  window.fetch=function(u,o){
-    if(typeof u==='string'){
-      if(u.includes('.resource/')){u=W+'/asset?url='+encodeURIComponent(A+u);}
-      else if(u.startsWith('/blocks/')||u.startsWith('/scripts/')||u.startsWith('/styles/')){
-        u=W+'/asset?url='+encodeURIComponent((C||P)+u);
-      }
-    }
-    return _f.call(this,u,o);
-  };
-})();
-<\/script>`;
-
-      // Add <base> for images + fetch interceptor before any other scripts
-      html = html.replace(/<head([^>]*)>/, `<head$1><base href="${publishUrl}/">${fetchInterceptor}`);
-
-      // Strip UE instrumentation only (NOT scripts)
-      html = html.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');
-      html = html.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
-
-      const cacheHeader = cacheBust ? 'no-store, no-cache' : 'public, max-age=60';
-      const respOrigin = request.headers.get('Origin') || '';
-      return new Response(html, {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': cacheHeader,
-          'X-Preview-Auth': authLevel,
-          'X-Preview-Source': htmlSource,
-          'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(respOrigin) ? respOrigin : ALLOWED_ORIGINS[0],
-          'Access-Control-Expose-Headers': 'X-Preview-Auth, X-Preview-Source',
-        },
-      });
-    }
-
-    // Standard mode: inline CSS, strip scripts/UE attributes, inject fallback CSS
+    // Hybrid mode: inline CSS (using S2S auth available here) + keep scripts proxied.
+    // Best of both worlds — styled AND decorated.
+    const mode = url.searchParams.get('mode') || 'standard';
+    const isHybridOrFull = mode === 'hybrid' || mode === 'full';
 
     // Step 2: Inline CSS — try publish first, then author with token
+    // This works for all modes because we have the S2S token in this request context.
     const cssLinks = [...html.matchAll(/<link[^>]*(?:rel=["']stylesheet["'][^>]*href=["']([^"']+)["']|href=["']([^"']+)["'][^>]*rel=["']stylesheet["'])[^>]*\/?>/gi)];
     for (const match of cssLinks) {
       const hrefVal = match[1] || match[2];
@@ -631,13 +545,11 @@ async function handlePreview(request) {
       const authorCssUrl = hrefVal.startsWith('http') ? hrefVal : `${authorBase}${hrefVal}`;
 
       let css = null;
-      // Attempt 1: Publish tier (no auth — /etc.clientlibs/ are public)
       try {
         const resp = await fetch(publishCssUrl);
         if (resp.ok) css = await resp.text();
       } catch { /* publish failed */ }
 
-      // Attempt 2: Author tier with token (for .resource/ paths)
       if (!css && authToken) {
         try {
           const resp = await fetch(authorCssUrl, {
@@ -655,10 +567,67 @@ async function handlePreview(request) {
       }
     }
 
-    // Step 3: Strip scripts
-    html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    if (isHybridOrFull) {
+      // Hybrid/Full: keep scripts, rewrite <script src> to proxy through /asset
+      const workerOrigin = url.origin;
+      const codeBase = url.searchParams.get('codeBase') || '';
 
-    // Step 4: Strip xwalk UE instrumentation
+      html = html.replace(
+        /(<script[^>]*src=["'])([^"']+)(["'])/gi,
+        (match, prefix, assetPath, suffix) => {
+          if (assetPath.startsWith('data:') || assetPath.startsWith('#') || assetPath.startsWith('javascript:')) return match;
+
+          let resolvedUrl;
+          if (assetPath.startsWith('http://') || assetPath.startsWith('https://')) {
+            try {
+              const h = new URL(assetPath).hostname;
+              if (h.endsWith('.adobeaemcloud.com') || h.endsWith('.aem.page') || h.endsWith('.aem.live')) {
+                resolvedUrl = assetPath;
+              } else {
+                return match;
+              }
+            } catch { return match; }
+          } else if (assetPath.includes('.resource/')) {
+            resolvedUrl = `${authorBase}${assetPath}`;
+          } else if (assetPath.startsWith('/etc.clientlibs/') || assetPath.startsWith('/etc/')) {
+            resolvedUrl = `${publishUrl}${assetPath}`;
+          } else if (assetPath.startsWith('/') && codeBase) {
+            resolvedUrl = `${codeBase}${assetPath}`;
+          } else if (assetPath.startsWith('/')) {
+            resolvedUrl = `${publishUrl}${assetPath}`;
+          } else {
+            return match;
+          }
+
+          return `${prefix}${workerOrigin}/asset?url=${encodeURIComponent(resolvedUrl)}${suffix}`;
+        },
+      );
+
+      // Fetch interceptor for dynamic block loading by aem.js
+      const fetchInterceptor = `<script>
+(function(){
+  var W='${workerOrigin}',A='${authorBase}',C='${codeBase}',P='${publishUrl}';
+  var _f=window.fetch;
+  window.fetch=function(u,o){
+    if(typeof u==='string'){
+      if(u.includes('.resource/')){u=W+'/asset?url='+encodeURIComponent(A+u);}
+      else if(u.startsWith('/blocks/')||u.startsWith('/scripts/')||u.startsWith('/styles/')){
+        u=W+'/asset?url='+encodeURIComponent((C||P)+u);
+      }
+    }
+    return _f.call(this,u,o);
+  };
+})();
+<\/script>`;
+
+      html = html.replace(/<head([^>]*)>/, `<head$1><base href="${publishUrl}/">${fetchInterceptor}`);
+    } else {
+      // Standard: strip all scripts
+      html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+      html = html.replace(/<head>/, `<head><base href="${publishUrl}/">`);
+    }
+
+    // Strip xwalk UE instrumentation (all modes)
     html = html.replace(/<div[^>]*data-aue-prop=[^>]*>[^<]*<\/div>/gi, '');
     html = html.replace(/<div[^>]*class="[^"]*section-metadata[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, '');
     html = html.replace(/<div>\s*(false|true|overlay|button|sec-spacing[^<]*|section-none|sec-full-width|sec-full-width-background|image-left|image-right|cta-button[^<]*|text-center|light|dark|hidden|teaser-card|teaser-overlay|image-top|image-bottom|teaserStyle|ctastyle|style)\s*<\/div>/gi, '');
@@ -671,10 +640,7 @@ async function handlePreview(request) {
     html = html.replace(/<div>\s*<\/div>/g, '');
     html = html.replace(/\n{3,}/g, '\n\n');
 
-    // Step 5: Add <base> for images and relative links
-    html = html.replace(/<head>/, `<head><base href="${publishUrl}/">`);
-
-    // Step 6: Inject fallback CSS
+    // Inject fallback CSS (supplements inlined site CSS for blocks that need JS decoration)
     const aemFallbackCss = `<style>
 :root{--brand:#1473e6;--bg:#fff;--text:#2c2c2c;--text-light:#666;--font:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;--max-w:1200px;--gap:2rem;--radius:8px}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -707,7 +673,7 @@ main>div+div{border-top:1px solid #f0f0f0}
 .compass-preview-banner{position:sticky;top:0;z-index:999;background:#1e293b;color:#94a3b8;font:12px/1.4 system-ui;padding:6px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #334155}
 .compass-preview-banner strong{color:#e2e8f0}
 </style>`;
-    html = html.replace(/<head>/, `<head>${aemFallbackCss}`);
+    html = html.replace(/<head[^>]*>/, (m) => `${m}${aemFallbackCss}`);
 
     // Add content preview banner
     const bannerHtml = `<div class="compass-preview-banner"><strong>Content preview</strong> — Use the Preview button in toolbar for the full styled page</div>`;
@@ -769,8 +735,34 @@ async function handleAssetProxy(request) {
     const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
     if (userToken) {
       headers.Authorization = `Bearer ${userToken}`;
-    } else if (cachedToken) {
-      headers.Authorization = `Bearer ${cachedToken}`;
+    } else {
+      // Ensure S2S token is available (may be null in a fresh Worker isolate)
+      const now = Date.now();
+      if (!cachedToken || tokenExpiry <= now + 300000) {
+        try {
+          const body = new URLSearchParams({
+            grant_type: 'client_credentials',
+            client_id: IMS_CLIENT_ID,
+            client_secret: IMS_CLIENT_SECRET,
+            scope: IMS_SCOPE,
+          });
+          const imsResp = await fetch(IMS_TOKEN_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body,
+          });
+          if (imsResp.ok) {
+            const data = await imsResp.json();
+            if (data.access_token) {
+              cachedToken = data.access_token;
+              tokenExpiry = now + (data.expires_in || 86400000);
+            }
+          }
+        } catch { /* S2S unavailable */ }
+      }
+      if (cachedToken) {
+        headers.Authorization = `Bearer ${cachedToken}`;
+      }
     }
   }
 
