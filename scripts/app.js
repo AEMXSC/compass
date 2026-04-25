@@ -3773,9 +3773,8 @@ async function connectCustomSite(input) {
   // Update contextual prompt chips for the connected site
   if (typeof updateContextChips === 'function') updateContextChips();
 
-  // For JCR/xwalk sites: Worker reverse proxy for pixel-perfect author preview
-  // The Worker proxies the entire author page — all sub-requests (CSS, JS, images)
-  // go through the Worker automatically (same origin). No URL rewriting needed.
+  // For JCR/xwalk sites: Worker standard preview (content + fallback CSS)
+  // Punch-out Preview button opens the real page in a new tab for pixel-perfect view.
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
     const jcrPath = parsed.path || '/content';
     activeResourcePath = jcrPath;
@@ -3786,22 +3785,28 @@ async function connectCustomSite(input) {
     const WORKER_BASE = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
     const authorHost = parsed.aemHost;
     const publishUrl = `https://${authorHost.replace('author-', 'publish-')}`;
+    const authorUrl = `https://${authorHost}`;
 
-    // Reverse proxy URL: Worker/aem/{authorHost}/{path}
+    // Standard Worker preview: fetches from publish (or author with token), inlines CSS, fallback styles
+    const previewParams = new URLSearchParams({
+      publish: publishUrl,
+      author: authorUrl,
+      path: jcrPath + '.html',
+      _t: Date.now(),
+    });
     const token = getToken();
-    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-    const inlinePreviewUrl = `${WORKER_BASE}/aem/${authorHost}${jcrPath}.html${tokenParam}`;
+    if (token) previewParams.set('token', token);
+    const inlinePreviewUrl = `${WORKER_BASE}/preview?${previewParams}`;
 
     if (previewFrame) {
       previewFrame.removeAttribute('srcdoc');
       previewFrame.src = inlinePreviewUrl;
     }
 
-    // Store config for refresh + punch-out
     window.__JCR_PREVIEW_CONFIG = {
-      workerBase: WORKER_BASE, publishUrl, authorHost, jcrPath, org, repo, branch,
+      workerBase: WORKER_BASE, publishUrl, authorUrl, jcrPath, org, repo, branch,
       publishPageUrl: `${publishUrl}${jcrPath}.html`,
-      authorPageUrl: `https://${authorHost}${jcrPath}.html`,
+      authorPageUrl: `${authorUrl}${jcrPath}.html`,
     };
     window.__JCR_PREVIEW_URL = inlinePreviewUrl;
   } else {
@@ -3813,10 +3818,16 @@ async function connectCustomSite(input) {
     const cfg = window.__JCR_PREVIEW_CONFIG;
     if (!cfg || !previewFrame) return;
     showToast('Updating preview...', 'info');
+    const params = new URLSearchParams({
+      publish: cfg.publishUrl,
+      author: cfg.authorUrl,
+      path: cfg.jcrPath + '.html',
+      _t: Date.now(),
+    });
     const tk = getToken();
-    const tokenParam = tk ? `?token=${encodeURIComponent(tk)}` : '';
+    if (tk) params.set('token', tk);
     previewFrame.removeAttribute('srcdoc');
-    previewFrame.src = `${cfg.workerBase}/aem/${cfg.authorHost}${cfg.jcrPath}.html${tokenParam}&_t=${Date.now()}`;
+    previewFrame.src = `${cfg.workerBase}/preview?${params}`;
   };
 
   loadResources();
