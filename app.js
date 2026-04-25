@@ -896,6 +896,8 @@ function getPageContext() {
 async function ensurePageContext() {
   const currentUrl = previewFrame.src || PREVIEW_URL;
   if (cachedPageHTML && cachedPageUrl === currentUrl) return;
+  // For Worker preview URLs, the HTML cache is populated async on connect — don't re-fetch
+  if (cachedPageHTML && currentUrl.includes('/preview?')) return;
   cachedPageUrl = currentUrl;
   cachedPageHTML = await fetchPageHTML(currentUrl);
 }
@@ -3561,9 +3563,16 @@ async function connectCustomSite(input) {
           previewFrame.removeAttribute('srcdoc');
           previewFrame.src = workerPreviewUrl;
 
-          // Cache page HTML for AI context
-          fetch(workerPreviewUrl).then((r) => r.ok ? r.text() : null).then((html) => {
-            if (html) cachedPageHTML = html;
+          // Cache page HTML for AI context — fetch raw content (no inlined CSS) for speed
+          cachedPageUrl = workerPreviewUrl;
+          const rawParams = new URLSearchParams(previewParams);
+          rawParams.set('mode', 'raw');
+          fetch(`${workerBase}/preview?${rawParams}`).then((r) => r.ok ? r.text() : null).then((html) => {
+            if (html) {
+              const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+              cachedPageHTML = bodyMatch ? bodyMatch[1] : html;
+              cachedPageUrl = workerPreviewUrl;
+            }
           }).catch(() => {});
 
           console.log(`[EW] JCR preview: Worker proxy iframe set for ${jcrPath}`);
