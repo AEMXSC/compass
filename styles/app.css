@@ -1372,10 +1372,9 @@ textarea:focus-visible,
   margin: 0 auto;
 }
 
-/* Push messages to bottom when content is shorter than container (like Claude.ai) */
-.chat-area::before {
-  content: '';
-  flex: 1;
+/* Pin messages to bottom when content is shorter than container */
+.chat-area > :first-child {
+  margin-top: auto;
 }
 }
 
@@ -1708,15 +1707,33 @@ textarea:focus-visible,
 }
 
 .thinking-pulse {
-  display: inline-block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   color: var(--text-muted);
-  animation: thinkPulse 1.5s ease-in-out infinite;
+  padding: 8px 0;
 }
 
-@keyframes thinkPulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+.thinking-dots {
+  display: flex;
+  gap: 3px;
+}
+
+.thinking-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: thinkDot 1.4s ease-in-out infinite;
+}
+
+.thinking-dots span:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes thinkDot {
+  0%, 70%, 100% { opacity: 0.25; transform: scale(0.8); }
+  35% { opacity: 1; transform: scale(1.1); }
 }
 
 /* ─── Input Area ─── */
@@ -4330,6 +4347,10 @@ textarea:focus-visible,
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.panel-chat .chat-area > :first-child {
+  margin-top: auto;
   max-width: none;
   margin: 0;
 }

@@ -1904,10 +1904,12 @@ async function handleRealChat(text, file) {
           }
         };
 
-        // Reload after CDN propagation
-        setTimeout(refreshPreview, 2000);
+        // Reload after CDN propagation (DA preview API needs 3-5s)
+        setTimeout(refreshPreview, 3000);
         // Safety net
-        setTimeout(refreshPreview, 7000);
+        setTimeout(refreshPreview, 8000);
+        // Final attempt
+        setTimeout(refreshPreview, 15000);
       }
 
       // Auth required — no write happened, tell the user clearly
@@ -1939,7 +1941,8 @@ async function handleRealChat(text, file) {
   const streamEl = addStreamMessage('Experience Agent');
 
   // Show thinking indicator immediately so user knows something is happening
-  streamEl.innerHTML = '<span class="thinking-pulse">Thinking...</span>';
+  streamEl.innerHTML = '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';
+  scrollChat();
 
   // P3: Optimistic intent detection — parse streamed text for change intent
   let intentShown = false;
