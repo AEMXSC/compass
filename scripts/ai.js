@@ -5367,8 +5367,9 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const lastMsg = messages[messages.length - 1]?.content;
   const promptText = typeof lastMsg === 'string' ? lastMsg : '';
 
-  // Use fast model (Haiku) for simple edits when page HTML is already in context
-  const useFastModel = context.pageHTML && isSimpleEdit(promptText);
+  // Use fast model (Haiku) for simple edits — even without cached page HTML,
+  // Haiku is 3-5x faster at generating tool calls for read → edit flows
+  const useFastModel = isSimpleEdit(promptText);
   const model = useFastModel ? MODEL_FAST : MODEL;
 
   // Tiered tools: send only relevant tools based on prompt intent (P0 speed optimization)

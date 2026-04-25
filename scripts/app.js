@@ -1006,10 +1006,14 @@ function getPageContext() {
 }
 
 async function ensurePageContext() {
-  const currentUrl = previewFrame.src || PREVIEW_URL;
-  if (cachedPageHTML && cachedPageUrl === currentUrl) return;
-  cachedPageUrl = currentUrl;
-  cachedPageHTML = await fetchPageHTML(currentUrl);
+  // Use the clean preview URL (without cache-bust params) for caching
+  const rawUrl = (previewFrame?.src || PREVIEW_URL || '').replace(/[?&]_t=\d+/, '');
+  if (cachedPageHTML && cachedPageUrl === rawUrl) return;
+  cachedPageUrl = rawUrl;
+  cachedPageHTML = await fetchPageHTML(rawUrl);
+  if (cachedPageHTML) {
+    console.debug(`[PageContext] Cached ${cachedPageHTML.length} chars for ${rawUrl.substring(0, 60)}`);
+  }
 }
 
 /* ── Tool Result Renderers ── */
