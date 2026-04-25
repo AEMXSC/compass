@@ -296,13 +296,8 @@ function buildAgentHeader(agentName) {
   if (isAdobe) tags += '<span class="agent-tag adobe">Adobe</span>';
   if (isMcp) tags += '<span class="agent-tag mcp">MCP</span>';
 
-  return `<div class="agent-avatar">${icon}</div>
-    <div class="agent-body" style="border-left-color: ${color}">
-      <div class="agent-header">
-        <span class="agent-name" style="color: ${color}">${escapeHtml(agentName)}</span>
-        ${role ? `<span class="agent-role">${escapeHtml(role)}</span>` : ''}
-        ${tags}
-      </div>`;
+  // Returns avatar + open agent-body with header. Caller must add content + close </div> for agent-body.
+  return `<div class="agent-avatar">${icon}</div><div class="agent-body" style="border-left-color: ${color}"><div class="agent-header"><span class="agent-name" style="color: ${color}">${escapeHtml(agentName)}</span>${role ? `<span class="agent-role">${escapeHtml(role)}</span>` : ''}${tags}</div>`;
 }
 
 /* ── Chat Primitives ── */
@@ -1938,7 +1933,7 @@ async function handleRealChat(text, file) {
     }
   }
 
-  const streamEl = addStreamMessage('Experience Agent');
+  const streamEl = addStreamMessage('Compass');
 
   // Show thinking indicator immediately so user knows something is happening
   streamEl.innerHTML = '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';

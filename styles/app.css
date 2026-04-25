@@ -1372,10 +1372,7 @@ textarea:focus-visible,
   margin: 0 auto;
 }
 
-/* Pin messages to bottom when content is shorter than container */
-.chat-area > :first-child {
-  margin-top: auto;
-}
+/* Messages grow from top. scrollChat() auto-scrolls to latest. */
 }
 
 /* ─── Welcome Card ─── */
@@ -4349,8 +4346,7 @@ textarea:focus-visible,
   gap: 10px;
 }
 
-.panel-chat .chat-area > :first-child {
-  margin-top: auto;
+/* Messages grow from top in editor panel too. */
   max-width: none;
   margin: 0;
 }
