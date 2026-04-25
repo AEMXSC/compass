@@ -5060,7 +5060,29 @@ Senior AEM architect who understands marketing KPIs. Technical precision meets b
 /* Returns an array of { type: 'text', text, cache_control? } blocks for the Claude API.
    Static layers get cache_control: { type: 'ephemeral' } so Claude can cache them
    across requests (~35KB saved per round-trip). Dynamic layers change per request. */
-function buildSystemParts(context = {}) {
+const FAST_SYSTEM_PROMPT = `You are Compass, an AI assistant for Adobe Experience Manager content editing.
+You have tools to read and edit page content. When asked to change content:
+1. If page HTML is provided below, edit it directly with edit_page_content.
+2. If not, call get_page_content first, then edit_page_content with the modified HTML.
+3. Keep the existing HTML structure — only change the specific text/element requested.
+4. Always trigger preview after editing.
+Be concise. Execute immediately. Don't explain what you'll do — just do it.`;
+
+function buildSystemParts(context = {}, { fast = false } = {}) {
+  // Fast mode: minimal prompt for simple edits (Haiku — every token counts)
+  if (fast) {
+    const blocks = [{ type: 'text', text: FAST_SYSTEM_PROMPT }];
+    // Add page context if available
+    if (context.org?.orgId) {
+      let pageCtx = `Site: ${context.org.orgId}/${context.org.repo} (${context.siteType || 'unknown'})`;
+      if (context.pagePath) pageCtx += ` | Path: ${context.pagePath}`;
+      if (context.pageHTML) pageCtx += `\n\nPage HTML:\n\`\`\`html\n${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}\n\`\`\``;
+      blocks.push({ type: 'text', text: pageCtx });
+    }
+    return blocks;
+  }
+
+  // Full mode: complete system prompt with all knowledge layers
   // Static layers — cacheable across requests
   const blocks = [
     { type: 'text', text: AEM_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
@@ -5358,7 +5380,6 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('Claude API key not configured');
 
-  const system = buildSystemParts(context);
   let messages = Array.isArray(userMessage)
     ? [...userMessage]
     : [{ role: 'user', content: userMessage }];
@@ -5367,12 +5388,12 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const lastMsg = messages[messages.length - 1]?.content;
   const promptText = typeof lastMsg === 'string' ? lastMsg : '';
 
-  // Use fast model (Haiku) for simple edits — even without cached page HTML,
-  // Haiku is 3-5x faster at generating tool calls for read → edit flows
+  // Use fast model + minimal prompt for simple edits
   const useFastModel = isSimpleEdit(promptText);
   const model = useFastModel ? MODEL_FAST : MODEL;
+  const system = buildSystemParts(context, { fast: useFastModel });
 
-  // Tiered tools: send only relevant tools based on prompt intent (P0 speed optimization)
+  // Tiered tools: send only relevant tools based on prompt intent
   const tools = getToolsForPrompt(promptText);
 
   let fullText = '';
