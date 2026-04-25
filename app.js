@@ -903,8 +903,8 @@ function getPageContext() {
 async function ensurePageContext() {
   const currentUrl = previewFrame.src || PREVIEW_URL;
   if (cachedPageHTML && cachedPageUrl === currentUrl) return;
-  // For Worker preview URLs, the HTML cache is populated async on connect — don't re-fetch
-  if (cachedPageHTML && currentUrl.includes('/preview?')) return;
+  // Worker preview URLs: cache is populated async on connect — never re-fetch here
+  if (currentUrl.includes('/preview?')) return;
   cachedPageUrl = currentUrl;
   cachedPageHTML = await fetchPageHTML(currentUrl);
 }
