@@ -1795,7 +1795,13 @@ async function handleRealChat(text, file) {
     } catch { /* non-blocking */ }
   }
 
-  await ensurePageContext();
+  // Show thinking indicator IMMEDIATELY (before any async work)
+  const streamEl = addStreamMessage('Compass');
+  streamEl.innerHTML = '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';
+  scrollChat();
+
+  // Pre-fetch page context (non-blocking — don't wait if it's slow)
+  await Promise.race([ensurePageContext(), sleep(2000)]);
   const ctx = getPageContext();
 
   // Tool call UI container — collapsible tool calls (like Claude.ai)
@@ -1897,40 +1903,36 @@ async function handleRealChat(text, file) {
           showToast('Updating preview...', 'info');
           setTimeout(() => window.__refreshJcrPreview?.(), 2000);
           setTimeout(() => window.__refreshJcrPreview?.(), 8000);
-        } else if (previewFrame && isSignedIn() && da.getOrg()) {
-          // DA/EDS: instant optimistic preview — fetch fresh HTML from DA Admin API
-          try {
-            const htmlPath = (path === '/' ? '/index' : path) + '.html';
-            const freshHTML = await da.getPage(htmlPath);
-            if (typeof freshHTML === 'string' && freshHTML.length > 0) {
-              const base = AEM_ORG.previewOrigin;
-              previewFrame.removeAttribute('src');
-              previewFrame.srcdoc = `<!DOCTYPE html><html><head>
-                <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-                <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
-                <script src="${base}/scripts/aem.js" type="module"><\/script>
-                <script src="${base}/scripts/scripts.js" type="module"><\/script>
-              </head><body><header></header><main>${freshHTML}</main><footer></footer></body></html>`;
-              cachedPageHTML = freshHTML;
-              showToast(`Page ${path} updated`, 'success');
-            }
-          } catch (e) {
-            console.warn('[Preview] DA optimistic render failed:', e.message);
-          }
-          // Swap to real CDN after propagation
-          setTimeout(() => {
-            if (previewFrame) {
-              previewFrame.removeAttribute('srcdoc');
-              previewFrame.src = AEM_ORG.previewOrigin + path + '?_t=' + Date.now();
-            }
-          }, 8000);
         } else if (previewFrame) {
-          // Fallback: hard reload
-          showToast(`Page ${path} saved — refreshing...`, 'info');
+          // DA/EDS: try optimistic preview, fall back to hard reload
+          let optimistic = false;
+          if (isSignedIn() && da.getOrg()) {
+            try {
+              const htmlPath = (path === '/' ? '/index' : path) + '.html';
+              const freshHTML = await da.getPage(htmlPath);
+              if (typeof freshHTML === 'string' && freshHTML.length > 0) {
+                const base = AEM_ORG.previewOrigin;
+                previewFrame.removeAttribute('src');
+                previewFrame.srcdoc = `<!DOCTYPE html><html><head>
+                  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+                  <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
+                  <script src="${base}/scripts/aem.js" type="module"><\/script>
+                  <script src="${base}/scripts/scripts.js" type="module"><\/script>
+                </head><body><header></header><main>${freshHTML}</main><footer></footer></body></html>`;
+                cachedPageHTML = freshHTML;
+                optimistic = true;
+                showToast(`Page ${path} updated`, 'success');
+              }
+            } catch { /* DA optimistic failed — fall through to hard reload */ }
+          }
+          // Always schedule CDN reload (optimistic or not)
+          const reloadUrl = AEM_ORG.previewOrigin + path;
+          if (!optimistic) showToast(`Page ${path} saved — refreshing...`, 'info');
           setTimeout(() => {
+            previewFrame.removeAttribute('srcdoc');
             previewFrame.src = 'about:blank';
-            setTimeout(() => { previewFrame.src = AEM_ORG.previewOrigin + path + '?_t=' + Date.now(); }, 200);
-          }, 3000);
+            setTimeout(() => { previewFrame.src = reloadUrl + '?_t=' + Date.now(); }, 200);
+          }, optimistic ? 8000 : 3000);
         }
       }
 
@@ -1960,11 +1962,7 @@ async function handleRealChat(text, file) {
     }
   }
 
-  const streamEl = addStreamMessage('Compass');
-
-  // Show thinking indicator immediately so user knows something is happening
-  streamEl.innerHTML = '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';
-  scrollChat();
+  // streamEl already created above (before ensurePageContext)
 
   // P3: Optimistic intent detection — parse streamed text for change intent
   let intentShown = false;
