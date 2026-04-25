@@ -85,6 +85,9 @@ async function route(request) {
   if (url.pathname === '/asset' && request.method === 'GET') {
     return handleAssetProxy(request);
   }
+  if (url.pathname.startsWith('/aem/') && (request.method === 'GET' || request.method === 'OPTIONS')) {
+    return handleAemReverseProxy(request);
+  }
   if (url.pathname === '/ims/login' && request.method === 'GET') {
     return handleImsLogin(request);
   }
@@ -795,6 +798,117 @@ async function handleAssetProxy(request) {
     });
   } catch (err) {
     return new Response(`Asset proxy error: ${err.message}`, { status: 502 });
+  }
+}
+
+/* ─── GET /aem/* — Full reverse proxy for AEM author/publish ─── */
+/*
+ * Proxies ALL requests to AEM author tier. The iframe loads from Worker origin,
+ * so ALL sub-requests (CSS, JS, images, dynamic fetch) automatically go through
+ * the Worker. No URL rewriting, no fetch interceptor needed.
+ *
+ * URL pattern: /aem/{authorHost}/{path}
+ * Example: /aem/author-p153659-e1614585.adobeaemcloud.com/content/wknd-universal/.../en.html
+ *
+ * Auth: user token from ?token= param, or S2S fallback
+ */
+
+async function handleAemReverseProxy(request) {
+  const url = new URL(request.url);
+
+  if (request.method === 'OPTIONS') {
+    return handleCors(request);
+  }
+
+  // Parse: /aem/{host}/{path...}
+  const pathParts = url.pathname.replace(/^\/aem\//, '').split('/');
+  const aemHost = pathParts.shift();
+  const aemPath = '/' + pathParts.join('/');
+
+  if (!aemHost || !aemHost.endsWith('.adobeaemcloud.com')) {
+    return new Response('Invalid AEM host — must be *.adobeaemcloud.com', { status: 400 });
+  }
+
+  // Resolve auth: user token from query param, then S2S
+  let authToken = url.searchParams.get('token') || null;
+  if (!authToken) {
+    const now = Date.now();
+    if (!cachedToken || tokenExpiry <= now + 300000) {
+      try {
+        const body = new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: IMS_CLIENT_ID,
+          client_secret: IMS_CLIENT_SECRET,
+          scope: IMS_SCOPE,
+        });
+        const imsResp = await fetch(IMS_TOKEN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        });
+        if (imsResp.ok) {
+          const data = await imsResp.json();
+          if (data.access_token) {
+            cachedToken = data.access_token;
+            tokenExpiry = now + (data.expires_in || 86400000);
+          }
+        }
+      } catch { /* S2S unavailable */ }
+    }
+    authToken = cachedToken;
+  }
+
+  // Build the upstream URL (strip ?token= from query)
+  const upstreamUrl = new URL(`https://${aemHost}${aemPath}`);
+  // Forward query params except token
+  for (const [k, v] of url.searchParams) {
+    if (k !== 'token') upstreamUrl.searchParams.set(k, v);
+  }
+
+  // Fetch from AEM
+  const headers = {};
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+
+  try {
+    const resp = await fetch(upstreamUrl.toString(), { headers, redirect: 'follow' });
+
+    // Get response body and content type
+    const contentType = resp.headers.get('content-type') || 'application/octet-stream';
+    const isHTML = contentType.includes('text/html');
+
+    let body;
+    if (isHTML) {
+      // Rewrite absolute URLs in HTML to go through the reverse proxy
+      let html = await resp.text();
+      // Rewrite links/scripts/images that point to the same AEM host
+      html = html.replace(
+        /((?:src|href|action)=["'])(\/[^"']*)(["'])/gi,
+        (match, pre, path, post) => `${pre}/aem/${aemHost}${path}${post}`,
+      );
+      // Rewrite CSS url() references
+      html = html.replace(
+        /url\(\s*(['"]?)(\/[^'")]+)\1\s*\)/g,
+        (match, q, path) => `url(${q}/aem/${aemHost}${path}${q})`,
+      );
+      body = html;
+    } else {
+      body = await resp.arrayBuffer();
+    }
+
+    // Cache: short for HTML, longer for static assets
+    const isStatic = /\.(css|js|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|webp|ico)$/i.test(aemPath);
+    const cacheTime = isStatic ? 3600 : 60;
+
+    return new Response(body, {
+      status: resp.status,
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': `public, max-age=${cacheTime}`,
+        // No X-Frame-Options — we WANT this to be iframeable
+      },
+    });
+  } catch (err) {
+    return new Response(`AEM proxy error: ${err.message}`, { status: 502 });
   }
 }
 
