@@ -1891,25 +1891,47 @@ async function handleRealChat(text, file) {
       if (result._action === 'refresh_preview' && result._preview_path) {
         const path = result._preview_path;
         activeResourcePath = path;
-        showToast(`Page ${path} saved — refreshing preview...`, 'success');
 
-        const refreshPreview = () => {
-          if (window.__JCR_PREVIEW_CONFIG) {
-            window.__refreshJcrPreview?.();
-          } else if (previewFrame) {
-            // DA/EDS: hard reload — blank the iframe first to force fresh fetch
-            const url = AEM_ORG.previewOrigin + path;
-            previewFrame.src = 'about:blank';
-            setTimeout(() => {
-              previewFrame.src = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
-            }, 200);
+        if (window.__JCR_PREVIEW_CONFIG) {
+          // JCR/xwalk: reload Worker proxy
+          showToast('Updating preview...', 'info');
+          setTimeout(() => window.__refreshJcrPreview?.(), 2000);
+          setTimeout(() => window.__refreshJcrPreview?.(), 8000);
+        } else if (previewFrame && isSignedIn() && da.getOrg()) {
+          // DA/EDS: instant optimistic preview — fetch fresh HTML from DA Admin API
+          try {
+            const htmlPath = (path === '/' ? '/index' : path) + '.html';
+            const freshHTML = await da.getPage(htmlPath);
+            if (typeof freshHTML === 'string' && freshHTML.length > 0) {
+              const base = AEM_ORG.previewOrigin;
+              previewFrame.removeAttribute('src');
+              previewFrame.srcdoc = `<!DOCTYPE html><html><head>
+                <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+                <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
+                <script src="${base}/scripts/aem.js" type="module"><\/script>
+                <script src="${base}/scripts/scripts.js" type="module"><\/script>
+              </head><body><header></header><main>${freshHTML}</main><footer></footer></body></html>`;
+              cachedPageHTML = freshHTML;
+              showToast(`Page ${path} updated`, 'success');
+            }
+          } catch (e) {
+            console.warn('[Preview] DA optimistic render failed:', e.message);
           }
-        };
-
-        // Reload after CDN propagation
-        setTimeout(refreshPreview, 3000);
-        setTimeout(refreshPreview, 10000);
-        setTimeout(refreshPreview, 20000);
+          // Swap to real CDN after propagation
+          setTimeout(() => {
+            if (previewFrame) {
+              previewFrame.removeAttribute('srcdoc');
+              previewFrame.src = AEM_ORG.previewOrigin + path + '?_t=' + Date.now();
+            }
+          }, 8000);
+        } else if (previewFrame) {
+          // Fallback: hard reload
+          showToast(`Page ${path} saved — refreshing...`, 'info');
+          setTimeout(() => {
+            previewFrame.src = 'about:blank';
+            setTimeout(() => { previewFrame.src = AEM_ORG.previewOrigin + path + '?_t=' + Date.now(); }, 200);
+          }, 3000);
+        }
       }
 
       // Auth required — no write happened, tell the user clearly
