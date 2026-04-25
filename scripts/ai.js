@@ -5385,14 +5385,22 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     ? [...userMessage]
     : [{ role: 'user', content: userMessage }];
 
-  // Extract the latest user prompt text for intent classification + model routing
-  const lastMsg = messages[messages.length - 1]?.content;
-  const promptText = typeof lastMsg === 'string' ? lastMsg : '';
+  // Extract the latest USER prompt text for intent classification + model routing
+  // Search backwards for the last user message (skip assistant messages in history)
+  let promptText = '';
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      const c = messages[i].content;
+      promptText = typeof c === 'string' ? c : (Array.isArray(c) ? c.find((b) => b.type === 'text')?.text || '' : '');
+      break;
+    }
+  }
 
   // Use fast model + minimal prompt for simple edits
   const useFastModel = isSimpleEdit(promptText);
   const model = useFastModel ? MODEL_FAST : MODEL;
   const system = buildSystemParts(context, { fast: useFastModel });
+  console.debug(`[AI] Model: ${model} | Fast: ${useFastModel} | Tools: ${useFastModel ? 5 : 'tiered'} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
   // Tiered tools: fast mode gets minimal tools, full mode gets intent-based
   const tools = useFastModel
