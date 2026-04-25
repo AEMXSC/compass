@@ -105,14 +105,26 @@ export async function deletePage(path) {
 export async function previewPage(path) {
   requireSite();
   const url = `https://admin.hlx.page/preview/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
-  const resp = await fetchWithToken(url, { method: 'POST' });
+  const token = getToken();
+  const headers = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+    headers['x-content-source-authorization'] = `Bearer ${token}`;
+  }
+  const resp = await fetch(url, { method: 'POST', headers });
   return resp;
 }
 
 export async function publishPage(path) {
   requireSite();
   const url = `https://admin.hlx.page/live/${DA_ORG}/${DA_REPO}/${DA_BRANCH}${path}`;
-  const resp = await fetchWithToken(url, { method: 'POST' });
+  const token = getToken();
+  const headers = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+    headers['x-content-source-authorization'] = `Bearer ${token}`;
+  }
+  const resp = await fetch(url, { method: 'POST', headers });
   return resp;
 }
 
