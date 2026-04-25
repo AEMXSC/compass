@@ -20,7 +20,7 @@
 import { getToken } from './ims.js';
 
 const MCP_BASE = 'https://mcp.adobeaemcloud.com';
-const MCP_PROTOCOL_VERSION = '2024-11-05';
+const MCP_PROTOCOL_VERSION = '2025-03-26';
 const WORKER_MCP_BASE = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev') + '/mcp?endpoint=';
 
 /**
