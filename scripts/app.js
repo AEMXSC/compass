@@ -1904,15 +1904,15 @@ async function handleRealChat(text, file) {
           setTimeout(() => window.__refreshJcrPreview?.(), 2000);
           setTimeout(() => window.__refreshJcrPreview?.(), 8000);
         } else if (previewFrame) {
-          // DA/EDS: try optimistic preview, fall back to hard reload
-          let optimistic = false;
+          const previewUrl = AEM_ORG.previewOrigin + path;
+
+          // DA/EDS: optimistic render — fetch fresh HTML from DA Admin API (instant)
           if (isSignedIn() && da.getOrg()) {
             try {
               const htmlPath = (path === '/' ? '/index' : path) + '.html';
               const freshHTML = await da.getPage(htmlPath);
               if (typeof freshHTML === 'string' && freshHTML.length > 0) {
                 const base = AEM_ORG.previewOrigin;
-                previewFrame.removeAttribute('src');
                 previewFrame.srcdoc = `<!DOCTYPE html><html><head>
                   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
                   <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
@@ -1920,19 +1920,21 @@ async function handleRealChat(text, file) {
                   <script src="${base}/scripts/scripts.js" type="module"><\/script>
                 </head><body><header></header><main>${freshHTML}</main><footer></footer></body></html>`;
                 cachedPageHTML = freshHTML;
-                optimistic = true;
-                showToast(`Page ${path} updated`, 'success');
+                cachedPageUrl = previewUrl;
+                showToast(`Page ${path} saved — preview updated`, 'success');
               }
-            } catch { /* DA optimistic failed — fall through to hard reload */ }
+            } catch (e) {
+              console.warn('[Preview] Optimistic render failed:', e.message);
+            }
           }
-          // Always schedule CDN reload (optimistic or not)
-          const reloadUrl = AEM_ORG.previewOrigin + path;
-          if (!optimistic) showToast(`Page ${path} saved — refreshing...`, 'info');
+
+          // Swap to real CDN after propagation
           setTimeout(() => {
-            previewFrame.removeAttribute('srcdoc');
-            previewFrame.src = 'about:blank';
-            setTimeout(() => { previewFrame.src = reloadUrl + '?_t=' + Date.now(); }, 200);
-          }, optimistic ? 8000 : 3000);
+            if (previewFrame && previewFrame.srcdoc) {
+              previewFrame.removeAttribute('srcdoc');
+              previewFrame.src = previewUrl;
+            }
+          }, 5000);
         }
       }
 
