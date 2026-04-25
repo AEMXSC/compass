@@ -1372,6 +1372,13 @@ textarea:focus-visible,
   margin: 0 auto;
 }
 
+/* Push messages to bottom when content is shorter than container (like Claude.ai) */
+.chat-area::before {
+  content: '';
+  flex: 1;
+}
+}
+
 /* ─── Welcome Card ─── */
 .welcome-card {
   text-align: center;
