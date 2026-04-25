@@ -806,6 +806,8 @@ function getBrandPolicies() {
 /* ── Get Page Context ── */
 let cachedPageHTML = null;
 let cachedPageUrl = null;
+let cachedJcrEtag = null;
+let cachedJcrEtagPath = null;
 
 async function fetchPageHTML(url) {
   // Method 0: DA Admin API (authenticated, no CORS issues — most reliable for DA sites)
@@ -886,6 +888,11 @@ function getPageContext() {
   // Use cached fetched HTML
   if (!ctx.pageHTML && cachedPageHTML) {
     ctx.pageHTML = cachedPageHTML;
+  }
+  // Attach pre-fetched ETag (allows AI to skip get_page_content and patch directly)
+  if (cachedJcrEtag && cachedJcrEtagPath === (activeResourcePath || '/')) {
+    ctx.jcrEtag = cachedJcrEtag;
+    ctx.jcrEtagPath = cachedJcrEtagPath;
   }
   // Attach project memory (persistent across sessions)
   const mem = getProjectMemory();
@@ -1692,6 +1699,12 @@ async function handleRealChat(text, file) {
           navigateToPage(path);
           showToast(`Page ${path} saved via GitHub — preview refreshed`, 'success');
         }, 1500);
+      }
+
+      // Invalidate cached ETag after any write (it's stale now)
+      if (result._action === 'refresh_preview') {
+        cachedJcrEtag = null;
+        cachedJcrEtagPath = null;
       }
 
       // Content saved — refresh preview to reflect changes.
@@ -3575,7 +3588,21 @@ async function connectCustomSite(input) {
             }
           }).catch(() => {});
 
-          console.log(`[EW] JCR preview: Worker proxy iframe set for ${jcrPath}`);
+          // Pre-fetch ETag so AI can patch without a read call (saves one full round trip)
+          if (isSignedIn() && window.__EW_AEM_HOST) {
+            import('./aem-content-mcp-client.js').then(async (aemContent) => {
+              try {
+                const result = await aemContent.getPage(window.__EW_AEM_HOST, jcrPath);
+                if (result?.etag) {
+                  cachedJcrEtag = result.etag;
+                  cachedJcrEtagPath = jcrPath;
+                  console.log(`[EW] Pre-fetched ETag for ${jcrPath}: ${result.etag.slice(0, 20)}...`);
+                }
+              } catch (e) { console.warn('[EW] ETag pre-fetch failed:', e.message); }
+            });
+          }
+
+          console.log(`[EW] JCR preview: hybrid-mode iframe set for ${jcrPath}`);
         }
       } catch (e) {
         console.warn(`[EW] JCR Worker preview failed: ${e.message}. Falling back to srcdoc...`);
