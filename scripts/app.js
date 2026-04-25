@@ -1894,21 +1894,22 @@ async function handleRealChat(text, file) {
         showToast(`Page ${path} saved — refreshing preview...`, 'success');
 
         const refreshPreview = () => {
-          // JCR/xwalk: re-fetch from Worker proxy with EDS scripts
           if (window.__JCR_PREVIEW_CONFIG) {
             window.__refreshJcrPreview?.();
-          } else {
-            // DA/EDS: reload .aem.page iframe
-            navigateToPage(path);
+          } else if (previewFrame) {
+            // DA/EDS: hard reload — blank the iframe first to force fresh fetch
+            const url = AEM_ORG.previewOrigin + path;
+            previewFrame.src = 'about:blank';
+            setTimeout(() => {
+              previewFrame.src = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+            }, 200);
           }
         };
 
-        // Reload after CDN propagation (DA preview API needs 3-5s)
+        // Reload after CDN propagation
         setTimeout(refreshPreview, 3000);
-        // Safety net
-        setTimeout(refreshPreview, 8000);
-        // Final attempt
-        setTimeout(refreshPreview, 15000);
+        setTimeout(refreshPreview, 10000);
+        setTimeout(refreshPreview, 20000);
       }
 
       // Auth required — no write happened, tell the user clearly
