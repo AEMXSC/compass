@@ -2888,7 +2888,26 @@ async function loadResources() {
     } catch { /* ignore */ }
   }
 
-  // Fallback: at least show the homepage
+  // Fallback: DA Admin API list (shows all pages in the DA repo)
+  if (sitePages.length <= 1 && isSignedIn() && da.getOrg()) {
+    try {
+      const pages = await da.listPages('/');
+      if (Array.isArray(pages) && pages.length > 0) {
+        sitePages = pages
+          .filter((p) => p.path?.endsWith('.html') || p.ext === 'html')
+          .map((p) => {
+            const pagePath = '/' + (p.path || p.name || '').replace(/\.html$/, '').replace(/^\//, '');
+            return {
+              path: pagePath === '/index' ? '/' : pagePath,
+              title: (p.name || p.path || '').replace('.html', '').split('/').pop() || 'index',
+              description: '',
+            };
+          });
+      }
+    } catch { /* DA list not available */ }
+  }
+
+  // Final fallback: at least show the homepage
   if (sitePages.length === 0) {
     sitePages = [{ path: '/', title: 'index', description: 'Homepage' }];
   }
