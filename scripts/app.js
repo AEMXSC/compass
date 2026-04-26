@@ -1917,12 +1917,12 @@ async function handleRealChat(text, file) {
       stepEl.querySelector('.tool-call-status').textContent = 'Done';
     }
 
-    // Clear thinking status
+    // Update thinking to show "Processing results..." between rounds
     const agentName = TOOL_AGENT_MAP[toolName] || 'Adobe Agent';
     const group = agentContainers[agentName];
     if (group) {
       const thinkingEl = group.querySelector('.tool-group-thinking');
-      if (thinkingEl) { thinkingEl.textContent = ''; thinkingEl.classList.remove('active'); }
+      if (thinkingEl) { thinkingEl.textContent = 'Processing results...'; }
     }
 
     // ── Tool Result Renderer Dispatch ──
@@ -2039,6 +2039,11 @@ async function handleRealChat(text, file) {
         if (!firstChunkReceived) {
           firstChunkReceived = true;
           streamEl.innerHTML = '';
+          // Clear all thinking status lines when AI starts responding
+          document.querySelectorAll('.tool-group-thinking.active').forEach((el) => {
+            el.textContent = '';
+            el.classList.remove('active');
+          });
         }
         streamEl.innerHTML = md(full);
         scrollChat();

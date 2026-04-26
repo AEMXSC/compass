@@ -5131,8 +5131,10 @@ function buildSystemParts(context = {}, { fast = false } = {}) {
 You ALREADY have this page content.`;
       if (context.jcrEtag) {
         pageContext += `\n**Pre-fetched ETag:** \`${context.jcrEtag}\` (for path: ${context.jcrEtagPath})
-**SPEED RULE:** For edits to this page, call \`patch_aem_page_content\` DIRECTLY with this ETag. Do NOT call get_page_content first — you already have the content and ETag. This saves a full round trip.`;
-      } else if (!isJcr) {
+**SPEED RULE:** For edits to this page, call \`patch_aem_page_content\` DIRECTLY with this ETag. Do NOT call get_page_content first — you already have the content and ETag.`;
+      } else if (isJcr) {
+        pageContext += `\nFor JCR edits: call get_page_content ONCE to get the ETag, then immediately call patch_aem_page_content. Do NOT call get_page_content multiple times — one read is enough.`;
+      } else {
         pageContext += `\nFor DA edits, modify the HTML and call edit_page_content directly — no read call needed.`;
       }
       pageContext += `\n\n\`\`\`html
