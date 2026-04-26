@@ -1820,6 +1820,39 @@ async function handleRealChat(text, file) {
   const agentContainers = {};
   const toolsCalled = new Set(); // Track tools called this turn for suggestions
 
+  // Human-readable thinking status for each tool call
+  const TOOL_THINKING = {
+    get_page_content: (i) => `Reading page content${i.path ? ` for ${i.path}` : ''}...`,
+    patch_aem_page_content: (i) => `Updating ${i.updated_fields?.length || ''} field(s) on ${i.page_path || 'page'}...`,
+    edit_page_content: (i) => `Writing page content${i.page_path ? ` to ${i.page_path}` : ''}...`,
+    preview_page: (i) => `Triggering preview${i.path ? ` for ${i.path}` : ''}...`,
+    publish_page: (i) => `Publishing${i.path ? ` ${i.path}` : ' page'}...`,
+    list_site_pages: () => 'Listing site pages...',
+    list_aem_pages: (i) => `Listing pages under ${i.path || '/'}...`,
+    create_aem_page: (i) => `Creating new page${i.title ? ` "${i.title}"` : ''}...`,
+    copy_aem_page: (i) => `Copying page${i.source_path ? ` from ${i.source_path}` : ''}...`,
+    delete_aem_page: (i) => `Deleting page${i.path ? ` ${i.path}` : ''}...`,
+    list_aem_templates: () => 'Discovering available templates...',
+    search_dam_assets: (i) => `Searching assets${i.query ? ` for "${i.query}"` : ''}...`,
+    get_asset_renditions: () => 'Getting asset renditions...',
+    generate_rendition: () => 'Generating image rendition...',
+    get_aem_sites: () => 'Discovering AEM sites...',
+    translate_page: (i) => `Translating to ${i.target_language || 'target language'}...`,
+    create_form: () => 'Creating form...',
+    aem_read: (i) => `Reading AEM content${i.aem_url ? '' : ''}...`,
+    aem_write: () => 'Writing AEM content...',
+    aem_list_environments: () => 'Listing AEM environments...',
+    suggest_alt_text: () => 'Analyzing images for alt text...',
+    apply_alt_text: () => 'Applying alt text to images...',
+    check_citation_readability: () => 'Checking AI citation readability...',
+  };
+
+  function getThinkingText(toolName, toolInput) {
+    const fn = TOOL_THINKING[toolName];
+    if (fn) try { return fn(toolInput || {}); } catch { /* */ }
+    return `Running ${toolName.replace(/_/g, ' ')}...`;
+  }
+
   function onToolCall(toolName, toolInput) {
     toolCount++;
     toolsCalled.add(toolName);
@@ -1841,6 +1874,7 @@ async function handleRealChat(text, file) {
             <span class="tool-group-count"></span>
             <span class="tool-group-chevron">▾</span>
           </div>
+          <div class="tool-group-thinking"></div>
           <div class="tool-group-body"></div>
         </div>
       `);
@@ -1849,8 +1883,16 @@ async function handleRealChat(text, file) {
 
     const group = agentContainers[agentName];
     const bodyEl = group.querySelector('.tool-group-body');
+    const thinkingEl = group.querySelector('.tool-group-thinking');
     const toolId = `tool-call-${toolCount}`;
     const inputSummary = formatToolInput(toolName, toolInput);
+    const thinkingText = getThinkingText(toolName, toolInput);
+
+    // Update thinking status line
+    if (thinkingEl) {
+      thinkingEl.textContent = thinkingText;
+      thinkingEl.classList.add('active');
+    }
 
     bodyEl.innerHTML += `
       <div class="tool-call-row active" id="${toolId}">
@@ -1872,7 +1914,15 @@ async function handleRealChat(text, file) {
     const stepEl = document.querySelector(`#tool-call-${toolCount}`);
     if (stepEl) {
       stepEl.classList.replace('active', 'done');
-      stepEl.querySelector('.tool-call-status').textContent = 'Result';
+      stepEl.querySelector('.tool-call-status').textContent = 'Done';
+    }
+
+    // Clear thinking status
+    const agentName = TOOL_AGENT_MAP[toolName] || 'Adobe Agent';
+    const group = agentContainers[agentName];
+    if (group) {
+      const thinkingEl = group.querySelector('.tool-group-thinking');
+      if (thinkingEl) { thinkingEl.textContent = ''; thinkingEl.classList.remove('active'); }
     }
 
     // ── Tool Result Renderer Dispatch ──
