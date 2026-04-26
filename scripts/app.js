@@ -918,6 +918,8 @@ function getBrandPolicies() {
 /* ── Get Page Context ── */
 let cachedPageHTML = null;
 let cachedPageUrl = null;
+let cachedJcrEtag = null;
+let cachedJcrEtagPath = null;
 
 async function fetchPageHTML(url) {
   // Method 0: DA Admin API (authenticated, no CORS issues — most reliable for DA sites)
@@ -998,6 +1000,11 @@ function getPageContext() {
   // Use cached fetched HTML
   if (!ctx.pageHTML && cachedPageHTML) {
     ctx.pageHTML = cachedPageHTML;
+  }
+  // Attach pre-fetched ETag for JCR edits (saves one full round trip)
+  if (cachedJcrEtag && cachedJcrEtagPath === (activeResourcePath || '/')) {
+    ctx.jcrEtag = cachedJcrEtag;
+    ctx.jcrEtagPath = cachedJcrEtagPath;
   }
   // Attach project memory (persistent across sessions)
   const mem = getProjectMemory();
@@ -1757,6 +1764,7 @@ function timeAgo(isoStr) {
 
 /* ── REAL: AI Chat (with native tool use) ── */
 async function handleRealChat(text, file) {
+ try {
   // Abort any in-flight AI request before starting a new one
   ai.abortCurrentChat();
 
@@ -1890,6 +1898,12 @@ async function handleRealChat(text, file) {
           navigateToPage(path);
           showToast(`Page ${path} saved via GitHub — preview refreshed`, 'success');
         }, 1500);
+      }
+
+      // Invalidate cached ETag after any write (it's stale now)
+      if (result._action === 'refresh_preview') {
+        cachedJcrEtag = null;
+        cachedJcrEtagPath = null;
       }
 
       // Content saved — refresh preview (works for both DA/EDS and JCR/xwalk sites).
@@ -2031,6 +2045,10 @@ async function handleRealChat(text, file) {
   } catch (err) {
     streamEl.innerHTML = `<span style="color:var(--accent)">AI Error: ${escapeHtml(err.message)}</span><br>Check your API key in settings.`;
   }
+ } catch (fatal) {
+  console.error('[Chat] Fatal error in handleRealChat:', fatal);
+  addMessage('assistant', `<span style="color:var(--accent)">Error: ${escapeHtml(fatal.message)}</span>`);
+ }
 }
 
 /* Format tool input for display */
@@ -3803,6 +3821,20 @@ async function connectCustomSite(input) {
     if (previewFrame) {
       previewFrame.removeAttribute('srcdoc');
       previewFrame.src = inlinePreviewUrl;
+    }
+
+    // Pre-fetch ETag so AI can patch without a read call (saves one full round trip)
+    if (isSignedIn() && window.__EW_AEM_HOST) {
+      import('./aem-content-mcp-client.js').then(async (aemContent) => {
+        try {
+          const result = await aemContent.getPage(window.__EW_AEM_HOST, jcrPath);
+          if (result?.etag) {
+            cachedJcrEtag = result.etag;
+            cachedJcrEtagPath = jcrPath;
+            console.log(`[EW] Pre-fetched ETag for ${jcrPath}`);
+          }
+        } catch (e) { console.warn('[EW] ETag pre-fetch failed:', e.message); }
+      });
     }
 
     window.__JCR_PREVIEW_CONFIG = {

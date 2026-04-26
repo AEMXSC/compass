@@ -5125,12 +5125,17 @@ function buildSystemParts(context = {}, { fast = false } = {}) {
     if (isDa) pageContext += `\n| **DA Admin** | admin.da.live/source/${o.daOrg}/${o.daRepo} |`;
     if (context.customerName) pageContext += `\n| **Customer** | ${context.customerName} |`;
 
-    // ── Page HTML (pre-loaded — skip the read call for DA edits) ──
+    // ── Page HTML (pre-loaded — skip the read call for edits) ──
     if (context.pageHTML) {
       pageContext += `\n\n### Page Content (LIVE — pre-loaded, ${context.pageHTML.length} chars)
-You ALREADY have this page content. For DA edits, modify the HTML and call edit_page_content directly — no read call needed.
-
-\`\`\`html
+You ALREADY have this page content.`;
+      if (context.jcrEtag) {
+        pageContext += `\n**Pre-fetched ETag:** \`${context.jcrEtag}\` (for path: ${context.jcrEtagPath})
+**SPEED RULE:** For edits to this page, call \`patch_aem_page_content\` DIRECTLY with this ETag. Do NOT call get_page_content first — you already have the content and ETag. This saves a full round trip.`;
+      } else if (!isJcr) {
+        pageContext += `\nFor DA edits, modify the HTML and call edit_page_content directly — no read call needed.`;
+      }
+      pageContext += `\n\n\`\`\`html
 ${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
 \`\`\``;
     } else {
