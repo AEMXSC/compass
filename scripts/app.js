@@ -2014,15 +2014,13 @@ async function handleRealChat(text, file) {
     } catch { /* not parseable — skip */ }
 
     // Check if all calls in this agent group are done — update the header dot
-    const agentName = TOOL_AGENT_MAP[toolName] || 'Adobe Agent';
-    const group = agentContainers[agentName];
-    if (group) {
-      const allDone = [...group.querySelectorAll('.tool-call-row')].every((r) => r.classList.contains('done'));
+    const grp = agentContainers[agentName];
+    if (grp) {
+      const allDone = [...grp.querySelectorAll('.tool-call-row')].every((r) => r.classList.contains('done'));
       if (allDone) {
-        const dot = group.querySelector('.tool-group-header .gen-dot');
+        const dot = grp.querySelector('.tool-group-header .gen-dot');
         if (dot) dot.classList.replace('active', 'done');
-        // Auto-collapse completed agent groups — give user time to see what happened
-        setTimeout(() => { group.classList.add('collapsed'); scrollChat(); }, 3000);
+        setTimeout(() => { grp.classList.add('collapsed'); scrollChat(); }, 3000);
       }
     }
   }
