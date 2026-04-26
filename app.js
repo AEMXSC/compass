@@ -1578,6 +1578,7 @@ function timeAgo(isoStr) {
 
 /* ── REAL: AI Chat (with native tool use) ── */
 async function handleRealChat(text, file) {
+ try {
   // Abort any in-flight AI request before starting a new one
   ai.abortCurrentChat();
 
@@ -1614,8 +1615,9 @@ async function handleRealChat(text, file) {
     } catch { /* non-blocking */ }
   }
 
-  await ensurePageContext();
-  const ctx = getPageContext();
+  try { await ensurePageContext(); } catch (e) { console.warn('[Chat] ensurePageContext failed:', e.message); }
+  let ctx;
+  try { ctx = getPageContext(); } catch (e) { console.warn('[Chat] getPageContext failed:', e.message); ctx = {}; }
 
   // Tool call UI container — collapsible tool calls (like Claude.ai)
   let toolContainer = null;
@@ -1843,6 +1845,10 @@ async function handleRealChat(text, file) {
   } catch (err) {
     streamEl.innerHTML = `<span style="color:var(--accent)">AI Error: ${escapeHtml(err.message)}</span><br>Check your API key in settings.`;
   }
+ } catch (fatal) {
+  console.error('[Chat] Fatal error in handleRealChat:', fatal);
+  addMessage('assistant', `<span style="color:var(--accent)">Error: ${escapeHtml(fatal.message)}</span>`);
+ }
 }
 
 /* Format tool input for display */
