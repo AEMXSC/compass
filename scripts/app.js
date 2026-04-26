@@ -13,7 +13,7 @@
 // Different query strings (e.g., './da-client.js' vs './da-client.js?v=57') create
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, relaySignIn, getBookmarkletCode, handlePkceCallback, fetchUserProfile } from './ims.js';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs } from './ims.js';
 import * as ai from './ai.js';
 import { TOOL_AGENT_MAP } from './ai.js';
 import * as da from './da-client.js';
@@ -22,6 +22,7 @@ import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCust
 import { detectSiteMention, resolveSite } from './known-sites.js';
 import { getGitHubToken, setGitHubToken, hasGitHubToken, getRepoInfo, listBranches, getRepoTree } from './github-content.js';
 import { detectAndCacheSiteType, getSiteType } from './site-detect.js';
+import { aemUnifiedMcp, prewarmSessions } from './mcp-client.js';
 
 /* ── Dynamic Org Configuration (from customer profile) ── */
 let AEM_ORG = getOrgConfig();
@@ -165,30 +166,151 @@ function showToast(message, type = 'info', duration = TOAST_DURATION_MS) {
 }
 
 function md(text) {
-  // Escape HTML first to prevent XSS, then apply markdown transforms
-  return escapeHtml(text)
-    .replace(/### (.*?)(\n|$)/g, '<h3>$1</h3>')
-    .replace(/## (.*?)(\n|$)/g, '<h2>$1</h2>')
-    .replace(/# (.*?)(\n|$)/g, '<h1>$1</h1>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`(.*?)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    .replace(/^[-*] (.+)/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
-    .replace(/<\/ul>\s*<ul>/g, '')
-    .replace(/\n{2,}/g, '<br><br>')
-    .replace(/\n/g, '<br>');
+  let html = escapeHtml(text);
+
+  // Fenced code blocks (```...```)
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => `<pre><code class="lang-${lang || 'text'}">${code.trim()}</code></pre>`);
+
+  // Headings (must be at line start)
+  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // Bold + italic
+  html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Links (http/https only)
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, (_, t, u) =>
+    /^https?:\/\//i.test(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : `${t} (${u})`);
+
+  // Horizontal rules
+  html = html.replace(/^---+$/gm, '<hr>');
+
+  // Blockquotes
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  html = html.replace(/<\/blockquote>\n<blockquote>/g, '\n');
+
+  // Numbered lists
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>[\s\S]*?<\/li>)(?=\n(?!\d+\. |[-*] )|\n*$)/g, (match) => {
+    if (match.includes('<li>')) return `<ol>${match}</ol>`;
+    return match;
+  });
+
+  // Unordered lists
+  html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+
+  // Wrap consecutive <li> in <ul> or <ol>
+  html = html.replace(/(?:^|\n)(<li>[\s\S]*?<\/li>)(?:\n|$)/g, (match) => {
+    if (match.includes('<ol>')) return match;
+    return `<ul>${match.trim()}</ul>`;
+  });
+  html = html.replace(/<\/ul>\s*<ul>/g, '');
+  html = html.replace(/<\/ol>\s*<ol>/g, '');
+
+  // Paragraphs and line breaks
+  html = html.replace(/\n{2,}/g, '<br><br>');
+  html = html.replace(/\n/g, '<br>');
+
+  return html;
+}
+
+/* ── Agent Identity System ── */
+const AGENT_ICONS = {
+  'Experience Production Agent': '📝',
+  'Governance Agent': '🛡',
+  'Governance Scanner': '🛡',
+  'Analytics Agent': '📊',
+  'Journey Agent': '🗺',
+  'Discovery Agent': '🔍',
+  'Content Advisor Agent': '♿',
+  'Content Optimization Agent': '✨',
+  'Workfront Agent': '📋',
+  'Target Agent': '🎯',
+  'Development Agent': '🔧',
+  'Acrobat Agent': '📄',
+  'Experimentation Agent': '🧪',
+  'Audience Agent': '👥',
+  'Data Insights Agent': '📈',
+  'LLM Optimizer': '🤖',
+  'Forms Agent': '📝',
+  'Admin API': '⚙',
+  'Site Management': '🌐',
+  'AEM Assets API': '🖼',
+  'Web Research': '🔗',
+  'Adobe Agent': '◆',
+  'Compass': '🧭',
+};
+
+const AGENT_ROLES = {
+  'Experience Production Agent': 'Content Author',
+  'Governance Agent': 'Brand Compliance',
+  'Governance Scanner': 'Brand Compliance',
+  'Analytics Agent': 'CJA Insights',
+  'Journey Agent': 'AJO Orchestration',
+  'Discovery Agent': 'Asset Discovery',
+  'Content Advisor Agent': 'Accessibility',
+  'Content Optimization Agent': 'Variant Generation',
+  'Workfront Agent': 'Project Management',
+  'Target Agent': 'Personalization',
+  'Development Agent': 'CI/CD Pipeline',
+  'Acrobat Agent': 'PDF Processing',
+  'Experimentation Agent': 'A/B Testing',
+  'Audience Agent': 'RT-CDP Segments',
+  'Data Insights Agent': 'Customer Analytics',
+  'LLM Optimizer': 'AI Readiness',
+  'Adobe Agent': 'AEM Cloud Service',
+  'Compass': 'AI Navigator',
+};
+
+const AGENT_COLORS = {
+  'Experience Production Agent': '#818cf8',
+  'Governance Agent': '#f59e0b',
+  'Governance Scanner': '#f59e0b',
+  'Analytics Agent': '#06b6d4',
+  'Journey Agent': '#8b5cf6',
+  'Discovery Agent': '#22c55e',
+  'Content Advisor Agent': '#ec4899',
+  'Workfront Agent': '#f97316',
+  'Target Agent': '#ef4444',
+  'Development Agent': '#14b8a6',
+  'Adobe Agent': '#e34850',
+  'Compass': '#818cf8',
+};
+
+function buildAgentHeader(agentName) {
+  if (!agentName) agentName = 'Compass';
+  const icon = AGENT_ICONS[agentName] || '◆';
+  const role = AGENT_ROLES[agentName] || '';
+  const color = AGENT_COLORS[agentName] || 'var(--accent-light, #818cf8)';
+  const isAdobe = ['Adobe Agent', 'Admin API', 'Site Management', 'AEM Assets API'].includes(agentName);
+  const isMcp = ['Analytics Agent', 'Journey Agent', 'Audience Agent', 'Target Agent', 'Data Insights Agent'].includes(agentName);
+
+  let tags = '';
+  if (isAdobe) tags += '<span class="agent-tag adobe">Adobe</span>';
+  if (isMcp) tags += '<span class="agent-tag mcp">MCP</span>';
+
+  // Returns avatar + open agent-body with header. Caller must add content + close </div> for agent-body.
+  return `<div class="agent-avatar">${icon}</div><div class="agent-body" style="border-left-color: ${color}"><div class="agent-header"><span class="agent-name" style="color: ${color}">${escapeHtml(agentName)}</span>${role ? `<span class="agent-role">${escapeHtml(role)}</span>` : ''}${tags}</div>`;
 }
 
 /* ── Chat Primitives ── */
 function addMessage(type, html, agentBadge) {
   const msg = document.createElement('div');
   msg.classList.add('message', type);
-  let inner = '';
-  if (agentBadge) inner += `<div class="agent-badge">${agentBadge}</div>`;
-  inner += `<div class="message-content">${html}</div>`;
-  msg.innerHTML = inner;
+  if (type === 'assistant') {
+    msg.classList.add('has-agent');
+    const name = agentBadge || 'Compass';
+    msg.innerHTML = `${buildAgentHeader(name)}<div class="message-content">${html}</div></div>`;
+  } else {
+    msg.innerHTML = `<div class="message-content">${html}</div>`;
+  }
   chatMessages.appendChild(msg);
   scrollChat();
   return msg;
@@ -205,24 +327,24 @@ function addRawHTML(html) {
 
 function addTyping() {
   const el = document.createElement('div');
-  el.classList.add('message', 'assistant');
-  el.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+  el.classList.add('message', 'assistant', 'has-agent');
+  el.innerHTML = `${buildAgentHeader('Compass')}<div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
   el.id = 'typingIndicator';
   chatMessages.appendChild(el);
   scrollChat();
+  if (window.__compassSetGenerating) window.__compassSetGenerating(true);
 }
 
 function removeTyping() {
   document.getElementById('typingIndicator')?.remove();
+  if (window.__compassSetGenerating) window.__compassSetGenerating(false);
 }
 
 function addStreamMessage(agentBadge) {
   const msg = document.createElement('div');
-  msg.classList.add('message', 'assistant');
-  let inner = '';
-  if (agentBadge) inner += `<div class="agent-badge">${agentBadge}</div>`;
-  inner += '<div class="message-content stream-content"></div>';
-  msg.innerHTML = inner;
+  msg.classList.add('message', 'assistant', 'has-agent');
+  const name = agentBadge || 'Compass';
+  msg.innerHTML = `${buildAgentHeader(name)}<div class="message-content stream-content"></div></div>`;
   chatMessages.appendChild(msg);
   scrollChat();
   return msg.querySelector('.stream-content');
@@ -251,15 +373,30 @@ function updateAuthUI() {
       if (userAvatar) userAvatar.textContent = initials;
       if (userName) userName.textContent = profile.displayName;
       if (userEmail) userEmail.textContent = profile.email || '';
+      // Show active org
+      const org = getActiveOrg();
+      const orgEl = document.getElementById('userOrg');
+      if (orgEl && org) {
+        orgEl.textContent = org.name;
+        orgEl.style.display = '';
+      } else if (orgEl) {
+        orgEl.style.display = 'none';
+      }
+    } else if (signedIn && getAuthMethod() === 'user') {
+      // Signed in with user-level OAuth — show avatar but keep Sign In for menu
+      authBtn.textContent = '';
+      authBtn.classList.add('signed-in', 'avatar-mode');
+      authBtn.title = 'Signed in — Adobe IMS (user-level)';
+      authBtn.innerHTML = '<span class="auth-avatar">✓</span>';
+      if (userAvatar) userAvatar.textContent = '✓';
+      if (userName) userName.textContent = 'Adobe User';
+      if (userEmail) userEmail.textContent = 'User-level IMS · Full access';
     } else if (signedIn) {
-      // Signed in but no profile (S2S service account) — show "Sign In" to upgrade
-      authBtn.classList.remove('signed-in', 'avatar-mode');
-      authBtn.innerHTML = 'Sign In';
-      authBtn.title = 'Sign in with Adobe ID to unlock full MCP access (currently using service account)';
-      // Populate dropdown with service account info
-      if (userAvatar) userAvatar.textContent = 'A';
-      if (userName) userName.textContent = 'AEM Service Account';
-      if (userEmail) userEmail.textContent = 'S2S · Click Sign In to upgrade';
+      // Signed in but no profile yet — show checkmark
+      authBtn.textContent = '';
+      authBtn.classList.add('signed-in', 'avatar-mode');
+      authBtn.title = 'Signed in — Adobe IMS';
+      authBtn.innerHTML = '<span class="auth-avatar">✓</span>';
     } else {
       // Not signed in — show "Sign In" text button
       authBtn.classList.remove('signed-in', 'avatar-mode');
@@ -450,13 +587,11 @@ if (imsTokenHelp) {
     e.preventDefault();
     const helpHtml = `
       <div style="font-size:12px;line-height:1.6;color:var(--text-secondary);margin-top:8px;padding:10px;background:var(--bg-secondary);border-radius:6px;">
-        <strong style="color:var(--text-primary)">How to get your IMS token:</strong><br>
-        1. Go to <a href="https://da.live" target="_blank" style="color:var(--accent-light)">da.live</a> and sign in with Adobe ID<br>
-        2. Open browser DevTools (F12) → Console<br>
-        3. Run: <code style="background:var(--bg-input);padding:2px 6px;border-radius:3px;font-size:11px;">copy(adobeIMS.getAccessToken().token)</code><br>
-        4. Token is now on your clipboard — paste it above<br>
+        <strong style="color:var(--text-primary)">Adobe IMS Authentication</strong><br>
+        Compass uses S2S (Server-to-Server) authentication via a Cloudflare Worker.<br>
+        The token is fetched automatically on page load — no manual steps needed.<br>
         <br>
-        <em style="color:var(--text-muted)">Tokens expire after ~24hrs. Re-paste when needed.</em>
+        <em style="color:var(--text-muted)">S2S tokens refresh automatically. If you see auth errors, try reloading the page.</em>
       </div>
     `;
     imsTokenStatus.innerHTML = helpHtml;
@@ -531,14 +666,9 @@ const relaySetupDone = document.getElementById('relaySetupDone');
 const relayOpenDA = document.getElementById('relayOpenDA');
 const relayWaiting = document.getElementById('relayWaiting');
 
-// Set bookmarklet href
+// Bookmarklet no longer needed (S2S auth is automatic)
 if (relayBookmarklet) {
-  relayBookmarklet.href = getBookmarkletCode();
-  // Prevent click from navigating (it's meant to be dragged)
-  relayBookmarklet.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-  });
+  relayBookmarklet.style.display = 'none';
 }
 
 function openRelayModal() {
@@ -574,36 +704,18 @@ if (relaySetupDone) {
   });
 }
 
-// "Open da.live" → open popup and wait for relay
+// "Open da.live" → S2S auto-sign-in (relay no longer needed)
 if (relayOpenDA) {
   relayOpenDA.addEventListener('click', async () => {
     if (relayWaiting) relayWaiting.style.display = 'flex';
-    try {
-      const token = await relaySignIn();
-      if (token) {
-        // Show success
-        if (relayConnect) relayConnect.style.display = 'none';
-        if (relaySuccess) relaySuccess.style.display = '';
-        updateAuthUI();
-        da.resetMcpState?.();
-        // Auto-close after 1.5s
-        setTimeout(closeRelayModal, 1500);
-      }
-    } catch (err) {
-      if (err.message === 'popup-blocked') {
-        // eslint-disable-next-line no-alert
-        alert('Pop-up blocked — please allow pop-ups for this site.');
-      } else if (err.message === 'popup-closed') {
-        // User closed popup without relaying — check if token arrived via paste
-        if (isSignedIn()) {
-          if (relayConnect) relayConnect.style.display = 'none';
-          if (relaySuccess) relaySuccess.style.display = '';
-          updateAuthUI();
-          setTimeout(closeRelayModal, 1500);
-        } else {
-          if (relayWaiting) relayWaiting.style.display = 'none';
-        }
-      }
+    const ok = await signIn();
+    if (ok) {
+      if (relayConnect) relayConnect.style.display = 'none';
+      if (relaySuccess) relaySuccess.style.display = '';
+      updateAuthUI();
+      setTimeout(closeRelayModal, 1500);
+    } else {
+      if (relayWaiting) relayWaiting.style.display = 'none';
     }
   });
 }
@@ -626,11 +738,11 @@ window.addEventListener('ew-auth-change', async (e) => {
     // Pre-warm DA MCP session so first edit is fast
     warmups.push(
       Promise.resolve(da.isAuthenticated())
-        .then((ok) => console.log('[Auth] DA MCP ready:', ok))
+        .then((ok) => console.debug('[Auth] DA MCP ready:', ok))
         .catch(() => {})
     );
 
-    console.log('[Auth] Signed in — warming sessions...');
+    console.debug('[Auth] Signed in — warming sessions...');
     await Promise.all(warmups);
   }
   updateAuthUI();
@@ -806,8 +918,6 @@ function getBrandPolicies() {
 /* ── Get Page Context ── */
 let cachedPageHTML = null;
 let cachedPageUrl = null;
-let cachedJcrEtag = null;
-let cachedJcrEtagPath = null;
 
 async function fetchPageHTML(url) {
   // Method 0: DA Admin API (authenticated, no CORS issues — most reliable for DA sites)
@@ -817,7 +927,7 @@ async function fetchPageHTML(url) {
       const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
       const result = await da.getPage(`${path}.html`);
       if (typeof result === 'string' && result.length > 0) {
-        console.log(`[fetchPageHTML] DA Admin API: ${path} (${result.length} chars)`);
+        console.debug(`[fetchPageHTML] DA Admin API: ${path} (${result.length} chars)`);
         return result;
       }
     } catch (e) { console.warn('[fetchPageHTML] DA Admin API failed:', e.message); }
@@ -889,11 +999,6 @@ function getPageContext() {
   if (!ctx.pageHTML && cachedPageHTML) {
     ctx.pageHTML = cachedPageHTML;
   }
-  // Attach pre-fetched ETag (allows AI to skip get_page_content and patch directly)
-  if (cachedJcrEtag && cachedJcrEtagPath === (activeResourcePath || '/')) {
-    ctx.jcrEtag = cachedJcrEtag;
-    ctx.jcrEtagPath = cachedJcrEtagPath;
-  }
   // Attach project memory (persistent across sessions)
   const mem = getProjectMemory();
   if (mem) ctx.projectMemory = mem;
@@ -901,12 +1006,12 @@ function getPageContext() {
 }
 
 async function ensurePageContext() {
-  const currentUrl = previewFrame.src || PREVIEW_URL;
-  if (cachedPageHTML && cachedPageUrl === currentUrl) return;
+  const rawUrl = (previewFrame?.src || PREVIEW_URL || '').replace(/[?&]_t=\d+/, '');
+  if (cachedPageHTML && cachedPageUrl === rawUrl) return;
   // Worker preview URLs: cache is populated async on connect — never re-fetch here
-  if (currentUrl.includes('/preview?')) return;
-  cachedPageUrl = currentUrl;
-  cachedPageHTML = await fetchPageHTML(currentUrl);
+  if (rawUrl.includes('/preview?')) return;
+  cachedPageUrl = rawUrl;
+  cachedPageHTML = await fetchPageHTML(rawUrl);
 }
 
 /* ── Tool Result Renderers ── */
@@ -1412,6 +1517,80 @@ const TOOL_RENDERERS = {
         ${result.live_url ? `<a href="${result.live_url}" target="_blank" rel="noopener" class="page-card-link">Open live page →</a>` : ''}
       </div>`;
   },
+
+  /* ─ Analytics Agent: KPI Pulse Metric Cards ─ */
+  cja_kpi_pulse(result) {
+    const metrics = result.metrics || result.kpis || result.data;
+    if (!metrics) return null;
+    const period = result.period || result.timeframe || '';
+
+    // Handle both array and object formats from CJA MCP
+    const entries = Array.isArray(metrics)
+      ? metrics
+      : Object.entries(metrics).map(([k, v]) => ({ label: k, value: v?.value ?? v, change: v?.change, trend: v?.trend }));
+
+    if (!entries.length) return null;
+
+    const cards = entries.slice(0, 6).map((m) => {
+      const label = m.label || m.name || m.metric || '';
+      const value = m.value ?? m.total ?? '—';
+      const change = m.change || m.delta || m.percent_change;
+      const trend = m.trend || (change > 0 ? 'up' : change < 0 ? 'down' : '');
+      const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '';
+      const trendColor = trend === 'up' ? '#22c55e' : trend === 'down' ? '#ef4444' : 'var(--text-muted)';
+      const changeText = change != null ? `${change > 0 ? '+' : ''}${typeof change === 'number' ? change.toFixed(1) : change}%` : '';
+      return `<div class="metric-card">
+        <div class="metric-label">${escapeHtml(String(label))}</div>
+        <div class="metric-value">${escapeHtml(String(value))} ${changeText ? `<span style="font-size:12px;color:${trendColor}">${trendIcon} ${changeText}</span>` : ''}</div>
+        ${m.source ? `<div class="metric-source">${escapeHtml(String(m.source))}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    return `
+      <div class="result-card">
+        <div class="result-card-header">
+          <span class="result-card-icon">📊</span>
+          <span class="result-card-title">KPI Pulse${period ? ` — ${escapeHtml(String(period))}` : ''}</span>
+        </div>
+        <div class="metric-grid">${cards}</div>
+      </div>`;
+  },
+
+  /* ─ Analytics Agent: Executive Briefing ─ */
+  cja_executive_briefing(result) {
+    const metrics = result.metrics || result.kpis || result.highlights;
+    const summary = result.summary || result.narrative || result.briefing || '';
+    const drivers = result.drivers || result.top_drivers || [];
+
+    let metricsHtml = '';
+    if (metrics) {
+      const entries = Array.isArray(metrics)
+        ? metrics
+        : Object.entries(metrics).map(([k, v]) => ({ label: k, value: v?.value ?? v, change: v?.change }));
+      metricsHtml = `<div class="metric-grid">${entries.slice(0, 4).map((m) => {
+        const change = m.change || m.delta;
+        const changeColor = change > 0 ? '#22c55e' : change < 0 ? '#ef4444' : 'var(--text-muted)';
+        const changeText = change != null ? `${change > 0 ? '+' : ''}${typeof change === 'number' ? change.toFixed(1) : change}%` : '';
+        return `<div class="metric-card">
+          <div class="metric-label">${escapeHtml(String(m.label || m.name || ''))}</div>
+          <div class="metric-value">${escapeHtml(String(m.value ?? '—'))} ${changeText ? `<span style="font-size:12px;color:${changeColor}">${changeText}</span>` : ''}</div>
+        </div>`;
+      }).join('')}</div>`;
+    }
+
+    const driversHtml = drivers.length ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)"><strong>Top Drivers:</strong> ${drivers.map((d) => escapeHtml(String(d.name || d))).join(' · ')}</div>` : '';
+
+    return `
+      <div class="result-card">
+        <div class="result-card-header">
+          <span class="result-card-icon">📈</span>
+          <span class="result-card-title">Executive Briefing${result.period ? ` — ${escapeHtml(String(result.period))}` : ''}</span>
+        </div>
+        ${metricsHtml}
+        ${summary ? `<div style="margin-top:8px;font-size:13px;line-height:1.6;color:var(--text-primary)">${md(String(summary))}</div>` : ''}
+        ${driversHtml}
+      </div>`;
+  },
 };
 
 /* ── Contextual Suggestion Engine ── */
@@ -1578,7 +1757,6 @@ function timeAgo(isoStr) {
 
 /* ── REAL: AI Chat (with native tool use) ── */
 async function handleRealChat(text, file) {
- try {
   // Abort any in-flight AI request before starting a new one
   ai.abortCurrentChat();
 
@@ -1615,9 +1793,15 @@ async function handleRealChat(text, file) {
     } catch { /* non-blocking */ }
   }
 
-  try { await ensurePageContext(); } catch (e) { console.warn('[Chat] ensurePageContext failed:', e.message); }
+  // Show thinking indicator IMMEDIATELY (before any async work)
+  const streamEl = addStreamMessage('Compass');
+  streamEl.innerHTML = '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';
+  scrollChat();
+
+  // Pre-fetch page context (non-blocking — don't wait if it's slow)
+  try { await Promise.race([ensurePageContext(), sleep(2000)]); } catch (e) { console.warn('[Chat] ensurePageContext failed:', e); }
   let ctx;
-  try { ctx = getPageContext(); } catch (e) { console.warn('[Chat] getPageContext failed:', e.message); ctx = {}; }
+  try { ctx = getPageContext(); } catch (e) { console.warn('[Chat] getPageContext failed:', e); ctx = {}; }
 
   // Tool call UI container — collapsible tool calls (like Claude.ai)
   let toolContainer = null;
@@ -1633,14 +1817,19 @@ async function handleRealChat(text, file) {
     toolsCalled.add(toolName);
     const agentName = TOOL_AGENT_MAP[toolName] || 'Adobe Agent';
 
-    // Create a new collapsible container per agent
+    // Create a new collapsible container per agent with Summit-style identity
     if (!agentContainers[agentName]) {
       shownAgents.add(agentName);
+      const icon = AGENT_ICONS[agentName] || '◆';
+      const role = AGENT_ROLES[agentName] || '';
+      const color = AGENT_COLORS[agentName] || 'var(--accent-light, #818cf8)';
       toolContainer = addRawHTML(`
-        <div class="tool-group" data-agent="${agentName}">
+        <div class="tool-group" data-agent="${escapeHtml(agentName)}">
           <div class="tool-group-header" onclick="this.parentElement.classList.toggle('collapsed')">
+            <span class="tool-group-avatar">${icon}</span>
+            <span class="tool-group-agent" style="color:${color}">${escapeHtml(agentName)}</span>
+            ${role ? `<span class="tool-group-role">${escapeHtml(role)}</span>` : ''}
             <span class="tool-group-indicator"><span class="gen-dot active"></span></span>
-            <span class="tool-group-agent">${agentName}</span>
             <span class="tool-group-count"></span>
             <span class="tool-group-chevron">▾</span>
           </div>
@@ -1703,49 +1892,21 @@ async function handleRealChat(text, file) {
         }, 1500);
       }
 
-      // Invalidate cached ETag after any write (it's stale now)
-      if (result._action === 'refresh_preview') {
-        cachedJcrEtag = null;
-        cachedJcrEtagPath = null;
-      }
-
-      // Content saved — refresh preview to reflect changes.
+      // Content saved — refresh preview (works for both DA/EDS and JCR/xwalk sites).
       if (result._action === 'refresh_preview' && result._preview_path) {
         const path = result._preview_path;
-        const previewUrl = AEM_ORG.previewOrigin + path;
         activeResourcePath = path;
 
-        const isJcr = window.__EW_SITE_TYPE === 'aem-cs' && AEM_ORG.previewOrigin?.includes('adobeaemcloud.com');
+        if (window.__JCR_PREVIEW_CONFIG) {
+          // JCR/xwalk: reload Worker proxy
+          showToast('Updating preview...', 'info');
+          setTimeout(() => window.__refreshJcrPreview?.(), 2000);
+          setTimeout(() => window.__refreshJcrPreview?.(), 8000);
+        } else if (previewFrame) {
+          const previewUrl = AEM_ORG.previewOrigin + path;
 
-        if (isJcr && previewFrame) {
-          // JCR: reload the Worker-proxied iframe (add cache-bust to force fresh content)
-          const currentSrc = previewFrame.src || '';
-          if (currentSrc.includes('/preview?')) {
-            const refreshUrl = currentSrc.replace(/_t=\d+/, `_t=${Date.now()}`);
-            previewFrame.src = refreshUrl;
-          } else {
-            // Rebuild the Worker preview URL
-            const authorHost = (window.__EW_AEM_HOST || '').replace('https://', '');
-            const publishHost = authorHost.replace('author-', 'publish-');
-            const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
-            const org = AEM_ORG.orgId || '';
-            const repo = AEM_ORG.repo || '';
-            const branch = AEM_ORG.branch || 'main';
-            const edsOrigin = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
-            const params = new URLSearchParams({
-              publish: `https://${publishHost}`,
-              author: `https://${authorHost}`,
-              path: `${path}.html`,
-              mode: 'hybrid',
-              codeBase: edsOrigin,
-              _t: Date.now().toString(),
-            });
-            previewFrame.src = `${workerBase}/preview?${params}`;
-          }
-          showToast(`Page ${path} updated — preview refreshing`, 'success');
-        } else {
-          // DA: optimistic render — show new content instantly via DA Admin API
-          if (previewFrame && isSignedIn() && da.getOrg()) {
+          // DA/EDS: optimistic render — fetch fresh HTML from DA Admin API (instant)
+          if (isSignedIn() && da.getOrg()) {
             try {
               const htmlPath = (path === '/' ? '/index' : path) + '.html';
               const freshHTML = await da.getPage(htmlPath);
@@ -1766,7 +1927,7 @@ async function handleRealChat(text, file) {
             }
           }
 
-          // Swap to real CDN URL after propagation (background, non-blocking)
+          // Swap to real CDN after propagation
           setTimeout(() => {
             if (previewFrame && previewFrame.srcdoc) {
               previewFrame.removeAttribute('srcdoc');
@@ -1802,15 +1963,40 @@ async function handleRealChat(text, file) {
     }
   }
 
-  const streamEl = addStreamMessage('Experience Agent');
+  // streamEl already created above (before ensurePageContext)
+
+  // P3: Optimistic intent detection — parse streamed text for change intent
+  let intentShown = false;
+  let firstChunkReceived = false;
 
   try {
     const rawResponse = await ai.streamChat(
       conversationHistory,
       ctx,
       (chunk, full) => {
+        if (!firstChunkReceived) {
+          firstChunkReceived = true;
+          streamEl.innerHTML = '';
+        }
         streamEl.innerHTML = md(full);
         scrollChat();
+
+        // P3: Detect "I'll change X to Y" / "Changed to: Y" patterns in streamed text
+        // Flash the preview panel to signal an incoming change
+        if (!intentShown && full.length > 30) {
+          const changeMatch = full.match(/(?:chang(?:e|ed|ing)\s+(?:the\s+)?(?:headline|title|heading|hero|text|copy|cta|button)\s+(?:to|from)[\s:]+[""]([^""]+)[""]|Changed\s+to:\s*[""]?([^"""\n]+))/i);
+          if (changeMatch) {
+            intentShown = true;
+            const newValue = changeMatch[1] || changeMatch[2] || '';
+            if (newValue && previewFrame) {
+              // Flash preview border to signal incoming change
+              previewFrame.style.outline = '2px solid var(--accent)';
+              previewFrame.style.outlineOffset = '-2px';
+              setTimeout(() => { previewFrame.style.outline = ''; previewFrame.style.outlineOffset = ''; }, 3000);
+              showToast(`Preview updating: "${newValue.slice(0, 50)}${newValue.length > 50 ? '...' : ''}"`, 'info');
+            }
+          }
+        }
       },
       onToolCall,
       onToolResult,
@@ -1845,10 +2031,6 @@ async function handleRealChat(text, file) {
   } catch (err) {
     streamEl.innerHTML = `<span style="color:var(--accent)">AI Error: ${escapeHtml(err.message)}</span><br>Check your API key in settings.`;
   }
- } catch (fatal) {
-  console.error('[Chat] Fatal error in handleRealChat:', fatal);
-  addMessage('assistant', `<span style="color:var(--accent)">Error: ${escapeHtml(fatal.message)}</span>`);
- }
 }
 
 /* Format tool input for display */
@@ -2727,7 +2909,26 @@ async function loadResources() {
     } catch { /* ignore */ }
   }
 
-  // Fallback: at least show the homepage
+  // Fallback: DA Admin API list (shows all pages in the DA repo)
+  if (sitePages.length <= 1 && isSignedIn() && da.getOrg()) {
+    try {
+      const pages = await da.listPages('/');
+      if (Array.isArray(pages) && pages.length > 0) {
+        sitePages = pages
+          .filter((p) => p.path?.endsWith('.html') || p.ext === 'html')
+          .map((p) => {
+            const pagePath = '/' + (p.path || p.name || '').replace(/\.html$/, '').replace(/^\//, '');
+            return {
+              path: pagePath === '/index' ? '/' : pagePath,
+              title: (p.name || p.path || '').replace('.html', '').split('/').pop() || 'index',
+              description: '',
+            };
+          });
+      }
+    } catch { /* DA list not available */ }
+  }
+
+  // Final fallback: at least show the homepage
   if (sitePages.length === 0) {
     sitePages = [{ path: '/', title: 'index', description: 'Homepage' }];
   }
@@ -2959,7 +3160,12 @@ function navigateToPage(path) {
     });
   }
 
-  if (previewFrame) previewFrame.src = url;
+  if (previewFrame) {
+    // Cache-bust to ensure fresh content (EDS CDN may cache aggressively)
+    const bustUrl = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+    previewFrame.removeAttribute('srcdoc');
+    previewFrame.src = bustUrl;
+  }
   if (previewUrlText) previewUrlText.textContent = url.replace(/^https?:\/\//, '');
   if (previewDot) previewDot.classList.add('connected');
   updateBreadcrumb(path);
@@ -2974,7 +3180,7 @@ function navigateToPage(path) {
   cachedPageHTML = null;
   cachedPageUrl = null;
   ensurePageContext().then(() => {
-    if (cachedPageHTML) console.log(`[NAV] Page content pre-cached: ${path} (${cachedPageHTML.length} chars)`);
+    if (cachedPageHTML) console.debug(`[NAV] Page content pre-cached: ${path} (${cachedPageHTML.length} chars)`);
   }).catch(() => { /* non-blocking */ });
 }
 // Expose for ai.js tool handlers
@@ -3165,7 +3371,7 @@ async function loadFileTree() {
     if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
     const data = await resp.json();
     const items = data.tree || [];
-    console.log(`[FileTree] GitHub tree: ${items.length} items from ${ghOrg}/${ghRepo}`);
+    console.debug(`[FileTree] GitHub tree: ${items.length} items from ${ghOrg}/${ghRepo}`);
 
     const root = buildTreeFromGitHub(items);
     fileTreeEl.innerHTML = '';
@@ -3319,10 +3525,11 @@ let customSiteConnected = false;
 function parseConnectInput(input) {
   const trimmed = input.trim();
 
-  // 1. EDS preview/live URLs: {branch}--{repo}--{org}.aem.page or .aem.live or .hlx.page or .hlx.live
-  const edsMatch = trimmed.match(/(\w[\w-]*)--(\w[\w-]*)--(\w[\w-]*)\.(aem|hlx)\.(page|live)/);
+  // 1. EDS preview/live URLs: {branch}--{repo}--{org}.aem.page/path or .aem.live/path
+  const edsMatch = trimmed.match(/(\w[\w-]*)--(\w[\w-]*)--(\w[\w-]*)\.(aem|hlx)\.(page|live)(\/[^\s?#]*)?/);
   if (edsMatch) {
-    return { branch: edsMatch[1], repo: edsMatch[2], org: edsMatch[3] };
+    const path = edsMatch[6] ? edsMatch[6].replace(/\/$/, '') || '/' : '/';
+    return { branch: edsMatch[1], repo: edsMatch[2], org: edsMatch[3], path };
   }
 
   // 2. DA editor URLs: https://da.live/edit#/org/repo/...
@@ -3345,6 +3552,7 @@ function parseConnectInput(input) {
   // 4. /content/ path = JCR/UE site — auto-resolve from known sites or known AEM instances
   //    Covers: author-p* URLs, UE editor URLs (both experience.adobe.com and author-hosted /ui#/), bare /content/ paths
   const contentMatch = trimmed.match(/\/content\/([^/]+)/);
+  const fullContentPath = trimmed.match(/(\/content\/[^\s?#]*)/)?.[1]?.replace(/\.html$/, '') || '';
   const authorHostMatch = trimmed.match(/(author-p\d+-e\d+)\.adobeaemcloud\.com/);
   if (contentMatch || authorHostMatch) {
     const siteName = contentMatch?.[1];
@@ -3354,15 +3562,14 @@ function parseConnectInput(input) {
     if (siteName) {
       const knownSite = resolveSite(siteName);
       if (knownSite) {
-        return { org: knownSite.org, repo: knownSite.repo, branch: knownSite.branch, aemHost: authorHost, jcr: !!authorHost };
+        return { org: knownSite.org, repo: knownSite.repo, branch: knownSite.branch, aemHost: authorHost, jcr: !!authorHost, path: fullContentPath };
       }
     }
 
     // XSC Showcase instance (author-p153659-e1614585) — we have S2S access to all sites
     if (authorHost?.startsWith('author-p153659-e1614585')) {
       if (siteName) {
-        // Best-guess EDS mapping: site name = repo, try common orgs
-        return { org: 'aem-showcase', repo: siteName, branch: 'main', aemHost: authorHost, jcr: true };
+        return { org: 'aem-showcase', repo: siteName, branch: 'main', aemHost: authorHost, jcr: true, path: fullContentPath };
       }
       return { error: 'jcr', message: 'AEM Showcase instance detected — add /content/{sitename}/ to the URL so Compass can identify the site.' };
     }
@@ -3396,7 +3603,7 @@ async function connectCustomSite(input) {
   try {
   // Parse the input (URL or org/repo)
   const parsed = parseConnectInput(input);
-  console.log('[EW] parseConnectInput result:', JSON.stringify(parsed));
+  console.debug('[EW] parseConnectInput result:', JSON.stringify(parsed));
   if (parsed.error) {
     if (statusEl) {
       statusEl.textContent = parsed.message;
@@ -3443,7 +3650,7 @@ async function connectCustomSite(input) {
     if (!edsWorks) {
       // EDS preview doesn't exist — use author URL for JCR preview
       previewOrigin = `https://${parsed.aemHost}`;
-      console.log(`[EW] JCR site: EDS preview unavailable, using author URL: ${previewOrigin}`);
+      console.debug(`[EW] JCR site: EDS preview unavailable, using author URL: ${previewOrigin}`);
     }
   }
 
@@ -3481,38 +3688,56 @@ async function connectCustomSite(input) {
     daOrg: org,
     daRepo: repo,
   };
-  // For JCR author URLs, include the content path; for EDS, just root
+  // Set the initial page path from the URL
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
-    // Extract content path from original input (e.g. /content/wknd-universal/language-masters/en)
-    const contentPathMatch = input.match(/(\/content\/[^\s?#]*)/);
-    const contentPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '';
+    const contentPath = parsed.path || '';
     PREVIEW_URL = previewOrigin + (contentPath || '/');
   } else {
-    PREVIEW_URL = previewOrigin + '/';
+    // EDS/DA sites: use the path from the pasted URL (e.g. /solutions/customer-experience)
+    const initialPath = parsed.path || '/';
+    PREVIEW_URL = previewOrigin + initialPath;
   }
   customSiteConnected = true;
   window.__EW_ORG = AEM_ORG;
+
+  // Org mismatch check: warn before agents waste time on 403s
+  if (isSignedIn() && parsed.jcr) {
+    const activeOrg = getActiveOrg();
+    if (activeOrg) {
+      // Check known org mappings for this AEM host
+      const KNOWN_ORG_MAP = {
+        'author-p153659-e1614585.adobeaemcloud.com': { id: '708E423B67F3C2050A495C27@AdobeOrg', name: 'AEM XSC Showcase' },
+      };
+      const expected = KNOWN_ORG_MAP[parsed.aemHost];
+      if (expected && activeOrg.id && !activeOrg.id.includes(expected.id.split('@')[0])) {
+        showToast(`Signed in to "${activeOrg.name}" but this site requires "${expected.name}". Switch org to edit.`, 'warn');
+        window.__ORG_MISMATCH = true;
+      } else {
+        window.__ORG_MISMATCH = false;
+      }
+    }
+  }
 
   // If parsed from a JCR/author URL, set the AEM host immediately (skip fstab detection)
   if (parsed.aemHost) {
     window.__EW_AEM_HOST = `https://${parsed.aemHost}`;
     window.__EW_SITE_TYPE = 'aem-cs';
-    console.log(`[EW] AEM CS site: ${parsed.aemHost} — site type set to aem-cs`);
+    console.debug(`[EW] AEM CS site: ${parsed.aemHost} — site type set to aem-cs`);
   }
 
   // Reconfigure DA client (skip for known JCR sites — DA won't work)
   if (!parsed.jcr) {
     da.configure({ org, repo, branch });
-    console.log(`[EW] DA client reconfigured: ${org}/${repo} (${branch}), da.getOrg()=${da.getOrg()}, da.getRepo()=${da.getRepo()}`);
+    console.debug(`[EW] DA client reconfigured: ${org}/${repo} (${branch}), da.getOrg()=${da.getOrg()}, da.getRepo()=${da.getRepo()}`);
   } else {
-    console.log(`[EW] JCR site — DA client not configured. AEM Content MCP tools available via ${parsed.aemHost}`);
+    console.debug(`[EW] JCR site — DA client not configured. AEM Content MCP tools available via ${parsed.aemHost}`);
   }
 
   // Detect site type (DA vs AEM CS) via fstab.yaml — AWAIT so AI knows the type before first prompt
   // Skip if already set from author URL
   const detectedType = parsed.aemHost ? 'aem-cs' : await detectAndCacheSiteType(org, repo, branch);
   const typeLabel = detectedType === 'aem-cs' ? 'AEM CS (xwalk)' : detectedType === 'da' ? 'DA' : detectedType;
-  console.log(`[EW] Site type: ${typeLabel}`);
+  console.debug(`[EW] Site type: ${typeLabel}`);
 
   // Update UI (home view elements may not exist when switching from toolbar)
   if (statusEl) {
@@ -3525,9 +3750,14 @@ async function connectCustomSite(input) {
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Connected';
   }
 
-  // Update home badge
+  // Update home badge — show full URL (including JCR path) for easy re-editing
   if (homeSiteName) homeSiteName.textContent = `${org}/${repo}`;
-  if (homeSiteUrl) homeSiteUrl.textContent = previewOrigin.replace(/^https?:\/\//, '');
+  if (homeSiteUrl) {
+    const displayUrl = parsed.aemHost
+      ? `https://${parsed.aemHost}${parsed.path || ''}`
+      : `${previewOrigin}${parsed.path || '/'}`;
+    homeSiteUrl.textContent = displayUrl.replace(/^https?:\/\//, '');
+  }
 
   // Switch to editor and load
   activeResourcePath = null;
@@ -3539,109 +3769,80 @@ async function connectCustomSite(input) {
 
   switchView('editor');
 
-  // For JCR sites: load via CF Worker's full-mode preview proxy.
-  // Worker serves HTML from its own origin with scripts/CSS proxied, bypassing X-Frame-Options.
+  // Update contextual prompt chips for the connected site
+  if (typeof updateContextChips === 'function') updateContextChips();
+
+  // For JCR/xwalk sites: Worker standard preview (content + fallback CSS)
+  // Punch-out Preview button opens the real page in a new tab for pixel-perfect view.
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
-    const contentPathMatch = input.match(/(\/content\/[^\s?#]*)/);
-    const jcrPath = contentPathMatch ? contentPathMatch[1].replace(/\.html$/, '') : '/content';
+    const jcrPath = parsed.path || '/content';
     activeResourcePath = jcrPath;
 
-    // Update preview URL bar
     if (previewUrlText) previewUrlText.textContent = `${parsed.aemHost}${jcrPath}`;
     if (previewDot) previewDot.classList.add('connected');
 
-    // Show loading state
+    const WORKER_BASE = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+    const authorHost = parsed.aemHost;
+    const publishUrl = `https://${authorHost.replace('author-', 'publish-')}`;
+    const authorUrl = `https://${authorHost}`;
+
+    // Hybrid Worker preview: inlines CSS (S2S auth) + keeps scripts proxied for decoration
+    const edsOrigin = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
+    const previewParams = new URLSearchParams({
+      publish: publishUrl,
+      author: authorUrl,
+      path: jcrPath + '.html',
+      mode: 'hybrid',
+      codeBase: edsOrigin,
+      _t: Date.now(),
+    });
+    const token = getToken();
+    if (token) previewParams.set('token', token);
+    const inlinePreviewUrl = `${WORKER_BASE}/preview?${previewParams}`;
+
     if (previewFrame) {
-      previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
-        <div style="text-align:center"><p>Loading JCR page preview...</p><p style="font-size:12px">${jcrPath}</p></div></body></html>`;
+      previewFrame.removeAttribute('srcdoc');
+      previewFrame.src = inlinePreviewUrl;
     }
 
-    // Use the CF Worker's preview proxy: fetches HTML with S2S auth, inlines CSS,
-    // strips scripts/UE instrumentation, and adds fallback block styles.
-    // Served from Worker origin so no X-Frame-Options issue.
-    (async () => {
-      const authorHost = parsed.aemHost;
-      const publishHost = authorHost.replace('author-', 'publish-');
-      const publishBase = `https://${publishHost}`;
-      const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
-
-      const previewParams = new URLSearchParams({
-        publish: publishBase,
-        author: `https://${authorHost}`,
-        path: `${jcrPath}.html`,
-        mode: 'hybrid',
-        codeBase: edsPreviewOrigin,
-        _t: Date.now().toString(),
-      });
-
-      const workerPreviewUrl = `${workerBase}/preview?${previewParams}`;
-      console.log(`[EW] JCR preview: loading hybrid-mode via Worker: ${workerPreviewUrl}`);
-
-      try {
-        if (previewFrame) {
-          previewFrame.removeAttribute('srcdoc');
-          previewFrame.src = workerPreviewUrl;
-
-          // Cache page HTML for AI context — fetch raw content (no inlined CSS) for speed
-          cachedPageUrl = workerPreviewUrl;
-          const rawParams = new URLSearchParams(previewParams);
-          rawParams.set('mode', 'raw');
-          fetch(`${workerBase}/preview?${rawParams}`).then((r) => r.ok ? r.text() : null).then((html) => {
-            if (html) {
-              const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-              cachedPageHTML = bodyMatch ? bodyMatch[1] : html;
-              cachedPageUrl = workerPreviewUrl;
-            }
-          }).catch(() => {});
-
-          // Pre-fetch ETag so AI can patch without a read call (saves one full round trip)
-          if (isSignedIn() && window.__EW_AEM_HOST) {
-            import('./aem-content-mcp-client.js').then(async (aemContent) => {
-              try {
-                const result = await aemContent.getPage(window.__EW_AEM_HOST, jcrPath);
-                if (result?.etag) {
-                  cachedJcrEtag = result.etag;
-                  cachedJcrEtagPath = jcrPath;
-                  console.log(`[EW] Pre-fetched ETag for ${jcrPath}: ${result.etag.slice(0, 20)}...`);
-                }
-              } catch (e) { console.warn('[EW] ETag pre-fetch failed:', e.message); }
-            });
-          }
-
-          console.log(`[EW] JCR preview: hybrid-mode iframe set for ${jcrPath}`);
-        }
-      } catch (e) {
-        console.warn(`[EW] JCR Worker preview failed: ${e.message}. Falling back to srcdoc...`);
-        // Fallback: try AEM Content MCP for structured content
-        try {
-          if (!isSignedIn()) await signIn();
-          const host = window.__EW_AEM_HOST;
-          if (host) {
-            const aemContentMod = await import('./aem-content-mcp-client.js');
-            const result = await aemContentMod.getPage(host, jcrPath);
-            const mcpHtml = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-            if (mcpHtml && previewFrame) {
-              previewFrame.srcdoc = `<!DOCTYPE html><html><head>
-                <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-                <style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;color:#333;line-height:1.6}img{max-width:100%;height:auto}h1,h2,h3{color:#1a1a1a}</style>
-              </head><body>${mcpHtml}</body></html>`;
-              cachedPageHTML = mcpHtml;
-              console.log('[EW] JCR preview rendered via AEM Content MCP:', jcrPath);
-            }
-          }
-        } catch (mcpErr) {
-          console.warn('[EW] JCR preview: all methods failed:', mcpErr.message);
-          if (previewFrame) {
-            previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font-family:system-ui;color:#888;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a">
-              <div style="text-align:center"><p>JCR preview unavailable</p><p style="font-size:12px">Use the <strong>UE</strong> button to open Universal Editor</p><p style="font-size:11px;color:#555">${e.message}</p></div></body></html>`;
-          }
-        }
-      }
-    })();
+    window.__JCR_PREVIEW_CONFIG = {
+      workerBase: WORKER_BASE, publishUrl, authorUrl, jcrPath, org, repo, branch,
+      publishPageUrl: `${publishUrl}${jcrPath}.html`,
+      authorPageUrl: `${authorUrl}${jcrPath}.html`,
+    };
+    window.__JCR_PREVIEW_URL = inlinePreviewUrl;
   } else {
-    navigateToPage('/');
+    navigateToPage(parsed.path || '/');
   }
+
+  // Refresh JCR preview after edits
+  window.__refreshJcrPreview = () => {
+    const cfg = window.__JCR_PREVIEW_CONFIG;
+    if (!cfg || !previewFrame) return;
+    showToast('Updating preview...', 'info');
+    const params = new URLSearchParams({
+      publish: cfg.publishUrl,
+      author: cfg.authorUrl,
+      path: cfg.jcrPath + '.html',
+      mode: 'hybrid',
+      codeBase: `https://${cfg.branch}--${cfg.repo.toLowerCase()}--${cfg.org.toLowerCase()}.aem.page`,
+      _t: Date.now(),
+    });
+    const tk = getToken();
+    if (tk) params.set('token', tk);
+    previewFrame.removeAttribute('srcdoc');
+    previewFrame.src = `${cfg.workerBase}/preview?${params}`;
+  };
+
   loadResources();
+
+  // P4: Parallel pre-warming on site connect (non-blocking)
+  // Fire all warmup tasks concurrently — none blocks UI or each other
+  Promise.allSettled([
+    ensurePageContext(),                            // Pre-fetch page HTML into cache
+    isSignedIn() ? prewarmSessions() : null,        // Pre-warm MCP sessions
+    isSignedIn() ? prefetchAemEnvironments() : null, // Pre-discover AEM environments
+  ].filter(Boolean)).catch(() => { /* non-blocking */ });
 
   // Populate branch select — real branches from GitHub API
   const branchSelect = document.getElementById('branchSelect');
@@ -3686,7 +3887,7 @@ async function connectCustomSite(input) {
     siteType: window.__EW_SITE_TYPE || 'unknown',
   });
   if (mem?.lastPrompts?.length) {
-    console.log(`[Memory] Restored project memory for ${org}/${repo}:`, mem);
+    console.debug(`[Memory] Restored project memory for ${org}/${repo}:`, mem);
   }
 
   } catch (err) {
@@ -3720,7 +3921,7 @@ function runGovernance() {
 }
 
 function requireApiKey() {
-  addMessage('assistant', md('**API key required.** Open ⚙ Settings and enter your Claude API key to use this feature.'));
+  addMessage('assistant', md('**API key required.** <a href="#" onclick="document.getElementById(\'settingsPanel\')?.classList.add(\'visible\');return false" style="color:var(--brand);text-decoration:underline;cursor:pointer">Open ⚙ Settings</a> and enter your Claude API key, or paste it directly in the chat.'));
 }
 
 function runLLMO() {
@@ -3930,9 +4131,122 @@ function matchSpecializedFlow(text) {
   return null;
 }
 
+/* ── Slash Commands — intercept /commands before AI ── */
+const SLASH_COMMANDS = {
+  '/blocks': { description: 'List available blocks for this site', prompt: 'Show me all available blocks for this site with descriptions' },
+  '/mcp': { description: 'Show MCP connection status', action: () => {
+    const envs = window.__AEM_ENVIRONMENTS || [];
+    const connected = !!envs.length;
+    const auth = isSignedIn();
+    addRawHTML(`
+      ${buildAgentHeader('Adobe Agent')}
+        <div class="message-content">
+          <strong>MCP Connection Status</strong>
+          <div class="metric-grid">
+            <div class="metric-card">
+              <div class="metric-label">AEM Unified</div>
+              <div class="metric-value">${connected ? '✅ Connected' : '⏳ Connecting'}</div>
+              <div class="metric-source">mcp.adobeaemcloud.com</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Environments</div>
+              <div class="metric-value">${envs.length}</div>
+              <div class="metric-source">discovered via Discovery MCP</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Auth</div>
+              <div class="metric-value">${auth ? '✅ Adobe IMS' : '❌ Not signed in'}</div>
+              <div class="metric-source">aem-extension-builder</div>
+            </div>
+          </div>
+        </div>
+      </div>`);
+  } },
+  '/sites': { description: 'List known AEM sites', prompt: 'List all known AEM sites I can connect to' },
+  '/governance': { description: 'Run brand compliance check', prompt: 'Run a full governance check on the current page' },
+  '/audit': { description: 'Run content audit', prompt: 'Audit this page for content quality, readability, and accessibility' },
+  '/alt': { description: 'Suggest ALT text for images', prompt: 'Suggest ALT text for all images on this page' },
+  '/bulk': { description: 'Bulk update across pages', prompt: 'I want to update content across multiple pages' },
+  '/brief': { description: 'Create page from brief', prompt: 'Create a new page from an attached brief' },
+  '/kpi': { description: 'Get KPI performance report', prompt: 'How did our site perform this week? Give me a KPI digest.' },
+  '/journey': { description: 'Create a customer journey', prompt: 'Create a customer journey for re-engagement' },
+  '/publish': { description: 'Publish current page', prompt: 'Publish the current page to live' },
+  '/help': { description: 'Show available commands', action: () => {
+    const cmds = Object.entries(SLASH_COMMANDS).map(([cmd, v]) => `\`${cmd}\` — ${v.description}`).join('\n');
+    addMessage('assistant', md(`**Available Commands**\n${cmds}\n\nType any command or just describe what you want in plain English.`));
+  }},
+};
+
+function handleSlashCommand(text) {
+  const cmd = text.split(' ')[0].toLowerCase();
+  const match = SLASH_COMMANDS[cmd];
+  if (!match) return false;
+  if (match.action) { match.action(); return true; }
+  if (match.prompt) { chatInput.value = match.prompt; handleUserInput(); return true; }
+  return false;
+}
+
+/** Show slash command autocomplete dropdown */
+function updateSlashAutocomplete(text) {
+  let dropdown = document.getElementById('slashDropdown');
+  if (!text.startsWith('/') || text.includes(' ')) {
+    if (dropdown) dropdown.style.display = 'none';
+    return;
+  }
+  const matches = Object.entries(SLASH_COMMANDS).filter(([cmd]) => cmd.startsWith(text.toLowerCase()));
+  if (matches.length === 0) {
+    if (dropdown) dropdown.style.display = 'none';
+    return;
+  }
+  if (!dropdown) {
+    dropdown = document.createElement('div');
+    dropdown.id = 'slashDropdown';
+    dropdown.className = 'slash-dropdown';
+    const inputWrapper = document.querySelector('.input-wrapper');
+    if (inputWrapper) inputWrapper.parentElement.insertBefore(dropdown, inputWrapper);
+  }
+  dropdown.innerHTML = matches.map(([cmd, v]) =>
+    `<button class="slash-option" data-cmd="${cmd}"><span class="slash-cmd">${cmd}</span><span class="slash-desc">${v.description}</span></button>`
+  ).join('');
+  dropdown.style.display = 'flex';
+  dropdown.querySelectorAll('.slash-option').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      chatInput.value = btn.dataset.cmd + ' ';
+      dropdown.style.display = 'none';
+      chatInput.focus();
+      // If it's a direct action command, run it
+      if (SLASH_COMMANDS[btn.dataset.cmd]?.action) {
+        chatInput.value = '';
+        SLASH_COMMANDS[btn.dataset.cmd].action();
+      }
+    });
+  });
+}
+
+// Wire autocomplete to input events
+chatInput?.addEventListener('input', () => updateSlashAutocomplete(chatInput.value));
+
 function handleUserInput() {
   const text = chatInput.value.trim();
   if (!text && !pendingFile) return;
+
+  // Auto-detect API key pasted in chat (sk-ant-...)
+  if (text.startsWith('sk-ant-') && text.length > 20) {
+    ai.setApiKey(text);
+    chatInput.value = '';
+    autoResizeChatInput();
+    updateAuthUI();
+    showToast('API key saved!', 'success');
+    return;
+  }
+
+  // Check for slash commands first
+  if (text.startsWith('/') && handleSlashCommand(text)) {
+    chatInput.value = '';
+    autoResizeChatInput();
+    return;
+  }
+
   chatInput.value = '';
   autoResizeChatInput();
 
@@ -4005,10 +4319,169 @@ document.querySelectorAll('.prompt-chip').forEach((btn) => {
   });
 });
 
-sendBtn.addEventListener('click', handleUserInput);
+sendBtn.addEventListener('click', () => {
+  if (sendBtn.classList.contains('stop-mode')) {
+    // Stop generation
+    ai.abortCurrentChat();
+    setGenerating(false);
+    return;
+  }
+  handleUserInput();
+});
 chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleUserInput(); }
+  if (e.key === 'Escape') { ai.abortCurrentChat(); setGenerating(false); }
 });
+
+/* ── Chat UX: Stop button, copy, scroll-to-bottom, regenerate ── */
+
+const SEND_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+const STOP_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+
+/** Toggle send button between send/stop states */
+function setGenerating(active) {
+  if (active) {
+    sendBtn.innerHTML = STOP_ICON;
+    sendBtn.classList.add('stop-mode');
+    sendBtn.title = 'Stop generating (Esc)';
+    sendBtn.setAttribute('aria-label', 'Stop generating');
+  } else {
+    sendBtn.innerHTML = SEND_ICON;
+    sendBtn.classList.remove('stop-mode');
+    sendBtn.title = 'Send';
+    sendBtn.setAttribute('aria-label', 'Send message');
+  }
+}
+
+// Hook into the existing addTyping/removeTyping to toggle send/stop button
+const _origAddTyping = addTyping;
+const _origRemoveTyping = removeTyping;
+// Override addTyping to also set generating state
+window.__compassSetGenerating = setGenerating; // expose for streaming hooks
+
+/** Contextual prompt chips above chat input — change based on what's loaded */
+function updateContextChips() {
+  let container = document.getElementById('contextChips');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'contextChips';
+    container.className = 'context-chips';
+    const inputWrapper = document.querySelector('.input-wrapper');
+    if (inputWrapper) inputWrapper.parentElement.insertBefore(container, inputWrapper);
+  }
+
+  const chips = [];
+  const siteType = window.__EW_SITE_TYPE;
+  const hasPage = !!window.__EW_PREVIEW_URL || !!document.querySelector('.preview-frame')?.src;
+
+  if (hasPage) {
+    chips.push({ icon: '✏️', label: 'Edit hero', prompt: 'Change the hero headline to something more engaging' });
+    chips.push({ icon: '🛡', label: 'Brand check', prompt: 'Run a brand compliance check on this page' });
+    chips.push({ icon: '♿', label: 'ALT text', prompt: 'Suggest ALT text for all images on this page' });
+    chips.push({ icon: '📄', label: 'Summarize', prompt: 'Summarize the content on this page' });
+  }
+
+  if (siteType === 'jcr' || window.__EW_AEM_HOST) {
+    chips.push({ icon: '📋', label: 'List pages', prompt: 'Show me all pages on this site' });
+    chips.push({ icon: '🔄', label: 'Bulk update', prompt: 'Update the footer CTA on all pages' });
+    chips.push({ icon: '📑', label: 'New page from brief', prompt: 'Create a new page from an attached brief' });
+  }
+
+  if (siteType === 'da') {
+    chips.push({ icon: '📝', label: 'Edit page', prompt: 'Change the hero headline' });
+    chips.push({ icon: '🔍', label: 'Find assets', prompt: 'Find 5 approved images for the hero' });
+  }
+
+  // Always available
+  chips.push({ icon: '📊', label: 'KPI report', prompt: 'How did our site perform this week?' });
+
+  // Limit to 4 chips
+  const display = chips.slice(0, 4);
+  container.innerHTML = display.map((c) =>
+    `<button class="context-chip" data-prompt="${c.prompt.replace(/"/g, '&quot;')}">${c.icon} ${c.label}</button>`
+  ).join('');
+
+  container.querySelectorAll('.context-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      chatInput.value = btn.dataset.prompt;
+      chatInput.focus();
+    });
+  });
+}
+
+// Update context chips when site connects or view changes
+window.addEventListener('ew-auth-change', () => setTimeout(updateContextChips, 500));
+
+/** Scroll-to-bottom FAB */
+const scrollFab = document.createElement('button');
+scrollFab.className = 'scroll-to-bottom-fab';
+scrollFab.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>';
+scrollFab.title = 'Scroll to bottom';
+scrollFab.style.display = 'none';
+scrollFab.addEventListener('click', () => { scrollChat(); scrollFab.style.display = 'none'; });
+chatMessages?.parentElement?.appendChild(scrollFab);
+
+if (chatMessages) {
+  chatMessages.addEventListener('scroll', () => {
+    const atBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 100;
+    scrollFab.style.display = atBottom ? 'none' : 'flex';
+  });
+}
+
+/** Copy button on code blocks — inject after markdown rendering */
+function injectCodeCopyButtons(container) {
+  if (!container) return;
+  container.querySelectorAll('pre > code, pre code').forEach((code) => {
+    const pre = code.closest('pre');
+    if (!pre || pre.querySelector('.code-copy-btn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'code-copy-btn';
+    btn.textContent = 'Copy';
+    btn.addEventListener('click', () => {
+      navigator.clipboard.writeText(code.textContent).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    });
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
+  });
+}
+
+/** Copy + Regenerate buttons on assistant messages */
+function injectMessageActions(msgEl) {
+  if (!msgEl || msgEl.querySelector('.msg-actions')) return;
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+
+  // Copy message
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'msg-action-btn';
+  copyBtn.title = 'Copy message';
+  copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+  copyBtn.addEventListener('click', () => {
+    const text = msgEl.querySelector('.message-content')?.textContent || msgEl.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+      setTimeout(() => { copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>'; }, 2000);
+    });
+  });
+  actions.appendChild(copyBtn);
+
+  msgEl.appendChild(actions);
+}
+
+// Override addMessage to inject copy buttons and message actions
+const _origAddMessage = addMessage;
+addMessage = function (type, html, agentBadge) {
+  _origAddMessage(type, html, agentBadge);
+  // Post-process: add copy buttons to code blocks and message actions
+  const lastMsg = chatMessages?.lastElementChild;
+  if (lastMsg && type === 'assistant') {
+    injectCodeCopyButtons(lastMsg);
+    injectMessageActions(lastMsg);
+  }
+};
 
 // Auto-resize textarea as user types
 function autoResizeChatInput() {
@@ -4090,12 +4563,11 @@ if (attachBtn) {
 
 if (authBtn) {
   authBtn.addEventListener('click', () => {
-    if (isSignedIn() && getAuthMethod() !== 's2s') {
-      // User-level auth — toggle user menu dropdown
+    if (isSignedIn()) {
+      // Toggle user menu dropdown
       const menu = document.getElementById('userMenu');
       if (menu) menu.classList.toggle('visible');
     } else {
-      // Not signed in OR S2S only — trigger imslib popup to get user-level token
       signIn();
     }
   });
@@ -4106,6 +4578,35 @@ document.getElementById('userSignOutBtn')?.addEventListener('click', () => {
   if (menu) menu.classList.remove('visible');
   signOut();
   updateAuthUI();
+});
+
+// Org switcher: toggle org list
+document.getElementById('userOrgSwitchBtn')?.addEventListener('click', () => {
+  const listEl = document.getElementById('userOrgList');
+  if (!listEl) return;
+  if (listEl.style.display === 'none') {
+    const orgs = getUserOrgs();
+    const active = getActiveOrg();
+    // Clear local auth state and redirect to IMS login to pick a new org
+    listEl.innerHTML = '<button class="switch-org-action">Sign in to a different organization</button>';
+    listEl.style.display = '';
+    listEl.querySelector('.switch-org-action')?.addEventListener('click', () => {
+      listEl.style.display = 'none';
+      const menu = document.getElementById('userMenu');
+      if (menu) menu.classList.remove('visible');
+      // Clear local tokens without calling imslib.signOut() (which redirects to logout page)
+      localStorage.removeItem('ew-ims-token');
+      localStorage.removeItem('ew-ims-expiry');
+      localStorage.removeItem('ew-ims-profile');
+      localStorage.removeItem('ew-ims-method');
+      // Redirect straight to IMS sign-in
+      if (window.adobeIMS) {
+        window.adobeIMS.signIn();
+      }
+    });
+  } else {
+    listEl.style.display = 'none';
+  }
 });
 // Close user menu when clicking outside
 document.addEventListener('click', (e) => {
@@ -4182,7 +4683,7 @@ const COMPASS_WORKER = 'https://compass-ims-proxy.compass-xsc.workers.dev';
     // Validate and store async
     validateAndStoreGitHubToken(token).then((result) => {
       if (result.ok) {
-        console.log(`[GH] OAuth sign-in: ${result.login}`);
+        console.debug(`[GH] OAuth sign-in: ${result.login}`);
       } else {
         console.warn('[GH] OAuth token invalid:', result.error);
         const status = document.getElementById('githubMenuStatus');
@@ -4424,6 +4925,20 @@ window.addEventListener('ew-switch-site', (e) => {
 });
 
 // Connect site input
+// Home site badge: click to populate connect input with current URL for editing
+const homeSiteBadge = document.getElementById('homeSiteBadge');
+if (homeSiteBadge) {
+  homeSiteBadge.addEventListener('click', () => {
+    const input = document.getElementById('connectSiteInput');
+    const urlText = document.getElementById('homeSiteUrl')?.textContent || '';
+    if (input && urlText) {
+      input.value = urlText;
+      input.focus();
+      input.select();
+    }
+  });
+}
+
 const connectSiteInput = document.getElementById('connectSiteInput');
 const connectSiteBtn = document.getElementById('connectSiteBtn');
 if (connectSiteInput) {
@@ -4439,6 +4954,22 @@ if (connectSiteBtn) {
 }
 
 // Edit in DA button
+// Open Full Preview — punch-out to real page in new tab
+const openFullPreviewBtn = document.getElementById('openFullPreviewBtn');
+if (openFullPreviewBtn) {
+  openFullPreviewBtn.addEventListener('click', () => {
+    const cfg = window.__JCR_PREVIEW_CONFIG;
+    if (cfg) {
+      // JCR site: open publish page in new tab (full CSS/JS, no auth needed)
+      window.open(cfg.publishPageUrl, '_blank');
+    } else {
+      // DA/EDS site: open .aem.page URL
+      const path = activeResourcePath || '/';
+      window.open(AEM_ORG.previewOrigin + path, '_blank');
+    }
+  });
+}
+
 const editInDABtn = document.getElementById('editInDABtn');
 if (editInDABtn) {
   editInDABtn.addEventListener('click', () => {
@@ -4955,14 +5486,17 @@ if (editInUEBtn) {
     const siteType = window.__EW_SITE_TYPE;
 
     if (siteType === 'aem-cs' && aemHost) {
-      // JCR/xwalk: open author-hosted Universal Editor with content path
-      // Format: https://{author-host}/ui#/@{ims-org}/aem/universal-editor/canvas/{author-host}{content-path}
+      // JCR/xwalk: author-hosted Universal Editor
+      // Format: https://{author-host}/ui#/@{org-slug}/aem/universal-editor/canvas/{author-host}{content-path}.html
       const host = aemHost.replace(/^https?:\/\//, '');
       const contentPath = path.startsWith('/content') ? path : `/content${path}`;
-      const ueUrl = `https://${host}/ui#/aem/universal-editor/canvas/${host}${contentPath}`;
+      const htmlPath = contentPath.endsWith('.html') ? contentPath : `${contentPath}.html`;
+      // Org slug for UE — stored in known-sites or derived from active org
+      const orgSlug = window.__EW_UE_ORG_SLUG || AEM_ORG.ueOrgSlug || 'aemshowcase2';
+      const ueUrl = `https://${host}/ui#/@${orgSlug}/aem/universal-editor/canvas/${host}${htmlPath}`;
       window.open(ueUrl, '_blank');
     } else {
-      // DA/EDS: open experience.adobe.com UE with preview URL
+      // DA/EDS: experience.adobe.com editor
       const ueUrl = `https://experience.adobe.com/#/@${AEM_ORG.orgId}/aem/editor/canvas/${AEM_ORG.previewOrigin}${path}`;
       window.open(ueUrl, '_blank');
     }
@@ -4980,7 +5514,7 @@ if (previewSiteUrl && siteSwitchInput && previewUrlText) {
     if (e.target === siteSwitchInput) return; // already editing
     previewUrlText.style.display = 'none';
     siteSwitchInput.style.display = '';
-    siteSwitchInput.value = `${AEM_ORG.orgId}/${AEM_ORG.repo}`;
+    siteSwitchInput.value = previewUrlText.textContent || `${AEM_ORG.orgId}/${AEM_ORG.repo}`;
     siteSwitchInput.focus();
     siteSwitchInput.select();
     previewSiteUrl.classList.add('editing');
@@ -5332,9 +5866,7 @@ Body Text (excerpt): ${bodyText}`;
 
 /* ── Init ── */
 async function init() {
-  // Handle PKCE callback (?code= in URL) — must run before IMS library init
-  const wasCallback = await handlePkceCallback();
-  if (wasCallback) console.log('[EW] PKCE callback handled — signed in');
+  // S2S auth handles sign-in automatically — no PKCE or redirect callbacks needed
 
   // Configure DA client from dynamic org config (only if a site is set)
   if (AEM_ORG.orgId && AEM_ORG.repo) {
@@ -5351,7 +5883,7 @@ async function init() {
   buildOrgSelector();
   initProfileGenerator();
 
-  console.log('[EW] init v25 — repo management, real branch picker, recent repos');
+  console.debug('[EW] init v25 — repo management, real branch picker, recent repos');
 
   // Render recent repos on home view
   renderRecentRepos();
@@ -5383,7 +5915,56 @@ async function init() {
   }
 
   if (ai.hasApiKey()) {
-    console.log(`Claude API key found — live AI mode${AEM_ORG.name ? ` for ${AEM_ORG.name}` : ''}`);
+    console.debug(`Claude API key found — live AI mode${AEM_ORG.name ? ` for ${AEM_ORG.name}` : ''}`);
+  }
+
+  // Context prefetch: pre-discover all AEM environments (like Adobe's AI Assistant pattern)
+  // Runs async — doesn't block init. Results cached for instant lookup on site connect.
+  if (isSignedIn()) {
+    // Run in parallel: prefetch environments + pre-warm MCP sessions
+    // Both async, neither blocks UI. Combined ~400ms.
+    prefetchAemEnvironments();
+    prewarmSessions();
+  }
+}
+
+/**
+ * Prefetch AEM environments via unified MCP (aem_list_environments).
+ * Caches results in window.__AEM_ENVIRONMENTS and indexes by authorUrl
+ * for fast lookup when user connects a site.
+ * ~350ms — runs async, doesn't block UI.
+ */
+async function prefetchAemEnvironments() {
+  try {
+    const result = await aemUnifiedMcp.callTool('list-aem-environments', {});
+    const environments = Array.isArray(result) ? result : (result?.environments || result?.value || []);
+
+    // Parse the text response if it's a string
+    let envList = environments;
+    if (typeof result === 'string') {
+      try {
+        // The tool returns text with JSON embedded — extract the array
+        const jsonMatch = result.match(/\[[\s\S]*\]/);
+        if (jsonMatch) envList = JSON.parse(jsonMatch[0]);
+      } catch { envList = []; }
+    }
+
+    window.__AEM_ENVIRONMENTS = envList;
+
+    // Index by author URL hostname for fast lookup
+    window.__AEM_ENV_BY_AUTHOR = {};
+    for (const env of envList) {
+      if (env.authorUrl) {
+        const host = env.authorUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        window.__AEM_ENV_BY_AUTHOR[host] = env;
+      }
+    }
+
+    console.debug(`[Compass] Prefetched ${envList.length} AEM environments`, Object.keys(window.__AEM_ENV_BY_AUTHOR));
+  } catch (err) {
+    console.warn('[Compass] Environment prefetch failed:', err.message);
+    window.__AEM_ENVIRONMENTS = [];
+    window.__AEM_ENV_BY_AUTHOR = {};
   }
 }
 

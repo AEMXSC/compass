@@ -571,6 +571,8 @@ async function handlePreview(request) {
       // Hybrid/Full: keep scripts, rewrite <script src> to proxy through /asset
       const workerOrigin = url.origin;
       const codeBase = url.searchParams.get('codeBase') || '';
+      // Pass user token to /asset for .resource/ paths (browser <script> tags can't send headers)
+      const assetTokenParam = authToken ? `&token=${encodeURIComponent(authToken)}` : '';
 
       html = html.replace(
         /(<script[^>]*src=["'])([^"']+)(["'])/gi,
@@ -599,7 +601,8 @@ async function handlePreview(request) {
             return match;
           }
 
-          return `${prefix}${workerOrigin}/asset?url=${encodeURIComponent(resolvedUrl)}${suffix}`;
+          const needsToken = resolvedUrl.includes('.resource/') || resolvedUrl.includes('author-');
+          return `${prefix}${workerOrigin}/asset?url=${encodeURIComponent(resolvedUrl)}${needsToken ? assetTokenParam : ''}${suffix}`;
         },
       );
 
@@ -732,7 +735,8 @@ async function handleAssetProxy(request) {
   const needsAuth = host.includes('author-') || targetUrl.includes('.resource/');
   const headers = {};
   if (needsAuth) {
-    const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
+      || url.searchParams.get('token') || '';
     if (userToken) {
       headers.Authorization = `Bearer ${userToken}`;
     } else {

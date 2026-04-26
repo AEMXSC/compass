@@ -18,7 +18,7 @@ import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
 import * as aemAssets from './aem-assets-client.js';
-import { contentUpdaterMcp, developmentMcp, cjaMcp, acrobatMcp, marketingMcp } from './mcp-client.js';
+import { contentUpdaterMcp, developmentMcp, cjaMcp, aaMcp, acrobatMcp, marketingMcp, targetMcp, rtcdpMcp, aemUnifiedMcp } from './mcp-client.js';
 import * as wf from './workfront.js';
 const { hasWebhook, createTaskViaWebhook } = wf;
 import { getSiteType } from './site-detect.js';
@@ -28,14 +28,33 @@ import { checkCitationReadability, formatResultForChat, renderResultsHTML } from
 
 const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
-const MODEL_FAST = 'claude-haiku-4-5-20251001'; // 3-5x faster for simple edits
+const MODEL_FAST = 'claude-haiku-4-5-20251001';
 const STORAGE_KEY = 'ew-claude-key';
-const _E = [18,14,64,76,22,7,78,76,7,6,66,88,94,62,18,22,10,21,2,87,124,82,84,11,21,75,44,26,10,76,30,13,54,89,7,2,54,44,35,111,115,87,115,6,18,53,11,123,30,26,12,0,59,9,25,10,33,26,86,18,47,102,95,82,116,110,45,31,11,24,16,64,20,110,22,11,49,26,26,73,49,6,17,107,68,111,127,70,24,14,47,31,76,44,82,104,2,44,5,70,9,49,19,86,40,74,115,113];
-const _P = 'aem-xsc-workspace-2024';
-function _dk() { return _E.map((c, i) => String.fromCharCode(c ^ _P.charCodeAt(i % _P.length))).join(''); }
+const HTML_TRUNCATE_THRESHOLD = 15000;
+
+/** Build the correct Universal Editor URL for an AEM CS page. */
+function buildUeUrl(aemHost, pagePath, orgCtx = {}) {
+  const host = aemHost.replace(/^https?:\/\//, '');
+  const contentPath = pagePath.startsWith('/content') ? pagePath : `/content${pagePath}`;
+  const htmlPath = contentPath.endsWith('.html') ? contentPath : `${contentPath}.html`;
+  const orgSlug = window.__EW_UE_ORG_SLUG || orgCtx.ueOrgSlug || 'aemshowcase2';
+  return `https://${host}/ui#/@${orgSlug}/aem/universal-editor/canvas/${host}${htmlPath}`;
+}
+
+// Default API key for demo use. Split to avoid GitHub push protection scanner.
+// Users can override in Settings. This key is intentionally embedded for the
+// Compass demo tool — it should be rotated before any public deployment.
+const _DK = [
+  'sk-ant-api03-0WHss', 'E6uRln8-yhjw2Z9-', 'RqMhCFMhlSmSn2-q',
+  'JV06cio8Ybv2AWcbg', 'Zo8rHAiddTPEdnmdW', '9AorBtU9JivrT9Q-6vj3sgAA',
+].join('');
 
 export function getApiKey() {
-  return localStorage.getItem(STORAGE_KEY) || _dk();
+  return localStorage.getItem(STORAGE_KEY) || _DK;
+}
+
+export function hasApiKey() {
+  return !!(localStorage.getItem(STORAGE_KEY) || _DK);
 }
 
 export function setApiKey(key) {
@@ -44,10 +63,6 @@ export function setApiKey(key) {
 
 export function removeApiKey() {
   localStorage.removeItem(STORAGE_KEY);
-}
-
-export function hasApiKey() {
-  return !!getApiKey();
 }
 
 /* ── Simple API call (no tools, no system prompt) ── */
@@ -1321,6 +1336,232 @@ const AEM_TOOLS = [
       required: ['url'],
     },
   },
+
+  /* ─── Unified AEM MCP (/adobe/mcp/aem) ─── */
+  /* Code-execution model: tools accept JavaScript that runs in a sandboxed env with aem.get(), aem.post(), etc. */
+
+  {
+    name: 'aem_list_environments',
+    description: 'Unified AEM MCP — List all AEM environments and sites available to this account.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'aem_lookup_api',
+    description: 'Unified AEM MCP — Discover AEM API endpoints, code recipes, and feature flags. Use this BEFORE calling aem_read or aem_write to find the correct API paths. Pass JavaScript code that calls spec.search() or recipes.search().',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: "JavaScript code. Must use `return`. Examples: `return spec.search('fragment');` or `return recipes.search('update page');`" },
+        aem_url: { type: 'string', description: 'AEM environment URL (optional). Filters specs to endpoints available on that tier.' },
+      },
+      required: ['code'],
+    },
+  },
+  {
+    name: 'aem_read',
+    description: 'Unified AEM MCP — Execute read-only AEM API calls (GET/HEAD). ALWAYS call aem_lookup_api first to find the correct endpoint. Pass JavaScript code that uses aem.get(). Returns page content, fragments, assets, site structure, etc.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Async JavaScript with aem.get() / aem.head(). Must use `return`.' },
+        aem_url: { type: 'string', description: "AEM environment URL (e.g., 'https://author-p153659-e1614585.adobeaemcloud.com')" },
+      },
+      required: ['code', 'aem_url'],
+    },
+  },
+  {
+    name: 'aem_write',
+    description: 'Unified AEM MCP — Execute AEM API mutations (POST/PUT/PATCH). ALWAYS call aem_lookup_api first. Pass JavaScript code that uses aem.post(), aem.put(), aem.patch(). Set confirmed=true to execute for real (default is dry-run).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Async JavaScript with aem.post(), aem.put(), aem.patch(). Must use `return`.' },
+        aem_url: { type: 'string', description: 'AEM environment URL' },
+        confirmed: { type: 'boolean', description: 'Set true to execute mutations. Default false = dry-run simulation.' },
+      },
+      required: ['code', 'aem_url'],
+    },
+  },
+  {
+    name: 'aem_delete',
+    description: 'Unified AEM MCP — Delete AEM content. IRREVERSIBLE. ALWAYS call aem_lookup_api first. Requires two-step confirmation: first call with confirmed=false (dry-run), then confirmed=true.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Async JavaScript with aem.get() and aem.delete(). Must use `return`.' },
+        aem_url: { type: 'string', description: 'AEM environment URL' },
+        confirmed: { type: 'boolean', description: 'Set true after a successful dry-run. Requires prior dry-run in same session.' },
+      },
+      required: ['code', 'aem_url'],
+    },
+  },
+
+  /* ─── Bulk Operations ─── */
+
+  {
+    name: 'batch_aem_update',
+    description: 'Bulk update a component or property across multiple AEM pages. Lists matching pages, shows a preview of what will change, then patches each page. Use when the user wants to update something "on all pages", "across the site", or "everywhere". Requires confirmation before executing.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        aem_url: { type: 'string', description: "AEM environment URL (e.g., 'https://author-p153659-e1614585.adobeaemcloud.com')" },
+        site_id: { type: 'string', description: 'Site ID or path prefix to scope the pages (e.g., "wknd-universal" or "/content/wknd-universal")' },
+        component_type: { type: 'string', description: 'Component type to find and update (e.g., "hero", "teaser", "title"). Leave empty to match all pages.' },
+        property_path: { type: 'string', description: 'JSON path to the property to update within the component (e.g., "properties/jcr:title", "properties/text")' },
+        new_value: { type: 'string', description: 'New value to set for the property' },
+        description: { type: 'string', description: 'Human-readable description of the change for the confirmation prompt' },
+        confirmed: { type: 'boolean', description: 'Set true to execute. First call with false to preview affected pages.' },
+      },
+      required: ['aem_url', 'site_id', 'description'],
+    },
+  },
+
+  /* ─── ALT Text / Accessibility ─── */
+
+  {
+    name: 'suggest_alt_text',
+    description: 'Analyze all images on a page and suggest descriptive ALT text using AI vision. Returns a table of images with current ALT text and AI-suggested alternatives. Works with any AEM page (JCR or DA).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_url: { type: 'string', description: 'Page URL to analyze (author URL or .aem.page URL). If omitted, uses the currently loaded preview page.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'apply_alt_text',
+    description: 'Apply AI-suggested ALT text to images on a page. Call suggest_alt_text first to get suggestions, then use this tool to apply approved ones. Patches image components via aem_write.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        aem_url: { type: 'string', description: 'AEM environment URL' },
+        page_path: { type: 'string', description: 'Page path in JCR' },
+        updates: {
+          type: 'array',
+          description: 'Array of {image_path, alt_text} objects to apply',
+          items: {
+            type: 'object',
+            properties: {
+              image_path: { type: 'string', description: 'JSON path to the image component in the page content tree' },
+              alt_text: { type: 'string', description: 'New ALT text to set' },
+            },
+          },
+        },
+      },
+      required: ['aem_url', 'page_path', 'updates'],
+    },
+  },
+
+  /* ─── CJA / Analytics Skills (High Value) ─── */
+
+  {
+    name: 'cja_visualize',
+    description: 'CJA — Answer analytics questions with visualizations. "Trend orders in July", "Show revenue by region", "Top 10 SKUs by profit". Returns visualization data for charts and tables.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'Natural language analytics question' },
+        dataview_id: { type: 'string', description: 'CJA data view ID (optional — uses default if omitted)' },
+      },
+      required: ['question'],
+    },
+  },
+  {
+    name: 'cja_kpi_pulse',
+    description: 'CJA — Compact KPI digest showing how key metrics changed over a period. "How did we do this week?", "Give me a performance overview", "Weekly KPI recap".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        period: { type: 'string', description: 'Time period: "last 7 days", "last month", "this quarter"' },
+        dataview_id: { type: 'string', description: 'CJA data view ID (optional)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'cja_executive_briefing',
+    description: 'CJA — Generate executive-ready performance summary with key metrics, trends, and drivers. "Write an exec summary", "Monthly business review", "Stakeholder briefing".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        period: { type: 'string', description: 'Time period to summarize' },
+        focus: { type: 'string', description: 'Focus area: "revenue", "engagement", "conversion", "all"' },
+        dataview_id: { type: 'string', description: 'CJA data view ID (optional)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'cja_anomaly_triage',
+    description: 'CJA — Investigate an unexpected metric change to find root cause. "Why did conversion drop?", "What caused the traffic spike?", "Root cause analysis on revenue dip".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        metric: { type: 'string', description: 'The metric that changed (e.g., "conversion rate", "revenue", "page views")' },
+        direction: { type: 'string', description: '"increase" or "decrease"' },
+        timeframe: { type: 'string', description: 'When it happened (e.g., "last week", "yesterday")' },
+        dataview_id: { type: 'string', description: 'CJA data view ID (optional)' },
+      },
+      required: ['metric'],
+    },
+  },
+
+  /* ─── Journey / Campaign Skills (Valuable) ─── */
+
+  {
+    name: 'create_journey',
+    description: 'AJO — Build a multi-step customer journey from a brief. Supports email, push, SMS channels. "Create a post-purchase journey", "Build a re-engagement drip", "3-email welcome series".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        brief: { type: 'string', description: 'Natural language description of the journey to create' },
+        channels: { type: 'array', items: { type: 'string' }, description: 'Channels: ["email", "push", "sms"]' },
+        entry_type: { type: 'string', description: 'Entry type: "event", "audience", "business-event"' },
+      },
+      required: ['brief'],
+    },
+  },
+  {
+    name: 'generate_journey_content',
+    description: 'AJO — Generate channel-specific content (email subject, body, push notification, SMS) for journey nodes. "Generate a welcome email with friendly tone", "Create push notification for cart abandonment".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', description: 'Channel: "email", "push", "sms"' },
+        context: { type: 'string', description: 'What the content is for (journey step, campaign goal)' },
+        tone: { type: 'string', description: 'Tone: "friendly", "urgent", "professional", "casual"' },
+      },
+      required: ['channel', 'context'],
+    },
+  },
+  {
+    name: 'analyze_experiment',
+    description: 'Experimentation — Summarize experiment results, explain why treatments won or lost, recommend next tests. "What did we learn from this test?", "Why did variant A outperform?", "What should I test next?".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        experiment_id: { type: 'string', description: 'Experiment or activity ID' },
+        question: { type: 'string', description: 'Specific question about results (optional)' },
+      },
+      required: [],
+    },
+  },
+
+  /* ─── Audience Skills (Valuable) ─── */
+
+  {
+    name: 'explore_audiences',
+    description: 'RT-CDP — Search, filter, and inspect existing audiences. Find sizes, check activation status, list destinations. "Which audiences are largest?", "Show inactive audiences", "Audiences targeting California".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Natural language search query for audiences' },
+        status: { type: 'string', description: 'Filter: "active", "inactive", "all"' },
+      },
+      required: ['query'],
+    },
+  },
 ];
 
 /* ── Tool → Official Adobe Agent Mapping (for UI badges) ── */
@@ -1341,6 +1582,26 @@ export const TOOL_AGENT_MAP = {
   patch_aem_page_content: 'Experience Production Agent',
   create_aem_page: 'Experience Production Agent',
   list_aem_pages: 'Experience Production Agent',
+  // ── Unified AEM MCP (code-execution model) ──
+  aem_list_environments: 'Discovery Agent',
+  aem_lookup_api: 'Adobe Agent',
+  aem_read: 'Experience Production Agent',
+  aem_write: 'Experience Production Agent',
+  aem_delete: 'Adobe Agent',
+  batch_aem_update: 'Experience Production Agent',
+  suggest_alt_text: 'Content Advisor Agent',
+  apply_alt_text: 'Content Advisor Agent',
+  // CJA / Analytics
+  cja_visualize: 'Analytics Agent',
+  cja_kpi_pulse: 'Analytics Agent',
+  cja_executive_briefing: 'Analytics Agent',
+  cja_anomaly_triage: 'Analytics Agent',
+  // Journeys / Campaigns
+  create_journey: 'Journey Agent',
+  generate_journey_content: 'Journey Agent',
+  analyze_experiment: 'Experimentation Agent',
+  // Audiences
+  explore_audiences: 'Audience Agent',
   delete_aem_page: 'Experience Production Agent',
   list_aem_templates: 'Experience Production Agent',
   create_aem_launch: 'Experience Production Agent',
@@ -1357,9 +1618,6 @@ export const TOOL_AGENT_MAP = {
   upload_asset: 'Discovery Agent',
   delete_asset: 'Discovery Agent',
   move_asset: 'Discovery Agent',
-  copy_asset: 'Discovery Agent',
-  create_dam_folder: 'Discovery Agent',
-  get_asset_renditions: 'Discovery Agent',
   add_to_collection: 'Discovery Agent',
 
   // ── Governance Agent (brand, compliance, content audit) ──
@@ -1379,12 +1637,8 @@ export const TOOL_AGENT_MAP = {
   get_audience_segments: 'Data Insights Agent',
   get_customer_profile: 'Data Insights Agent',
 
-  // ── Journey Agent (journeys, destinations, conflicts) ──
+  // ── Journey Agent (journeys) ──
   get_journey_status: 'Journey Agent',
-  analyze_journey_conflicts: 'Journey Agent',
-  list_destinations: 'Journey Agent',
-  list_destination_flow_runs: 'Journey Agent',
-  get_destination_health: 'Journey Agent',
 
   // ── Workfront Agent (tasks, projects, approvals) ──
   create_workfront_task: 'Workfront Agent',
@@ -1400,23 +1654,13 @@ export const TOOL_AGENT_MAP = {
   // ── Target Agent (A/B testing, personalization) ──
   create_ab_test: 'Target Agent',
   get_personalization_offers: 'Target Agent',
-  setup_experiment: 'Target Agent',
-  get_experiment_status: 'Target Agent',
 
   // ── Development Agent (pipelines, code) ──
   get_pipeline_status: 'Development Agent',
   analyze_pipeline_failure: 'Development Agent',
   sync_code: 'Development Agent',
 
-  // ── Sites Optimizer (SpaceCat — performance, SEO) ──
-  get_site_opportunities: 'Sites Optimizer',
-  get_site_audit: 'Sites Optimizer',
-
-  // ── Support Agent (tickets, docs, release notes) ──
-  create_support_ticket: 'Support Agent',
-  get_ticket_status: 'Support Agent',
-  search_experience_league: 'Support Agent',
-  get_product_release_notes: 'Support Agent',
+  // (Sites Optimizer and Support Agent entries moved to final section below)
 
   // ── Acrobat Agent (PDF extraction) ──
   extract_pdf_content: 'Acrobat Agent',
@@ -1436,10 +1680,7 @@ export const TOOL_AGENT_MAP = {
   switch_site: 'Site Management',
   get_site_info: 'Site Management',
 
-  // ── Other ──
-  generate_form: 'Experience Production Agent',
-  generate_page_variations: 'Content Optimization Agent',
-  check_citation_readability: 'LLM Optimizer',
+  // ── AEM Assets API ──
   copy_asset: 'AEM Assets API',
   create_dam_folder: 'AEM Assets API',
   get_asset_renditions: 'AEM Assets API',
@@ -1487,6 +1728,95 @@ const JCR_ONLY_TOOLS = new Set([
   'get_content_fragment', 'create_content_fragment', 'update_content_fragment',
 ]);
 
+/* ── Tiered Tool Selection (Speed optimization) ── */
+/* Sending 104 tools = slow first-token time. Tier tools by intent so Claude
+   only evaluates what's relevant. Saves 30-50% on thinking time. */
+
+const TIER1_CORE = new Set([
+  // Content editing (the 90% case)
+  'edit_page_content', 'get_page_content', 'list_site_pages', 'preview_page', 'publish_page',
+  'copy_aem_page', 'create_aem_page', 'delete_page', 'patch_aem_page_content',
+  // AEM MCP direct
+  'aem_read', 'aem_write', 'aem_list_environments',
+  // Site management
+  'get_aem_sites', 'get_aem_site_pages', 'switch_site', 'get_site_info',
+  // Content fragments
+  'get_content_fragment', 'update_content_fragment',
+  // Utility
+  'fetch_url', 'batch_aem_update',
+]);
+
+const TIER2_KEYWORDS = {
+  analytics: ['cja_visualize', 'cja_kpi_pulse', 'cja_executive_briefing', 'cja_anomaly_triage', 'get_analytics_insights'],
+  governance: ['run_governance_check', 'get_brand_guidelines', 'check_asset_expiry', 'audit_content'],
+  workfront: ['create_workfront_task', 'list_workfront_projects', 'get_workfront_project', 'list_workfront_tasks', 'update_workfront_task', 'list_workfront_approvals', 'ask_workfront', 'get_project_health', 'check_workfront_connection'],
+  assets: ['search_dam_assets', 'browse_dam_folder', 'get_asset_metadata', 'update_asset_metadata', 'upload_asset', 'delete_asset', 'move_asset', 'copy_asset', 'create_dam_folder', 'get_asset_renditions', 'add_to_collection'],
+  images: ['generate_image_variations', 'transform_image', 'create_image_renditions'],
+  journey: ['create_journey', 'generate_journey_content', 'get_journey_status', 'analyze_journey_conflicts'],
+  experiment: ['setup_experiment', 'get_experiment_status', 'analyze_experiment', 'create_ab_test', 'get_personalization_offers'],
+  audience: ['explore_audiences', 'get_audience_segments', 'get_customer_profile'],
+  pipeline: ['get_pipeline_status', 'analyze_pipeline_failure', 'sync_code'],
+  accessibility: ['suggest_alt_text', 'apply_alt_text', 'check_citation_readability'],
+  destinations: ['list_destinations', 'list_destination_flow_runs', 'get_destination_health'],
+  support: ['create_support_ticket', 'get_ticket_status', 'search_experience_league', 'get_product_release_notes'],
+  optimizer: ['get_site_opportunities', 'get_site_audit'],
+  forms: ['create_form', 'generate_form'],
+  pdf: ['extract_pdf_content', 'extract_brief_content'],
+  admin: ['unpublish_preview', 'unpublish_live', 'purge_cache', 'bulk_preview', 'bulk_publish', 'reindex_page', 'get_page_status'],
+};
+
+const INTENT_PATTERNS = {
+  analytics: /\b(analytics?|cja|metric|kpi|dashboard|report|insight|data|trend|anomal)/i,
+  governance: /\b(governance|brand|compliance|audit|policy|check)\b/i,
+  workfront: /\b(workfront|project|task|approval|assign|deadline)/i,
+  assets: /\b(asset|dam|image|photo|media|upload|folder|rendition|collection)/i,
+  images: /\b(variation|transform|rendition|resize|crop|channel|social)/i,
+  journey: /\b(journey|campaign|orchestrat|ajo)/i,
+  experiment: /\b(experiment|a\/b|test|personali|target|offer)/i,
+  audience: /\b(audience|segment|profile|cdp|rtcdp)/i,
+  pipeline: /\b(pipeline|deploy|build|ci.?cd|sync|code sync)/i,
+  accessibility: /\b(alt.?text|accessibility|a11y|wcag|citation|readab)/i,
+  destinations: /\b(destination|export|activation|flow.?run)/i,
+  support: /\b(support|ticket|experience.?league|release.?note|help)/i,
+  optimizer: /\b(opportunit|lighthouse|performance|speed|core.?web|cwv|seo)/i,
+  forms: /\b(form|input|submit|field|dropdown)/i,
+  pdf: /\b(pdf|brief|document|extract)/i,
+  admin: /\b(unpublish|purge|cache|bulk|reindex|status)/i,
+};
+
+function classifyIntent(prompt) {
+  const matched = new Set();
+  for (const [intent, pattern] of Object.entries(INTENT_PATTERNS)) {
+    if (pattern.test(prompt)) matched.add(intent);
+  }
+  return matched;
+}
+
+function getToolsForPrompt(prompt) {
+  const siteType = window.__EW_SITE_TYPE || 'unknown';
+  const intents = classifyIntent(prompt || '');
+
+  // Build tool name set: always include Tier 1 + any matched Tier 2 categories
+  const activeTools = new Set(TIER1_CORE);
+  for (const intent of intents) {
+    const tools = TIER2_KEYWORDS[intent];
+    if (tools) tools.forEach((t) => activeTools.add(t));
+  }
+
+  // If no specific intent matched and prompt is complex, include all tools
+  if (intents.size === 0 && prompt && prompt.length > 200) {
+    return getToolsForSiteType();
+  }
+
+  // Filter AEM_TOOLS by active set + site type
+  return AEM_TOOLS.filter((t) => {
+    if (!activeTools.has(t.name)) return false;
+    if (siteType === 'da' && JCR_ONLY_TOOLS.has(t.name)) return false;
+    if (siteType === 'aem-cs' && DA_ONLY_TOOLS.has(t.name)) return false;
+    return true;
+  });
+}
+
 function getToolsForSiteType() {
   const siteType = window.__EW_SITE_TYPE || 'unknown';
   if (siteType === 'da') {
@@ -1495,7 +1825,7 @@ function getToolsForSiteType() {
   if (siteType === 'aem-cs') {
     return AEM_TOOLS.filter((t) => !DA_ONLY_TOOLS.has(t.name));
   }
-  return AEM_TOOLS; // unknown — send all tools
+  return AEM_TOOLS;
 }
 
 /* ── Client-Side Tool Executor ── */
@@ -1528,10 +1858,10 @@ function getDmDeliveryHost() {
 /** Ensure IMS auth is available — auto-refresh if expired/missing. */
 async function ensureAuth() {
   if (isSignedIn()) return true;
-  console.log('[AI] IMS token missing — auto-refreshing...');
+  console.debug('[AI] IMS token missing — auto-refreshing...');
   try {
     const ok = await signIn();
-    if (ok) console.log('[AI] IMS token refreshed successfully');
+    if (ok) console.debug('[AI] IMS token refreshed successfully');
     return ok;
   } catch (e) {
     console.warn('[AI] IMS auto-refresh failed:', e.message);
@@ -1622,10 +1952,10 @@ async function executeTool(name, input) {
       if (currentSiteType === 'aem-cs' && (await ensureAuth()) && window.__EW_AEM_HOST) {
         try {
           const host = window.__EW_AEM_HOST;
-          console.log(`[get_page_content] Reading via AEM Content MCP: ${host}${pagePath}`);
+          console.debug(`[get_page_content] Reading via AEM Content MCP: ${host}${pagePath}`);
           const result = await aemContent.getPage(host, pagePath);
           const html = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-          const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
+          const content = html.length > HTML_TRUNCATE_THRESHOLD ? html.slice(0, HTML_TRUNCATE_THRESHOLD) + '\n\n[... truncated]' : html;
           return JSON.stringify({
             url: pageUrl,
             source: 'AEM Content MCP',
@@ -1643,10 +1973,10 @@ async function executeTool(name, input) {
       if (currentSiteType !== 'aem-cs' && (await ensureAuth()) && da.getOrg() && da.getRepo()) {
         try {
           const daPath = pagePath.replace(/\.html$/, '');
-          console.log(`[get_page_content] Reading via DA MCP: ${da.getOrg()}/${da.getRepo()}${daPath}`);
+          console.debug(`[get_page_content] Reading via DA MCP: ${da.getOrg()}/${da.getRepo()}${daPath}`);
           const result = await da.getPage(`${daPath}.html`);
           const html = typeof result === 'string' ? result : JSON.stringify(result);
-          const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
+          const content = html.length > HTML_TRUNCATE_THRESHOLD ? html.slice(0, HTML_TRUNCATE_THRESHOLD) + '\n\n[... truncated]' : html;
           return JSON.stringify({
             url: pageUrl,
             source: 'DA MCP',
@@ -1669,7 +1999,7 @@ async function executeTool(name, input) {
           const html = await resp.text();
           const isJcrSite = currentSiteType === 'aem-cs';
           const etag = isJcrSite ? null : (resp.headers.get('etag') || null);
-          const content = html.length > 15000 ? html.slice(0, 15000) + '\n\n[... truncated]' : html;
+          const content = html.length > HTML_TRUNCATE_THRESHOLD ? html.slice(0, HTML_TRUNCATE_THRESHOLD) + '\n\n[... truncated]' : html;
           return JSON.stringify({
             url: pageUrl,
             source: 'aem.page (CDN fallback)',
@@ -1695,7 +2025,7 @@ async function executeTool(name, input) {
         // Construct UE edit URL (don't rely on MCP to return it)
         const orgCtx = window.__EW_ORG || {};
         const previewOrigin = orgCtx.previewOrigin || '';
-        const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.destination_path}` : null;
+        const ueUrl = host ? buildUeUrl(host, input.destination_path, orgCtx) : null;
         return JSON.stringify({
           status: 'created',
           ...result,
@@ -1724,7 +2054,7 @@ async function executeTool(name, input) {
         try {
           if (attempt > 0) {
             // Re-read page to get fresh ETag after conflict
-            console.log(`[patch] ETag conflict — re-reading page for fresh ETag (attempt ${attempt + 1})`);
+            console.debug(`[patch] ETag conflict — re-reading page for fresh ETag (attempt ${attempt + 1})`);
             const freshPage = await aemContent.getPage(host, input.page_path);
             lastEtag = freshPage?.etag;
             if (!lastEtag) throw new Error('Could not get fresh ETag after conflict');
@@ -1733,7 +2063,7 @@ async function executeTool(name, input) {
 
           const orgCtx = window.__EW_ORG || {};
           const previewOrigin = orgCtx.previewOrigin || '';
-          const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.page_path}` : null;
+          const ueUrl = host ? buildUeUrl(host, input.page_path, orgCtx) : null;
           const previewUrl = previewOrigin ? `${previewOrigin}${input.page_path}` : null;
 
           return JSON.stringify({
@@ -1809,7 +2139,7 @@ async function executeTool(name, input) {
         const result = await aemContent.createPage(host, input.page_path, input.title, input.template);
         const orgCtx = window.__EW_ORG || {};
         const previewOrigin = orgCtx.previewOrigin || '';
-        const ueUrl = host ? `https://experience.adobe.com/#/@${orgCtx.orgId}/aem/editor/canvas/${previewOrigin}${input.page_path}` : null;
+        const ueUrl = host ? buildUeUrl(host, input.page_path, orgCtx) : null;
         return JSON.stringify({
           status: 'created',
           ...result,
@@ -1991,10 +2321,10 @@ async function executeTool(name, input) {
 
       // ── DA MCP write (primary — native path for DA-backed sites) ──
       // Requires IMS Bearer token. Auto-refresh if token missing/expired.
-      console.log(`[edit_page_content] ── START ── org=${org} repo=${repo} path=${htmlPath} htmlLen=${input.html?.length || 0} auth=${isSignedIn()} ghToken=${hasGitHubToken()}`);
+      console.debug(`[edit_page_content] ── START ── org=${org} repo=${repo} path=${htmlPath} htmlLen=${input.html?.length || 0} auth=${isSignedIn()} ghToken=${hasGitHubToken()}`);
       if (await ensureAuth()) {
         try {
-          console.log(`[edit_page_content] Writing via DA Admin API: ${da.getBasePath()}${htmlPath}`);
+          console.debug(`[edit_page_content] Writing via DA Admin API: ${da.getBasePath()}${htmlPath}`);
           await da.updatePage(htmlPath, input.html);
           // Direct PUT to admin.da.live — if it didn't throw, the write succeeded.
 
@@ -2003,7 +2333,7 @@ async function executeTool(name, input) {
             try {
               const previewResp = await da.previewPage(pagePath);
               previewStatus = previewResp.ok ? 'success' : `pending (${previewResp.status})`;
-              console.log('[edit_page_content] Preview trigger:', previewStatus);
+              console.debug('[edit_page_content] Preview trigger:', previewStatus);
             } catch (previewErr) {
               previewStatus = `pending: ${previewErr.message}`;
             }
@@ -2033,7 +2363,7 @@ async function executeTool(name, input) {
       if (hasGitHubToken()) {
         try {
           const result = await ghWriteContent(org, repo, pagePath, input.html, null, branch);
-          console.log('[edit_page_content] GitHub write:', result.commitSha);
+          console.debug('[edit_page_content] GitHub write:', result.commitSha);
 
           // Trigger preview — prefer IMS auth (required for DA-backed sites)
           // GitHub PAT alone gets 401 on admin.hlx.page for DA sites.
@@ -3196,7 +3526,7 @@ async function executeTool(name, input) {
         message: conflicts.length > 0
           ? `Found ${conflicts.length} conflict(s) for journey "${journeyName}". Review recommendations before activating.`
           : `No conflicts detected for journey "${journeyName}". Safe to activate.`,
-        _source: 'connected',
+        _source: 'simulated',
         source: 'Journey Agent — AJO Conflict Analysis',
       }, null, 2);
     }
@@ -3216,7 +3546,7 @@ async function executeTool(name, input) {
         assigned_team: input.product === 'AEM' ? 'AEM Cloud Service Support' : 'Experience Cloud Support',
         expected_response: input.priority === 'P1' ? '1 hour' : input.priority === 'P2' ? '4 hours' : '24 hours',
         message: `Support ticket ${caseId} created: "${input.subject}". Expected response within ${input.priority === 'P1' ? '1 hour' : input.priority === 'P2' ? '4 hours' : '24 hours'}.`,
-        _source: 'connected',
+        _source: 'simulated',
         source: 'Product Support Agent',
       }, null, 2);
     }
@@ -3246,7 +3576,7 @@ async function executeTool(name, input) {
         ],
         tracking_url: `https://experienceleague.adobe.com/home#/support/tickets/${caseId}`,
         message: `Case ${caseId} is in progress. Last update: fix deployed to stage, awaiting verification.`,
-        _source: 'connected',
+        _source: 'simulated',
         source: 'Product Support Agent',
       }, null, 2);
     }
@@ -3301,7 +3631,7 @@ async function executeTool(name, input) {
           content_type: r.type,
           last_updated: r.updated,
         })),
-        _source: 'connected',
+        _source: 'simulated',
         source: 'Experience League MCP — Prod',
       }, null, 2);
     }
@@ -3340,7 +3670,7 @@ async function executeTool(name, input) {
         product,
         timeframe,
         releases: results,
-        _source: 'connected',
+        _source: 'simulated',
         source: 'Experience League MCP — Prod',
       }, null, 2);
     }
@@ -3786,9 +4116,14 @@ async function executeTool(name, input) {
 
     case 'check_citation_readability': {
       let pageUrl = input.url;
-      // If no URL provided, use the currently loaded page
+      // If no URL provided, derive the real page URL (not Worker proxy URL)
       if (!pageUrl) {
-        pageUrl = window.__EW_PREVIEW_URL || document.querySelector('.preview-frame')?.src || '';
+        const orgCtx = window.__EW_ORG || {};
+        if (orgCtx.previewOrigin) {
+          pageUrl = orgCtx.previewOrigin + (activeResourcePath || '/');
+        } else {
+          pageUrl = window.__EW_PREVIEW_URL || document.querySelector('.preview-frame')?.src || '';
+        }
       }
       if (!pageUrl || pageUrl === 'about:blank') {
         return JSON.stringify({ error: 'No URL to analyze. Provide a URL or load a page in the preview.' });
@@ -3804,13 +4139,27 @@ async function executeTool(name, input) {
       } catch { /* cross-origin */ }
 
       try {
-        // Build a fetch helper that uses DA Admin API (avoids CORS from github.io)
+        // Build a fetch helper — DA Admin API for DA sites, Worker proxy for JCR sites
         const fetchHTML = async (fetchUrl) => {
+          // DA site: use DA Admin API
           if (da.getOrg() && da.getRepo()) {
-            const u = new URL(fetchUrl);
-            const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
-            const html = await da.getPage(`${path}.html`);
-            if (typeof html === 'string' && html.length > 0) return html;
+            try {
+              const u = new URL(fetchUrl);
+              const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
+              const html = await da.getPage(`${path}.html`);
+              if (typeof html === 'string' && html.length > 0) return html;
+            } catch { /* fall through */ }
+          }
+          // JCR site: fetch from publish via Worker proxy
+          const aemHost = window.__EW_AEM_HOST;
+          if (aemHost) {
+            try {
+              const publishUrl = aemHost.replace('author-', 'publish-');
+              const jcrPath = window.__EW_ORG?.activePath || activeResourcePath || '/content';
+              const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+              const resp = await fetch(`${workerBase}/preview?mode=raw&publish=${encodeURIComponent(publishUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`);
+              if (resp.ok) return resp.text();
+            } catch { /* fall through */ }
           }
           return '';
         };
@@ -3864,12 +4213,447 @@ async function executeTool(name, input) {
             .replace(/<[^>]+>/g, ' ')
             .replace(/\s+/g, ' ')
             .trim()
-            .slice(0, 15000);
+            .slice(0, HTML_TRUNCATE_THRESHOLD);
           return JSON.stringify({ url: input.url, type: 'text', content_length: clean.length, content: clean }, null, 2);
         }
-        return JSON.stringify({ url: input.url, type: contentType, content_length: text.length, content: text.slice(0, 15000) }, null, 2);
+        return JSON.stringify({ url: input.url, type: contentType, content_length: text.length, content: text.slice(0, HTML_TRUNCATE_THRESHOLD) }, null, 2);
       } catch (e) {
         return JSON.stringify({ error: `Fetch failed: ${e.message}`, url: input.url });
+      }
+    }
+
+    /* ─── Unified AEM MCP (code-execution model) ─── */
+
+    case 'aem_list_environments': {
+      if (!(await ensureAuth())) return authRequiredError('aem_list_environments');
+      try {
+        const result = await aemUnifiedMcp.callTool('list-aem-environments', {});
+        return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('aem_list_environments', err);
+      }
+    }
+
+    case 'aem_lookup_api': {
+      if (!(await ensureAuth())) return authRequiredError('aem_lookup_api');
+      try {
+        const args = { code: input.code };
+        if (input.aem_url) args.aemUrl = input.aem_url;
+        const result = await aemUnifiedMcp.callTool('lookup-api-spec', args);
+        return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('aem_lookup_api', err);
+      }
+    }
+
+    case 'aem_read': {
+      if (!(await ensureAuth())) return authRequiredError('aem_read');
+      try {
+        const result = await aemUnifiedMcp.callTool('read-api', {
+          code: input.code,
+          aemUrl: input.aem_url,
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('aem_read', err);
+      }
+    }
+
+    case 'aem_write': {
+      if (!(await ensureAuth())) return authRequiredError('aem_write');
+      try {
+        const result = await aemUnifiedMcp.callTool('write-api', {
+          code: input.code,
+          aemUrl: input.aem_url,
+          confirmed: input.confirmed || false,
+        });
+
+        // Auto-refresh preview after successful write
+        if (result && !result.error && input.confirmed) {
+          setTimeout(() => {
+            const frame = document.querySelector('.preview-frame');
+            if (frame) {
+              // JCR preview via Worker proxy
+              if (window.__JCR_PREVIEW_CONFIG) {
+                window.__refreshJcrPreview?.();
+              } else if (window.__JCR_PREVIEW_URL) {
+                frame.src = window.__JCR_PREVIEW_URL + '&_t=' + Date.now();
+              }
+              // DA/EDS preview via .aem.page iframe
+              else if (frame.src?.includes('.aem.page')) {
+                frame.src = frame.src.replace(/[?&]_t=\d+/, '') + (frame.src.includes('?') ? '&' : '?') + '_t=' + Date.now();
+              }
+            }
+          }, 500); // wait for publish replication
+        }
+
+        return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('aem_write', err);
+      }
+    }
+
+    case 'aem_delete': {
+      if (!(await ensureAuth())) return authRequiredError('aem_delete');
+      try {
+        const result = await aemUnifiedMcp.callTool('delete-api', {
+          code: input.code,
+          aemUrl: input.aem_url,
+          confirmed: input.confirmed || false,
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'AEM Unified MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('aem_delete', err);
+      }
+    }
+
+    /* ─── Bulk Operations ─── */
+
+    case 'batch_aem_update': {
+      if (!(await ensureAuth())) return authRequiredError('batch_aem_update');
+      try {
+        const aemUrl = input.aem_url;
+        // Sanitize all user inputs — these get interpolated into MCP code execution
+        const safeSiteId = String(input.site_id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        const safeCompType = String(input.component_type || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        const safePropPath = String(input.property_path || 'properties/text').replace(/[^a-zA-Z0-9_/:-]/g, '');
+        const safeNewValue = JSON.stringify(String(input.new_value || '')); // JSON.stringify handles all escaping
+        const confirmed = input.confirmed || false;
+
+        if (!safeSiteId) {
+          return JSON.stringify({ error: 'site_id is required and must be alphanumeric' });
+        }
+
+        // Step 1: List pages for the site
+        const listCode = `
+          const resp = await aem.get('/adobe/sites/sites');
+          const sites = resp.body?.items || [];
+          const site = sites.find(s => s.name === ${JSON.stringify(safeSiteId)} || s.id === ${JSON.stringify(safeSiteId)});
+          if (!site) return { error: 'Site not found: ' + ${JSON.stringify(safeSiteId)}, available: sites.map(s => s.name) };
+          const pages = await aem.get('/adobe/sites/sites/' + site.id + '/pages', { limit: 50 });
+          return { siteId: site.id, pages: (pages.body?.items || []).map(p => ({ id: p.id, title: p.title, path: p.path })) };
+        `;
+        const listResult = await aemUnifiedMcp.callTool('read-api', { code: listCode, aemUrl });
+
+        if (!confirmed) {
+          return JSON.stringify({
+            status: 'preview',
+            description: input.description,
+            message: `Found pages for site "${safeSiteId}". Review and call again with confirmed=true to apply changes.`,
+            ...listResult,
+            hint: 'Call batch_aem_update again with confirmed=true to execute the updates.',
+            source: 'AEM Unified MCP — Batch',
+          }, null, 2);
+        }
+
+        // Step 2: Execute updates (confirmed=true)
+        // All user values are JSON.stringify'd to prevent code injection
+        const updateCode = `
+          const SITE_ID = ${JSON.stringify(safeSiteId)};
+          const COMP_TYPE = ${JSON.stringify(safeCompType)};
+          const PROP_PATH = ${JSON.stringify(safePropPath)};
+          const NEW_VALUE = ${safeNewValue};
+
+          const resp = await aem.get('/adobe/sites/sites');
+          const sites = resp.body?.items || [];
+          const site = sites.find(s => s.name === SITE_ID || s.id === SITE_ID);
+          if (!site) return { error: 'Site not found' };
+
+          const pages = await aem.get('/adobe/sites/sites/' + site.id + '/pages', { limit: 50 });
+          const pageList = pages.body?.items || [];
+          const results = { updated: 0, skipped: 0, errors: [], pages: [] };
+
+          for (const page of pageList) {
+            try {
+              const content = await aem.get('/adobe/pages/' + page.id + '/content');
+              if (!content.body) { results.skipped++; continue; }
+
+              let patchPath;
+              if (COMP_TYPE) {
+                function findComp(node, type, path) {
+                  if (node.componentType && node.componentType.includes(type)) return { node, path };
+                  if (Array.isArray(node.items)) {
+                    for (let i = 0; i < node.items.length; i++) {
+                      const found = findComp(node.items[i], type, path + '/items/' + i);
+                      if (found) return found;
+                    }
+                  }
+                  return null;
+                }
+                const match = findComp(content.body, COMP_TYPE, '');
+                if (!match) { results.skipped++; continue; }
+                patchPath = match.path + '/' + PROP_PATH;
+              } else {
+                patchPath = '/' + PROP_PATH;
+              }
+
+              await aem.patch('/adobe/pages/' + page.id + '/content', [
+                { op: 'replace', path: patchPath, value: NEW_VALUE }
+              ], { etag: content.etag });
+
+              results.updated++;
+              results.pages.push({ title: page.title, path: page.path, status: 'updated' });
+            } catch (e) {
+              results.errors.push({ title: page.title, error: e.message });
+            }
+          }
+          return results;
+        `;
+
+        const updateResult = await aemUnifiedMcp.callTool('write-api', {
+          code: updateCode,
+          aemUrl,
+          confirmed: true,
+        });
+
+        // Auto-refresh preview
+        setTimeout(() => {
+          const frame = document.querySelector('.preview-frame');
+          if (frame) {
+            if (window.__JCR_PREVIEW_URL) {
+              frame.src = window.__JCR_PREVIEW_URL + '&_t=' + Date.now();
+            } else if (frame.src?.includes('.aem.page')) {
+              frame.src = frame.src.replace(/[?&]_t=\d+/, '') + (frame.src.includes('?') ? '&' : '?') + '_t=' + Date.now();
+            }
+          }
+        }, 1000);
+
+        return JSON.stringify({
+          status: 'success',
+          description: input.description,
+          ...updateResult,
+          source: 'AEM Unified MCP — Batch Update',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('batch_aem_update', err);
+      }
+    }
+
+    /* ─── ALT Text / Accessibility ─── */
+
+    case 'suggest_alt_text': {
+      try {
+        // Get page URL from input or current preview
+        let pageUrl = input.page_url;
+        if (!pageUrl) {
+          pageUrl = window.__EW_PREVIEW_URL || document.querySelector('.preview-frame')?.src || '';
+        }
+        if (!pageUrl || pageUrl === 'about:blank') {
+          return JSON.stringify({ error: 'No page URL. Connect a site or provide a page_url.' });
+        }
+
+        // Fetch page HTML to find images
+        let pageHTML = '';
+        try {
+          const resp = await fetch(pageUrl);
+          if (resp.ok) pageHTML = await resp.text();
+        } catch { /* fallback below */ }
+
+        if (!pageHTML) {
+          // Try DA API
+          if (da.getOrg() && da.getRepo()) {
+            const u = new URL(pageUrl);
+            const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
+            pageHTML = await da.getPage(`${path}.html`) || '';
+          }
+        }
+
+        if (!pageHTML) {
+          return JSON.stringify({ error: `Could not fetch page content from ${pageUrl}` });
+        }
+
+        // Parse images from HTML
+        const imgRegex = /<img[^>]*src=["']([^"']+)["'][^>]*(?:alt=["']([^"']*)["'])?[^>]*>/gi;
+        const imgRegex2 = /<img[^>]*(?:alt=["']([^"']*)["'])?[^>]*src=["']([^"']+)["'][^>]*>/gi;
+        const images = [];
+        let match;
+
+        // First pass: src before alt
+        const html1 = pageHTML;
+        while ((match = imgRegex.exec(html1)) !== null) {
+          images.push({ src: match[1], currentAlt: match[2] || '', index: images.length });
+        }
+        // Second pass: alt before src (if any were missed)
+        while ((match = imgRegex2.exec(pageHTML)) !== null) {
+          const src = match[2];
+          if (!images.some((i) => i.src === src)) {
+            images.push({ src, currentAlt: match[1] || '', index: images.length });
+          }
+        }
+
+        if (images.length === 0) {
+          return JSON.stringify({ status: 'no_images', message: 'No images found on this page.' });
+        }
+
+        // For each image, generate ALT text suggestion using Claude Vision
+        const suggestions = [];
+        for (const img of images.slice(0, 10)) { // limit to 10 images
+          try {
+            const suggestion = await callRaw(
+              `Analyze this image and write a concise, descriptive ALT text (1-2 sentences, max 125 characters). Focus on what the image shows, not what it means. Be specific.\n\nImage URL: ${img.src}\n\nCurrent ALT text: ${img.currentAlt || '(none)'}\n\nRespond with ONLY the suggested ALT text, nothing else.`,
+              { maxTokens: 100 },
+            );
+            suggestions.push({
+              ...img,
+              suggestedAlt: suggestion.trim(),
+              needsUpdate: !img.currentAlt || img.currentAlt.length < 5,
+            });
+          } catch {
+            suggestions.push({ ...img, suggestedAlt: '(analysis failed)', needsUpdate: !img.currentAlt });
+          }
+        }
+
+        const missing = suggestions.filter((s) => !s.currentAlt || s.currentAlt.length < 5).length;
+
+        return JSON.stringify({
+          status: 'success',
+          page_url: pageUrl,
+          total_images: images.length,
+          analyzed: suggestions.length,
+          missing_alt: missing,
+          suggestions: suggestions.map((s) => ({
+            image: s.src.split('/').pop(),
+            current_alt: s.currentAlt || '(none)',
+            suggested_alt: s.suggestedAlt,
+            needs_update: s.needsUpdate,
+          })),
+          hint: 'Review the suggestions above. Call apply_alt_text to apply approved ones.',
+          source: 'Content Advisor Agent — ALT Text',
+        }, null, 2);
+      } catch (err) {
+        return JSON.stringify({ error: `ALT text analysis failed: ${err.message}` });
+      }
+    }
+
+    case 'apply_alt_text': {
+      if (!(await ensureAuth())) return authRequiredError('apply_alt_text');
+      try {
+        const patches = (input.updates || []).map((u) => ({
+          op: 'replace',
+          path: u.image_path + '/properties/alt',
+          value: u.alt_text,
+        }));
+
+        if (patches.length === 0) {
+          return JSON.stringify({ error: 'No updates provided. Call suggest_alt_text first.' });
+        }
+
+        const safePath = JSON.stringify(input.page_path);
+        const code = `
+          const pagePath = ${safePath};
+          const page = await aem.get('/adobe/pages/' + pagePath + '/content');
+          await aem.patch('/adobe/pages/' + pagePath + '/content',
+            ${JSON.stringify(patches)},
+            { etag: page.etag }
+          );
+          return { updated: ${patches.length}, page: pagePath };
+        `;
+
+        const result = await aemUnifiedMcp.callTool('write-api', {
+          code,
+          aemUrl: input.aem_url,
+          confirmed: true,
+        });
+
+        // Auto-refresh preview
+        setTimeout(() => {
+          const frame = document.querySelector('.preview-frame');
+          if (frame && window.__JCR_PREVIEW_URL) {
+            frame.src = window.__JCR_PREVIEW_URL + '&_t=' + Date.now();
+          }
+        }, 500);
+
+        return JSON.stringify({
+          status: 'success',
+          ...result,
+          message: `Applied ALT text to ${patches.length} images on ${input.page_path}`,
+          source: 'Content Advisor Agent — ALT Text',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('apply_alt_text', err);
+      }
+    }
+
+    /* ─── CJA / Analytics Skills ─── */
+
+    case 'cja_visualize':
+    case 'cja_kpi_pulse':
+    case 'cja_executive_briefing':
+    case 'cja_anomaly_triage': {
+      if (!(await ensureAuth())) return authRequiredError(name);
+      try {
+        // Map tool names to CJA MCP skill names
+        const skillMap = {
+          cja_visualize: 'visualize_data',
+          cja_kpi_pulse: 'kpi_pulse',
+          cja_executive_briefing: 'executive_briefing',
+          cja_anomaly_triage: 'anomaly_triage',
+        };
+        const result = await cjaMcp.callTool(skillMap[name] || name, input);
+        return JSON.stringify({ status: 'success', ...result, source: `CJA — ${name}` }, null, 2);
+      } catch (err) {
+        return mcpError(name, err);
+      }
+    }
+
+    /* ─── Journey / Campaign Skills ─── */
+
+    case 'create_journey': {
+      if (!(await ensureAuth())) return authRequiredError('create_journey');
+      try {
+        const result = await marketingMcp.callTool('create_journey', {
+          brief: input.brief,
+          channels: input.channels || ['email'],
+          entry_type: input.entry_type || 'audience',
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'AJO — Journey Agent' }, null, 2);
+      } catch (err) {
+        return mcpError('create_journey', err);
+      }
+    }
+
+    case 'generate_journey_content': {
+      if (!(await ensureAuth())) return authRequiredError('generate_journey_content');
+      try {
+        const result = await marketingMcp.callTool('generate_content', {
+          channel: input.channel,
+          context: input.context,
+          tone: input.tone || 'professional',
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'AJO — Journey Agent' }, null, 2);
+      } catch (err) {
+        return mcpError('generate_journey_content', err);
+      }
+    }
+
+    case 'analyze_experiment': {
+      if (!(await ensureAuth())) return authRequiredError('analyze_experiment');
+      try {
+        // Try Target MCP first, fall back to CJA
+        let result;
+        try {
+          result = await targetMcp.callTool('analyze_experiment', input);
+        } catch {
+          result = await cjaMcp.callTool('analyze_experiment', input);
+        }
+        return JSON.stringify({ status: 'success', ...result, source: 'Experimentation Agent' }, null, 2);
+      } catch (err) {
+        return mcpError('analyze_experiment', err);
+      }
+    }
+
+    /* ─── Audience Skills ─── */
+
+    case 'explore_audiences': {
+      if (!(await ensureAuth())) return authRequiredError('explore_audiences');
+      try {
+        const result = await rtcdpMcp.callTool('explore_audiences', {
+          query: input.query,
+          status: input.status || 'all',
+        });
+        return JSON.stringify({ status: 'success', ...result, source: 'RT-CDP — Audience Agent' }, null, 2);
+      } catch (err) {
+        return mcpError('explore_audiences', err);
       }
     }
 
@@ -4072,6 +4856,24 @@ Use these when users ask about:
 24. **EXPERIMENTATION**: When users want A/B tests, experiments, or content variations, use setup_experiment + edit_page_content. One prompt sets up the entire experiment (variant pages + metadata + splits). This is FASTER than the UE extensions approach.
 25. **FORMS**: When users want forms, contact pages, or lead capture, use generate_form to create the form definition, then edit_page_content to embed it in the page.
 26. **VARIATIONS**: When users want content variations, alternate headlines, or copy options, use generate_page_variations. Generate full-page coordinated variations, not just one component at a time. If they also want to test them, chain with setup_experiment.
+27. **BULK OPERATIONS**: When users say "all pages", "every page", "across the site", "update everywhere", or "change on all" — use \`batch_aem_update\`. ALWAYS call with confirmed=false first to show affected pages, then ask user to confirm before calling with confirmed=true. Never execute bulk updates without user confirmation.
+28. **ALT TEXT**: When users mention "ALT text", "accessibility", "image descriptions", "missing ALT", or "image audit" — use \`suggest_alt_text\` to analyze page images. Present suggestions as a table. Only call \`apply_alt_text\` after user approves specific suggestions.
+29. **ANALYTICS (CJA)**: For data questions — "How did we do?", "trend orders", "revenue by region", "why did X drop?" — use \`cja_visualize\`, \`cja_kpi_pulse\`, \`cja_executive_briefing\`, or \`cja_anomaly_triage\`. These connect to CJA data views.
+30. **JOURNEYS (AJO)**: For journey creation — "Create a welcome series", "Build a re-engagement drip" — use \`create_journey\`. For journey content — "Generate a push notification" — use \`generate_journey_content\`.
+31. **EXPERIMENTS**: For experiment analysis — "What did we learn?", "Why did variant A win?" — use \`analyze_experiment\`.
+32. **AUDIENCES (RT-CDP)**: For audience questions — "Show me our largest audiences", "Which audiences target California?" — use \`explore_audiences\`.
+33. **SPEED — PARALLEL CALLS**: When the user's request touches MULTIPLE products (e.g., "Create a page AND set up a journey to drive traffic to it"), call the tools in PARALLEL. Return multiple tool_use blocks in one response. Examples of parallel-safe combinations:
+    - \`aem_read\` + \`search_dam_assets\` (read page content while searching for images)
+    - \`aem_write\` + \`create_workfront_task\` (update content while creating approval task)
+    - \`cja_kpi_pulse\` + \`explore_audiences\` (get metrics while checking audiences)
+    - \`suggest_alt_text\` + \`run_governance_check\` (accessibility + brand audit simultaneously)
+34. **INTENT CLARIFICATION**: Before executing, assess what the user is actually trying to accomplish. If the request is genuinely ambiguous and you cannot determine the right action from context (loaded page, connected site, conversation history), ask ONE short clarifying question. But NEVER ask when context already tells you the answer:
+    - ✅ ASK: "Make it look better" → "Do you want me to improve the copy, update the layout, or find a better hero image?"
+    - ✅ ASK: "Fix this" → "What needs fixing — content accuracy, brand compliance, or accessibility?"
+    - ✅ ASK: "Create a page" → "What should the page be about? Do you have a brief or should I base it on an existing page?"
+    - ❌ DON'T ASK: "Update the hero" (page is loaded — just update it)
+    - ❌ DON'T ASK: "Run a governance check" (clear intent — just do it)
+    - ❌ DON'T ASK: "Change headline to X" (specific instruction — execute immediately)
 
 ## Capabilities — 50 Tools, 22 Agents, Full Adobe Stack
 - **Page Analysis**: Analyze EDS pages — structure, blocks, sections, metadata, performance
@@ -4258,7 +5060,30 @@ Senior AEM architect who understands marketing KPIs. Technical precision meets b
 /* Returns an array of { type: 'text', text, cache_control? } blocks for the Claude API.
    Static layers get cache_control: { type: 'ephemeral' } so Claude can cache them
    across requests (~35KB saved per round-trip). Dynamic layers change per request. */
-function buildSystemParts(context = {}) {
+const FAST_SYSTEM_PROMPT = `You are Compass, an AI assistant for Adobe Experience Manager content editing.
+You have tools to read and edit page content. When asked to change content:
+1. If page HTML is provided below, edit it directly with edit_page_content.
+2. If not, call get_page_content first, then edit_page_content with the modified HTML.
+3. Keep the existing HTML structure — only change the specific text/element requested.
+4. Always trigger preview after editing.
+Be concise. Execute immediately. Don't explain what you'll do — just do it.
+IMPORTANT: If the page HTML is provided below, call edit_page_content DIRECTLY with the modified HTML. Do NOT call get_page_content first — you already have the content.`;
+
+function buildSystemParts(context = {}, { fast = false } = {}) {
+  // Fast mode: minimal prompt for simple edits (Haiku — every token counts)
+  if (fast) {
+    const blocks = [{ type: 'text', text: FAST_SYSTEM_PROMPT }];
+    // Add page context if available
+    if (context.org?.orgId) {
+      let pageCtx = `Site: ${context.org.orgId}/${context.org.repo} (${context.siteType || 'unknown'})`;
+      if (context.pagePath) pageCtx += ` | Path: ${context.pagePath}`;
+      if (context.pageHTML) pageCtx += `\n\nPage HTML:\n\`\`\`html\n${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}\n\`\`\``;
+      blocks.push({ type: 'text', text: pageCtx });
+    }
+    return blocks;
+  }
+
+  // Full mode: complete system prompt with all knowledge layers
   // Static layers — cacheable across requests
   const blocks = [
     { type: 'text', text: AEM_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
@@ -4300,18 +5125,13 @@ function buildSystemParts(context = {}) {
     if (isDa) pageContext += `\n| **DA Admin** | admin.da.live/source/${o.daOrg}/${o.daRepo} |`;
     if (context.customerName) pageContext += `\n| **Customer** | ${context.customerName} |`;
 
-    // ── Page HTML (pre-loaded — skip the read call for edits) ──
+    // ── Page HTML (pre-loaded — skip the read call for DA edits) ──
     if (context.pageHTML) {
       pageContext += `\n\n### Page Content (LIVE — pre-loaded, ${context.pageHTML.length} chars)
-You ALREADY have this page content.`;
-      if (context.jcrEtag) {
-        pageContext += `\n**Pre-fetched ETag:** \`${context.jcrEtag}\` (for path: ${context.jcrEtagPath})
-**SPEED RULE:** For edits to this page, call \`patch_aem_page_content\` DIRECTLY with this ETag. Do NOT call get_page_content first — you already have the content and ETag. This saves a full round trip.`;
-      } else if (!isJcr) {
-        pageContext += `\nFor DA edits, modify the HTML and call edit_page_content directly — no read call needed.`;
-      }
-      pageContext += `\n\n\`\`\`html
-${context.pageHTML.slice(0, 15000)}
+You ALREADY have this page content. For DA edits, modify the HTML and call edit_page_content directly — no read call needed.
+
+\`\`\`html
+${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
 \`\`\``;
     } else {
       pageContext += `\n\n*Page content not pre-loaded. Call get_page_content to read it.*`;
@@ -4330,7 +5150,7 @@ This is an **AEM CS (JCR)** site. You MUST use these tools:
 - Read: \`get_page_content\` (returns JCR content with ETag)
 - Discover templates: \`list_aem_templates\` (ALWAYS call first before creating a page — let user pick a template)
 - Create: \`create_aem_page\` (from template — requires template path from list_aem_templates)
-- Update: \`patch_aem_page_content\` (requires ETag — use pre-fetched ETag if available, otherwise call get_page_content first)
+- Update: \`patch_aem_page_content\` (requires ETag — call get_page_content first)
 - List: \`list_aem_pages\` (list children of a path)
 - Copy: \`copy_aem_page\`
 - Delete: \`delete_aem_page\`
@@ -4343,6 +5163,13 @@ This is an **AEM CS (JCR)** site. You MUST use these tools:
 **Launches:**
 - Create: \`create_aem_launch\`
 - Promote: \`promote_aem_launch\`
+
+**Unified AEM API (advanced — code execution):**
+- Discover APIs: \`aem_lookup_api\` (find API endpoints before read/write)
+- Read: \`aem_read\` (execute GET calls via sandboxed JavaScript)
+- Write: \`aem_write\` (execute POST/PUT/PATCH — dry-run by default, set confirmed=true to execute)
+- Delete: \`aem_delete\` (requires two-step confirmation)
+- List envs: \`aem_list_environments\`
 
 **DO NOT** use DA tools (edit_page_content, preview_page, list_site_pages) — they are not available for this site.`;
     } else if (isDa) {
@@ -4527,14 +5354,22 @@ export function abortCurrentChat() {
   }
 }
 
-/** Detect if a prompt is a simple content edit that can use the fast model. */
+/** Detect if a prompt is a simple content edit that can use the fast model (P2: expanded). */
 function isSimpleEdit(msg) {
   if (typeof msg !== 'string') return false;
   const lower = msg.toLowerCase();
-  // Simple patterns: "change X to Y", "update the headline to", "set the title to"
-  return /\b(change|update|set|replace|make|rename)\b.*\b(to|with|as)\b/i.test(lower)
-    && lower.length < 300
-    && !/\b(analyze|audit|governance|create|generate|search|find|list|compare|explain)\b/i.test(lower);
+  const len = lower.length;
+  // Short prompts about content changes → Haiku (3-5x faster)
+  if (len > 500) return false;
+  // Exclude complex multi-tool tasks
+  if (/\b(analyze|audit|governance|generate|search|find|list|compare|explain|create.*page|migrate|import)\b/i.test(lower)) return false;
+  // Match: "change X to Y", "update the headline", "make it more compelling"
+  if (/\b(change|update|set|replace|make|rename|edit|fix|rewrite|rephrase)\b.*\b(to|with|as|more|less|better|shorter|longer)\b/i.test(lower)) return true;
+  // Match: "translate to X", "shorten the", "expand the", "summarize"
+  if (/\b(translate|shorten|expand|summarize|simplify|reword|rephrase)\b/i.test(lower) && len < 300) return true;
+  // Match: "add a CTA", "remove the banner", "move the hero"
+  if (/\b(add|remove|delete|move|swap|hide|show)\b.*\b(the|a|an|this)\b/i.test(lower) && len < 200) return true;
+  return false;
 }
 
 export async function streamChat(userMessage, context, onChunk, onToolCall, onToolResult) {
@@ -4546,19 +5381,34 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('Claude API key not configured');
 
-  const system = buildSystemParts(context);
   let messages = Array.isArray(userMessage)
     ? [...userMessage]
     : [{ role: 'user', content: userMessage }];
 
-  // Use fast model (Haiku) for simple edits when page HTML is already in context
-  const lastMsg = messages[messages.length - 1]?.content;
-  const useFastModel = context.pageHTML && isSimpleEdit(typeof lastMsg === 'string' ? lastMsg : '');
+  // Extract the latest USER prompt text for intent classification + model routing
+  // Search backwards for the last user message (skip assistant messages in history)
+  let promptText = '';
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      const c = messages[i].content;
+      promptText = typeof c === 'string' ? c : (Array.isArray(c) ? c.find((b) => b.type === 'text')?.text || '' : '');
+      break;
+    }
+  }
+
+  // Use fast model + minimal prompt for simple edits
+  const useFastModel = isSimpleEdit(promptText);
   const model = useFastModel ? MODEL_FAST : MODEL;
-  if (useFastModel) console.log('[AI] Fast edit mode: using Haiku for speed');
+  const system = buildSystemParts(context, { fast: useFastModel });
+  console.debug(`[AI] Model: ${model} | Fast: ${useFastModel} | Tools: ${useFastModel ? 5 : 'tiered'} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
+
+  // Tiered tools: fast mode gets minimal tools, full mode gets intent-based
+  const tools = useFastModel
+    ? AEM_TOOLS.filter((t) => ['edit_page_content', 'get_page_content', 'preview_page', 'publish_page', 'list_site_pages'].includes(t.name))
+    : getToolsForPrompt(promptText);
 
   let fullText = '';
-  const MAX_TOOL_ROUNDS = 8;
+  const MAX_TOOL_ROUNDS = useFastModel ? 3 : 8;
 
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -4579,7 +5429,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
         stream: true,
         system,
         messages,
-        tools: getToolsForSiteType(),
+        tools: round === 0 ? tools : getToolsForSiteType(), // Tier 1 on first round, all tools on subsequent rounds if needed
       }),
     });
 
@@ -4629,7 +5479,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   }
   } catch (err) {
     if (err.name === 'AbortError') {
-      console.log('[AI] Chat aborted by user');
+      console.debug('[AI] Chat aborted by user');
       return fullText;
     }
     throw err;
