@@ -5089,7 +5089,20 @@ async function enableDesignMode() {
   // Fetch page HTML for srcdoc rendering (always use srcdoc for design mode —
   // the production iframe is cross-origin, so we need same-origin DOM access)
   await ensurePageContext();
-  const html = cachedPageHTML;
+  let html = cachedPageHTML;
+  if (!html && previewFrame.src?.includes('/preview?')) {
+    // Worker preview: fetch raw HTML directly
+    try {
+      const rawUrl = previewFrame.src.replace(/mode=hybrid/, 'mode=raw').replace(/_t=\d+/, `_t=${Date.now()}`);
+      const resp = await fetch(rawUrl);
+      if (resp.ok) {
+        const full = await resp.text();
+        const bodyMatch = full.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+        html = bodyMatch ? bodyMatch[1] : full;
+        cachedPageHTML = html;
+      }
+    } catch { /* fetch failed */ }
+  }
   if (!html) {
     showToast('Could not load page content for design mode', 'warn');
     return;
