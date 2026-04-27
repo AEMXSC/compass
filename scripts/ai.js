@@ -1897,7 +1897,7 @@ function sanitizePath(p) {
   return clean;
 }
 
-async function executeTool(name, input) {
+export async function executeTool(name, input) {
   const profile = getActiveProfile() || {};
 
   switch (name) {
@@ -5405,40 +5405,69 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
 
   // Use fast model + minimal prompt for simple edits
   const useFastModel = isSimpleEdit(promptText);
+  const raceModels = useFastModel && context.pageHTML;
   const model = useFastModel ? MODEL_FAST : MODEL;
   const system = buildSystemParts(context, { fast: useFastModel });
-  console.debug(`[AI] Model: ${model} | Fast: ${useFastModel} | Tools: ${useFastModel ? 5 : 'tiered'} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
+  const fullSystem = raceModels ? buildSystemParts(context, { fast: false }) : null;
+  console.debug(`[AI] Model: ${model} | Race: ${raceModels} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
   // Tiered tools: fast mode gets minimal tools, full mode gets intent-based
   const tools = useFastModel
-    ? AEM_TOOLS.filter((t) => ['edit_page_content', 'get_page_content', 'preview_page', 'publish_page', 'list_site_pages'].includes(t.name))
+    ? AEM_TOOLS.filter((t) => ['edit_page_content', 'get_page_content', 'preview_page', 'publish_page', 'list_site_pages', 'patch_aem_page_content'].includes(t.name))
     : getToolsForPrompt(promptText);
 
   let fullText = '';
   const MAX_TOOL_ROUNDS = useFastModel ? 3 : 8;
 
+  const apiHeaders = {
+    'Content-Type': 'application/json',
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+    'anthropic-dangerous-direct-browser-access': 'true',
+  };
+
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (abortCtrl.signal.aborted) break;
 
-    const resp = await fetch(CLAUDE_API, {
-      method: 'POST',
-      signal: abortCtrl.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: useFastModel ? 4096 : 8192,
-        stream: true,
-        system,
-        messages,
-        tools: round === 0 ? tools : getToolsForSiteType(), // Tier 1 on first round, all tools on subsequent rounds if needed
-      }),
-    });
+    let resp;
+
+    // Race: fire Haiku + Sonnet on first round for simple edits, use whichever responds first
+    if (raceModels && round === 0) {
+      const haikuCtrl = new AbortController();
+      const sonnetCtrl = new AbortController();
+      abortCtrl.signal.addEventListener('abort', () => { haikuCtrl.abort(); sonnetCtrl.abort(); });
+
+      const makeBody = (m, sys, maxTok) => JSON.stringify({
+        model: m, max_tokens: maxTok, stream: true, system: sys, messages, tools,
+      });
+
+      const haikuP = fetch(CLAUDE_API, { method: 'POST', signal: haikuCtrl.signal, headers: apiHeaders, body: makeBody(MODEL_FAST, system, 4096) });
+      const sonnetP = fetch(CLAUDE_API, { method: 'POST', signal: sonnetCtrl.signal, headers: apiHeaders, body: makeBody(MODEL, fullSystem, 8192) });
+
+      const winner = await Promise.race([
+        haikuP.then((r) => ({ resp: r, model: 'haiku', cancel: sonnetCtrl })),
+        sonnetP.then((r) => ({ resp: r, model: 'sonnet', cancel: haikuCtrl })),
+      ]);
+
+      console.debug(`[AI] Race winner: ${winner.model}`);
+      winner.cancel.abort();
+      resp = winner.resp;
+    } else {
+      resp = await fetch(CLAUDE_API, {
+        method: 'POST',
+        signal: abortCtrl.signal,
+        headers: apiHeaders,
+        body: JSON.stringify({
+          model,
+          max_tokens: useFastModel ? 4096 : 8192,
+          stream: true,
+          system,
+          messages,
+          tools: round === 0 ? tools : getToolsForSiteType(),
+        }),
+      });
+    }
 
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));

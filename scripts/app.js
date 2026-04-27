@@ -1762,6 +1762,44 @@ function timeAgo(isoStr) {
   return `${Math.floor(ms / 86400000)}d ago`;
 }
 
+/* ── Client-side fast edit: skip AI for ultra-simple DA edits ── */
+function tryClientSideFastEdit(text, ctx) {
+  if (!text || !ctx.pageHTML) return null;
+  const lower = text.toLowerCase();
+
+  // Pattern: "change/update the hero headline to <value>"
+  const heroMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:hero\s+)?(?:headline|heading|title|h1)\s+(?:to|:)\s+[""]?(.+?)[""]?\s*$/i);
+  if (heroMatch && heroMatch[1]) {
+    const newValue = heroMatch[1].trim();
+    const html = ctx.pageHTML.replace(/(<h1[^>]*>)([\s\S]*?)(<\/h1>)/, `$1${newValue}$3`);
+    if (html !== ctx.pageHTML) {
+      return { html, description: `Changed hero headline to "${newValue}"` };
+    }
+  }
+
+  // Pattern: "change/update the CTA/button text to <value>"
+  const ctaMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:cta|button)\s+(?:text\s+)?(?:to|:)\s+[""]?(.+?)[""]?\s*$/i);
+  if (ctaMatch && ctaMatch[1]) {
+    const newValue = ctaMatch[1].trim();
+    const html = ctx.pageHTML.replace(/(<a[^>]*class="[^"]*button[^"]*"[^>]*>)([\s\S]*?)(<\/a>)/, `$1${newValue}$3`);
+    if (html !== ctx.pageHTML) {
+      return { html, description: `Changed CTA text to "${newValue}"` };
+    }
+  }
+
+  // Pattern: "change/update the subtitle/subheading to <value>"
+  const subMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:sub(?:title|heading)|h2)\s+(?:to|:)\s+[""]?(.+?)[""]?\s*$/i);
+  if (subMatch && subMatch[1]) {
+    const newValue = subMatch[1].trim();
+    const html = ctx.pageHTML.replace(/(<h2[^>]*>)([\s\S]*?)(<\/h2>)/, `$1${newValue}$3`);
+    if (html !== ctx.pageHTML) {
+      return { html, description: `Changed subtitle to "${newValue}"` };
+    }
+  }
+
+  return null;
+}
+
 /* ── REAL: AI Chat (with native tool use) ── */
 async function handleRealChat(text, file) {
  try {
@@ -1810,6 +1848,37 @@ async function handleRealChat(text, file) {
   try { await Promise.race([ensurePageContext(), sleep(2000)]); } catch (e) { console.warn('[Chat] ensurePageContext failed:', e); }
   let ctx;
   try { ctx = getPageContext(); } catch (e) { console.warn('[Chat] getPageContext failed:', e); ctx = {}; }
+
+  // ── Option 3: Client-side fast path for ultra-simple DA edits ──
+  // Skip the AI entirely for "change X to Y" when we have page HTML.
+  if (!file && ctx.pageHTML && ctx.siteType !== 'aem-cs') {
+    const fastResult = tryClientSideFastEdit(text, ctx);
+    if (fastResult) {
+      streamEl.innerHTML = '';
+      try {
+        streamEl.innerHTML = `<span style="opacity:0.7">Applying edit directly...</span>`;
+        scrollChat();
+        const editResult = await ai.executeTool('edit_page_content', {
+          page_path: ctx.pagePath || '/',
+          html: fastResult.html,
+          trigger_preview: true,
+        });
+        const parsed = JSON.parse(editResult);
+        streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\nPreview refreshing.`);
+        conversationHistory.push({ role: 'assistant', content: `${fastResult.description} — applied directly (fast path).` });
+        if (parsed._action === 'refresh_preview' && parsed._preview_path) {
+          const path = parsed._preview_path;
+          activeResourcePath = path;
+          setTimeout(() => navigateToPage(path), 1500);
+          showToast(`Page updated — preview refreshing`, 'success');
+        }
+        scrollChat();
+        return;
+      } catch (e) {
+        console.warn('[FastEdit] Failed, falling through to AI:', e.message);
+      }
+    }
+  }
 
   // Tool call UI container — collapsible tool calls (like Claude.ai)
   let toolContainer = null;
