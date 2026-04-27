@@ -1970,7 +1970,6 @@ async function handleRealChat(text, file) {
     const thinkingEl = group.querySelector('.tool-group-thinking');
     const toolId = `tool-call-${toolCount}`;
     const inputSummary = formatToolInput(toolName, toolInput);
-    const thinkingText = getThinkingText(toolName, toolInput);
 
     // Update thinking status line
     if (thinkingEl) {
