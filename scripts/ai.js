@@ -5413,7 +5413,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
 
   // Tiered tools: fast mode gets minimal tools, full mode gets intent-based
   const tools = useFastModel
-    ? AEM_TOOLS.filter((t) => ['edit_page_content', 'get_page_content', 'preview_page', 'publish_page', 'list_site_pages', 'patch_aem_page_content'].includes(t.name))
+    ? AEM_TOOLS.filter((t) => ['edit_page_content', 'get_page_content', 'preview_page', 'publish_page', 'list_site_pages', 'patch_aem_page_content', 'aem_read', 'aem_write'].includes(t.name))
     : getToolsForPrompt(promptText);
 
   let fullText = '';
