@@ -1765,7 +1765,6 @@ function timeAgo(isoStr) {
 /* ── Client-side fast edit: skip AI for ultra-simple DA edits ── */
 function tryClientSideFastEdit(text, ctx) {
   if (!text || !ctx.pageHTML) return null;
-  const lower = text.toLowerCase();
 
   // Pattern: "change/update the hero headline to <value>"
   const heroMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:hero\s+)?(?:headline|heading|title|h1)\s+(?:to|:)\s+[""]?(.+?)[""]?\s*$/i);
@@ -1885,9 +1884,10 @@ async function handleRealChat(text, file) {
   let toolCount = 0;
 
   // Track which agent badges have been shown
-  const shownAgents = new Set();
+
   const agentContainers = {};
-  const toolsCalled = new Set(); // Track tools called this turn for suggestions
+  const toolsCalled = new Set();
+  const toolIdMap = new Map(); // toolName → last toolId (for parallel execution)
 
   // Human-readable thinking status for each tool call
   const TOOL_THINKING = {
@@ -1944,7 +1944,7 @@ async function handleRealChat(text, file) {
 
     // Create a new collapsible container per agent with Summit-style identity
     if (!agentContainers[agentName]) {
-      shownAgents.add(agentName);
+
       const icon = AGENT_ICONS[agentName] || '◆';
       const role = AGENT_ROLES[agentName] || '';
       const color = AGENT_COLORS[agentName] || 'var(--accent-light, #818cf8)';
@@ -1977,6 +1977,8 @@ async function handleRealChat(text, file) {
       thinkingEl.classList.add('active');
     }
 
+    toolIdMap.set(toolName, toolId);
+
     bodyEl.innerHTML += `
       <div class="tool-call-row active" id="${toolId}">
         <span class="tool-call-dot"></span>
@@ -1994,7 +1996,8 @@ async function handleRealChat(text, file) {
   }
 
   async function onToolResult(toolName, resultStr) {
-    const stepEl = document.querySelector(`#tool-call-${toolCount}`);
+    const myToolId = toolIdMap.get(toolName);
+    const stepEl = myToolId ? document.getElementById(myToolId) : null;
     if (stepEl) {
       stepEl.classList.replace('active', 'done');
       stepEl.querySelector('.tool-call-status').textContent = 'Done';
@@ -3967,7 +3970,7 @@ async function connectCustomSite(input) {
           if (result?.etag) {
             cachedJcrEtag = result.etag;
             cachedJcrEtagPath = jcrPath;
-            console.log(`[EW] Pre-fetched ETag for ${jcrPath}`);
+            console.debug(`[EW] Pre-fetched ETag for ${jcrPath}`);
           }
         } catch (e) { console.warn('[EW] ETag pre-fetch failed:', e.message); }
       });
@@ -5245,6 +5248,7 @@ const DESIGN_MODE_SCRIPT = `
 `;
 
 async function enableDesignMode() {
+ try {
   designModeActive = true;
   if (designOverlay) designOverlay.classList.add('active');
 
@@ -5300,6 +5304,11 @@ async function enableDesignMode() {
   <script>${DESIGN_MODE_SCRIPT}<\/script>
 </body>
 </html>`;
+ } catch (e) {
+  console.warn('[Design] enableDesignMode failed:', e.message);
+  showToast('Design mode failed to load', 'error');
+  designModeActive = false;
+ }
 }
 
 function disableDesignMode() {
