@@ -1925,6 +1925,21 @@ async function handleRealChat(text, file) {
   function onToolCall(toolName, toolInput) {
     toolCount++;
     toolsCalled.add(toolName);
+    const thinkingText = getThinkingText(toolName, toolInput);
+
+    // Show thinking in main chat stream (AEMcoder-style)
+    if (streamEl) {
+      const current = streamEl.innerHTML;
+      const thinkingLine = `<div class="tool-thinking-line">${escapeHtml(thinkingText)}</div>`;
+      // Append thinking line below any existing streamed text
+      if (current.includes('thinking-pulse') || current.trim() === '') {
+        streamEl.innerHTML = thinkingLine;
+      } else {
+        streamEl.innerHTML = current + thinkingLine;
+      }
+      scrollChat();
+    }
+
     const agentName = TOOL_AGENT_MAP[toolName] || 'Adobe Agent';
 
     // Create a new collapsible container per agent with Summit-style identity
