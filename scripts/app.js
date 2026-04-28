@@ -1766,30 +1766,41 @@ function timeAgo(isoStr) {
 function tryClientSideFastEdit(text, ctx) {
   if (!text || !ctx.pageHTML) return null;
 
-  // Pattern: "change/update the hero headline to <value>"
-  const heroMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:hero\s+)?(?:headline|heading|title|h1)\s+(?:to|:)\s+[""]?(.+?)[""]?\s*$/i);
+  // Detect creative intent — user wants AI to think, not a literal replacement
+  // "something more engaging" / "better for summer" / "more compelling" = needs AI
+  // "Aloha Adventures" / "Shop Now" = literal value, fast path OK
+  function isCreativeIntent(value) {
+    return /\b(something|anything|more|less|better|worse|different|creative|engaging|compelling|catchy|shorter|longer|simpler|punchier|fun|professional|formal|casual|persona|audience|target|about|related|relevant|focused)\b/i.test(value);
+  }
+
+  // Only fast-path when user provides a literal value (often in quotes)
+  // Pattern: "change the hero headline to <value>"
+  const heroMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:hero\s+)?(?:headline|heading|title|h1)\s+(?:to|:)\s+[""“]?(.+?)[""”]?\s*$/i);
   if (heroMatch && heroMatch[1]) {
     const newValue = heroMatch[1].trim();
+    if (isCreativeIntent(newValue)) return null;
     const html = ctx.pageHTML.replace(/(<h1[^>]*>)([\s\S]*?)(<\/h1>)/, `$1${newValue}$3`);
     if (html !== ctx.pageHTML) {
       return { html, description: `Changed hero headline to "${newValue}"` };
     }
   }
 
-  // Pattern: "change/update the CTA/button text to <value>"
-  const ctaMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:cta|button)\s+(?:text\s+)?(?:to|:)\s+[""]?(.+?)[""]?\s*$/i);
+  // Pattern: "change the CTA/button text to <value>"
+  const ctaMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:cta|button)\s+(?:text\s+)?(?:to|:)\s+[""“]?(.+?)[""”]?\s*$/i);
   if (ctaMatch && ctaMatch[1]) {
     const newValue = ctaMatch[1].trim();
+    if (isCreativeIntent(newValue)) return null;
     const html = ctx.pageHTML.replace(/(<a[^>]*class="[^"]*button[^"]*"[^>]*>)([\s\S]*?)(<\/a>)/, `$1${newValue}$3`);
     if (html !== ctx.pageHTML) {
       return { html, description: `Changed CTA text to "${newValue}"` };
     }
   }
 
-  // Pattern: "change/update the subtitle/subheading to <value>"
-  const subMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:sub(?:title|heading)|h2)\s+(?:to|:)\s+[""]?(.+?)[""]?\s*$/i);
+  // Pattern: "change the subtitle/subheading to <value>"
+  const subMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:sub(?:title|heading)|h2)\s+(?:to|:)\s+[""“]?(.+?)[""”]?\s*$/i);
   if (subMatch && subMatch[1]) {
     const newValue = subMatch[1].trim();
+    if (isCreativeIntent(newValue)) return null;
     const html = ctx.pageHTML.replace(/(<h2[^>]*>)([\s\S]*?)(<\/h2>)/, `$1${newValue}$3`);
     if (html !== ctx.pageHTML) {
       return { html, description: `Changed subtitle to "${newValue}"` };
