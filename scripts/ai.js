@@ -5135,7 +5135,7 @@ You ALREADY have this page content.`;
       } else if (isJcr) {
         pageContext += `\nFor JCR edits: call get_page_content ONCE to get the ETag, then immediately call patch_aem_page_content. Do NOT call get_page_content multiple times — one read is enough.`;
       } else {
-        pageContext += `\nFor DA edits, modify the HTML and call edit_page_content directly — no read call needed.`;
+        pageContext += `\n**SPEED RULE:** For DA edits, modify the HTML above and call \`edit_page_content\` DIRECTLY. Do NOT call get_page_content — you already have the full page HTML. One tool call, not two.`;
       }
       pageContext += `\n\n\`\`\`html
 ${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
@@ -5182,11 +5182,13 @@ This is an **AEM CS (JCR)** site. You MUST use these tools:
     } else if (isDa) {
       toolRouting = `### TOOL ROUTING (MANDATORY)
 This is a **DA (Document Authoring)** site. You MUST use these tools:
-- Read pages: \`get_page_content\` (reads via DA Admin API)
 - Write pages: \`edit_page_content\` (writes HTML to DA-backed repo, auto-triggers preview)
+- Read pages: \`get_page_content\` (ONLY if page HTML is not already in context above)
 - List pages: \`list_site_pages\`
 - Preview: \`preview_page\`
 - Publish: \`publish_page\`
+
+**SPEED:** If page HTML is already provided above, call edit_page_content DIRECTLY with your modified HTML. Do NOT call get_page_content first — the content is already in your context. One tool call = one edit.
 
 **DO NOT** use AEM Content MCP tools (patch_aem_page_content, copy_aem_page) — they are not available for this site.`;
     } else {
