@@ -3047,8 +3047,39 @@ async function loadResources() {
     } catch { /* ignore */ }
   }
 
+  // Fallback: DA Admin API list (shows all content pages in the DA repo)
+  if (sitePages.length <= 1 && da.getOrg()) {
+    try {
+      const daPages = [];
+      const listDir = async (dir) => {
+        const items = await da.listPages(dir);
+        if (!Array.isArray(items)) return;
+        for (const item of items) {
+          if (item.ext === 'html' || item.path?.endsWith('.html')) {
+            daPages.push(item);
+          } else if (!item.ext && item.name && !item.name.startsWith('.')) {
+            // Directory — recurse one level deep
+            if (dir === '/') await listDir(`/${item.name}`).catch(() => {});
+          }
+        }
+      };
+      await listDir('/');
+      if (daPages.length > 0) {
+        sitePages = daPages.map((p) => {
+          const raw = p.path || p.name || '';
+          const pagePath = '/' + raw.replace(/\.html$/, '').replace(/^\//, '');
+          return {
+            path: pagePath === '/index' ? '/' : pagePath,
+            title: raw.replace('.html', '').split('/').pop() || 'index',
+            description: '',
+          };
+        });
+      }
+    } catch { /* DA list not available */ }
+  }
+
   // Fallback: GitHub API tree (works for private repos with PAT)
-  if (sitePages.length === 0 && hasGitHubToken()) {
+  if (sitePages.length <= 1 && hasGitHubToken()) {
     try {
       const org = AEM_ORG.orgId;
       const repo = AEM_ORG.repo;
@@ -3064,25 +3095,6 @@ async function loadResources() {
         };
       });
     } catch { /* ignore */ }
-  }
-
-  // Fallback: DA Admin API list (shows all pages in the DA repo)
-  if (sitePages.length <= 1 && isSignedIn() && da.getOrg()) {
-    try {
-      const pages = await da.listPages('/');
-      if (Array.isArray(pages) && pages.length > 0) {
-        sitePages = pages
-          .filter((p) => p.path?.endsWith('.html') || p.ext === 'html')
-          .map((p) => {
-            const pagePath = '/' + (p.path || p.name || '').replace(/\.html$/, '').replace(/^\//, '');
-            return {
-              path: pagePath === '/index' ? '/' : pagePath,
-              title: (p.name || p.path || '').replace('.html', '').split('/').pop() || 'index',
-              description: '',
-            };
-          });
-      }
-    } catch { /* DA list not available */ }
   }
 
   // Final fallback: at least show the homepage
