@@ -5411,6 +5411,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const model = useFastModel ? MODEL_FAST : MODEL;
   const system = buildSystemParts(context, { fast: useFastModel });
   const fullSystem = raceModels ? buildSystemParts(context, { fast: false }) : null;
+  const _t0 = performance.now();
   console.debug(`[AI] Model: ${model} | Race: ${raceModels} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
   // Tiered tools: fast mode gets minimal tools, full mode gets intent-based
@@ -5452,7 +5453,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
         sonnetP.then((r) => ({ resp: r, model: 'sonnet', cancel: haikuCtrl })),
       ]);
 
-      console.debug(`[AI] Race winner: ${winner.model}`);
+      console.debug(`[AI] Race winner: ${winner.model} (${Math.round(performance.now() - _t0)}ms)`);
       winner.cancel.abort();
       resp = winner.resp;
     } else {
@@ -5477,10 +5478,12 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     }
 
     // Parse the streamed response, collecting text and tool_use blocks
+    console.debug(`[AI] Round ${round} API responded: ${Math.round(performance.now() - _t0)}ms`);
     const { text, contentBlocks, stopReason } = await parseToolStream(resp, (chunk) => {
       fullText += chunk;
       onChunk(chunk, fullText);
     });
+    console.debug(`[AI] Round ${round} stream complete: ${Math.round(performance.now() - _t0)}ms | stop: ${stopReason}`);
 
     // If no tool use, we're done
     if (stopReason !== 'tool_use') break;

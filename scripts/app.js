@@ -1856,11 +1856,14 @@ async function handleRealChat(text, file) {
   const streamEl = addStreamMessage('Compass');
   streamEl.innerHTML = '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';
   scrollChat();
+  const t0 = performance.now();
 
   // Pre-fetch page context (non-blocking — don't wait if it's slow)
   try { await Promise.race([ensurePageContext(), sleep(2000)]); } catch (e) { console.warn('[Chat] ensurePageContext failed:', e); }
+  console.debug(`[Chat] ensurePageContext: ${Math.round(performance.now() - t0)}ms`);
   let ctx;
   try { ctx = getPageContext(); } catch (e) { console.warn('[Chat] getPageContext failed:', e); ctx = {}; }
+  console.debug(`[Chat] getPageContext: ${Math.round(performance.now() - t0)}ms | pageHTML: ${ctx.pageHTML ? ctx.pageHTML.length : 'null'}`);
 
   // ── Option 3: Client-side fast path for ultra-simple DA edits ──
   // Skip the AI entirely for "change X to Y" when we have page HTML.
