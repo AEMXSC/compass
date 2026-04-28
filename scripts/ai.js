@@ -5407,7 +5407,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
 
   // Use fast model + minimal prompt for simple edits
   const useFastModel = isSimpleEdit(promptText);
-  const raceModels = useFastModel && context.pageHTML;
+  const raceModels = useFastModel; // Always race for simple edits — Haiku TTFT is 3x faster
   const model = useFastModel ? MODEL_FAST : MODEL;
   const system = buildSystemParts(context, { fast: useFastModel });
   const fullSystem = raceModels ? buildSystemParts(context, { fast: false }) : null;
