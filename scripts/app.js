@@ -3061,15 +3061,21 @@ async function loadResources() {
   // Fallback: DA Admin API list (shows all content pages in the DA repo)
   if (sitePages.length <= 1 && da.getOrg()) {
     try {
+      const daOrg = da.getOrg().toLowerCase();
+      const daRepo = da.getRepo().toLowerCase();
+      const pathPrefix = `/${daOrg}/${daRepo}/`;
+      const infraFiles = new Set(['nav', 'footer', 'header', 'head', '404']);
       const daPages = [];
       const listDir = async (dir) => {
         const items = await da.listPages(dir);
         if (!Array.isArray(items)) return;
         for (const item of items) {
           if (item.ext === 'html' || item.path?.endsWith('.html')) {
-            daPages.push(item);
+            const name = (item.name || '').replace('.html', '');
+            if (!infraFiles.has(name) && !name.endsWith('.plain')) {
+              daPages.push(item);
+            }
           } else if (!item.ext && item.name && !item.name.startsWith('.')) {
-            // Directory — recurse one level deep
             if (dir === '/') await listDir(`/${item.name}`).catch(() => {});
           }
         }
@@ -3077,7 +3083,9 @@ async function loadResources() {
       await listDir('/');
       if (daPages.length > 0) {
         sitePages = daPages.map((p) => {
-          const raw = p.path || p.name || '';
+          let raw = p.path || p.name || '';
+          // Strip org/repo prefix from DA paths (e.g. /aemxsc/lifepoint/index.html → /index)
+          if (raw.toLowerCase().startsWith(pathPrefix)) raw = raw.slice(pathPrefix.length - 1);
           const pagePath = '/' + raw.replace(/\.html$/, '').replace(/^\//, '');
           return {
             path: pagePath === '/index' ? '/' : pagePath,
@@ -3086,7 +3094,7 @@ async function loadResources() {
           };
         });
       }
-    } catch { /* DA list not available */ }
+    } catch (e) { console.warn('[Resources] DA list failed:', e.message); }
   }
 
   // Fallback: GitHub API tree (works for private repos with PAT)
