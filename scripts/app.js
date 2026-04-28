@@ -744,6 +744,9 @@ window.addEventListener('ew-auth-change', async (e) => {
 
     console.debug('[Auth] Signed in — warming sessions...');
     await Promise.all(warmups);
+
+    // Refresh page tree now that DA auth is available
+    if (da.getOrg()) loadResources();
   }
   updateAuthUI();
 });
@@ -3058,8 +3061,8 @@ async function loadResources() {
     } catch { /* ignore */ }
   }
 
-  // Fallback: DA Admin API list (shows all content pages in the DA repo)
-  if (sitePages.length <= 1 && da.getOrg()) {
+  // Fallback: DA Admin API list (shows all content pages — requires IMS auth)
+  if (sitePages.length <= 1 && da.getOrg() && isSignedIn()) {
     try {
       const daOrg = da.getOrg().toLowerCase();
       const daRepo = da.getRepo().toLowerCase();
