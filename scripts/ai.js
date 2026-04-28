@@ -5435,7 +5435,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
 
     let resp;
 
-    // Race: fire Haiku + Sonnet on first round for simple edits, use whichever responds first
+    // Race: fire Haiku + Sonnet, use whichever produces first content chunk
     if (raceModels && round === 0) {
       const haikuCtrl = new AbortController();
       const sonnetCtrl = new AbortController();
@@ -5445,14 +5445,35 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
         model: m, max_tokens: maxTok, stream: true, system: sys, messages, tools,
       });
 
-      const haikuP = fetch(CLAUDE_API, { method: 'POST', signal: haikuCtrl.signal, headers: apiHeaders, body: makeBody(MODEL_FAST, system, 4096) });
-      const sonnetP = fetch(CLAUDE_API, { method: 'POST', signal: sonnetCtrl.signal, headers: apiHeaders, body: makeBody(MODEL, fullSystem, 8192) });
+      // Race on first SSE data chunk, not fetch() headers
+      const raceOnFirstChunk = async (fetchP, label, cancelCtrl) => {
+        const r = await fetchP;
+        if (!r.ok) throw new Error(`${label}: ${r.status}`);
+        const reader = r.body.getReader();
+        const first = await reader.read();
+        // We got data — this model wins. Return a new ReadableStream that replays the first chunk
+        const replayed = new ReadableStream({
+          start(ctrl) { if (first.value) ctrl.enqueue(first.value); },
+          async pull(ctrl) {
+            const { done, value } = await reader.read();
+            if (done) { ctrl.close(); return; }
+            ctrl.enqueue(value);
+          },
+          cancel() { reader.cancel(); },
+        });
+        return { resp: new Response(replayed, { headers: r.headers }), model: label, cancel: cancelCtrl };
+      };
 
-      const winner = await Promise.race([
-        haikuP.then((r) => ({ resp: r, model: 'haiku', cancel: sonnetCtrl })),
-        sonnetP.then((r) => ({ resp: r, model: 'sonnet', cancel: haikuCtrl })),
-      ]);
+      const haikuP = raceOnFirstChunk(
+        fetch(CLAUDE_API, { method: 'POST', signal: haikuCtrl.signal, headers: apiHeaders, body: makeBody(MODEL_FAST, system, 4096) }),
+        'haiku', sonnetCtrl,
+      );
+      const sonnetP = raceOnFirstChunk(
+        fetch(CLAUDE_API, { method: 'POST', signal: sonnetCtrl.signal, headers: apiHeaders, body: makeBody(MODEL, fullSystem, 8192) }),
+        'sonnet', haikuCtrl,
+      );
 
+      const winner = await Promise.race([haikuP, sonnetP]);
       console.debug(`[AI] Race winner: ${winner.model} (${Math.round(performance.now() - _t0)}ms)`);
       winner.cancel.abort();
       resp = winner.resp;
