@@ -5416,7 +5416,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const model = useFastModel ? MODEL_FAST : MODEL;
   const system = buildSystemParts(context, { fast: useFastModel });
   const _t0 = performance.now();
-  console.debug(`[AI] Model: ${model} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
+  console.warn(`[AI] Model: ${model} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
   const tools = useFastModel
     ? AEM_TOOLS.filter((t) => ['edit_page_content', 'get_page_content', 'preview_page', 'publish_page', 'list_site_pages', 'patch_aem_page_content', 'aem_read', 'aem_write'].includes(t.name))
