@@ -1872,14 +1872,11 @@ async function handleRealChat(text, file) {
   const streamEl = addStreamMessage('Compass');
   streamEl.innerHTML = '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';
   scrollChat();
-  const t0 = performance.now();
 
   // Pre-fetch page context (non-blocking — don't wait if it's slow)
   try { await Promise.race([ensurePageContext(), sleep(2000)]); } catch (e) { console.warn('[Chat] ensurePageContext failed:', e); }
-  console.debug(`[Chat] ensurePageContext: ${Math.round(performance.now() - t0)}ms`);
   let ctx;
   try { ctx = getPageContext(); } catch (e) { console.warn('[Chat] getPageContext failed:', e); ctx = {}; }
-  console.debug(`[Chat] getPageContext: ${Math.round(performance.now() - t0)}ms | pageHTML: ${ctx.pageHTML ? ctx.pageHTML.length : 'null'}`);
 
   // ── Option 3: Client-side fast path for ultra-simple DA edits ──
   // Skip the AI entirely for "change X to Y" when we have page HTML.
@@ -1889,29 +1886,38 @@ async function handleRealChat(text, file) {
   if (!file && ctx.pageHTML && ctx.siteType !== 'aem-cs') {
     const fastResult = tryClientSideFastEdit(text, ctx);
     if (fastResult) {
-      streamEl.innerHTML = '';
-      try {
-        streamEl.innerHTML = `<span style="opacity:0.7">Applying edit directly...</span>`;
-        scrollChat();
-        const editResult = await ai.executeTool('edit_page_content', {
-          page_path: ctx.pagePath || '/',
-          html: fastResult.html,
-          trigger_preview: true,
-        });
-        const parsed = JSON.parse(editResult);
-        streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\nPreview refreshing.`);
-        conversationHistory.push({ role: 'assistant', content: `${fastResult.description} — applied directly (fast path).` });
-        if (parsed._action === 'refresh_preview' && parsed._preview_path) {
-          const path = parsed._preview_path;
-          activeResourcePath = path;
-          setTimeout(() => navigateToPage(path), 1500);
-          showToast(`Page updated — preview refreshing`, 'success');
-        }
-        scrollChat();
-        return;
-      } catch (e) {
-        console.warn('[FastEdit] Failed, falling through to AI:', e.message);
-      }
+      // Speculative execution — show success immediately, write in background
+      streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\nSaving...`);
+      conversationHistory.push({ role: 'assistant', content: `${fastResult.description} — applied directly.` });
+      cachedPageHTML = fastResult.html;
+      scrollChat();
+
+      // Fire-and-forget: DA write + preview refresh in background
+      ai.executeTool('edit_page_content', {
+        page_path: ctx.pagePath || '/',
+        html: fastResult.html,
+        trigger_preview: true,
+      }).then((editResult) => {
+        try {
+          const parsed = JSON.parse(editResult);
+          streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\nPreview is live.`);
+          if (parsed._action === 'refresh_preview' && parsed._preview_path) {
+            activeResourcePath = parsed._preview_path;
+            setTimeout(() => navigateToPage(parsed._preview_path), 1500);
+            showToast('Page updated', 'success');
+          }
+        } catch { /* */ }
+      }).catch((e) => {
+        streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\n⚠️ Save failed: ${e.message}`);
+      });
+      return;
+    }
+  }
+
+  // Tier 1 fallback: if pageHTML missing but pattern matches, note it
+  if (!file && !ctx.pageHTML && ctx.siteType !== 'aem-cs') {
+    if (tryClientSideFastEdit(text, { ...ctx, pageHTML: '<h1>x</h1>' })) {
+      console.debug('[Chat] Tier 1 pattern matched but no pageHTML — falling to Tier 2/3');
     }
   }
 
@@ -2193,8 +2199,8 @@ async function handleRealChat(text, file) {
 
     conversationHistory.push({ role: 'assistant', content: rawResponse });
 
-    // ── Fast edit apply: Haiku returned just the new text — apply it ──
-    if (ai.isSimpleEdit(text) && rawResponse && ctx.pageHTML && ctx.siteType !== 'aem-cs') {
+    // ── Fast edit apply: Haiku returned just the new text — apply it (DA + JCR) ──
+    if (ai.isSimpleEdit(text) && rawResponse && ctx.pageHTML) {
       const newText = rawResponse.replace(/^[""]|[""]$/g, '').trim();
       if (newText && newText.length < 500 && !newText.includes('<')) {
         // Find what to replace — extract target from user prompt
@@ -2207,18 +2213,42 @@ async function handleRealChat(text, file) {
           }
         }
         if (editHtml && editHtml !== ctx.pageHTML) {
-          try {
-            streamEl.innerHTML = md(`**Done!** Changed to: "${newText}"\n\nApplying...`);
-            scrollChat();
-            const result = await ai.executeTool('edit_page_content', { page_path: ctx.pagePath || '/', html: editHtml, trigger_preview: true });
-            const parsed = JSON.parse(result);
-            if (parsed._action === 'refresh_preview' && parsed._preview_path) {
-              setTimeout(() => navigateToPage(parsed._preview_path), 1500);
-              showToast('Page updated — preview refreshing', 'success');
+          streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\nSaving...`);
+          cachedPageHTML = editHtml;
+          scrollChat();
+
+          if (ctx.siteType === 'aem-cs') {
+            // JCR: use patch_aem_page_content with ETag (or let AI handle next turn)
+            // Can't do optimistic preview for JCR (Worker proxy), just write
+            const patchInput = { page_path: ctx.pagePath || '/' };
+            if (cachedJcrEtag) patchInput.etag = cachedJcrEtag;
+            // For JCR, the field path is complex — let Sonnet handle it on next round
+            // Just show the result and let user know
+            streamEl.innerHTML = md(`**Generated:** "${newText}"\n\nFor JCR sites, use the full AI path to apply. Paste this value when prompted.`);
+          } else {
+            // DA: optimistic preview + background write
+            if (previewFrame && AEM_ORG.previewOrigin) {
+              const base = AEM_ORG.previewOrigin;
+              previewFrame.srcdoc = `<!DOCTYPE html><html><head>
+                <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+                <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
+                <script src="${base}/scripts/aem.js" type="module"><\/script>
+                <script src="${base}/scripts/scripts.js" type="module"><\/script>
+              </head><body><header></header><main>${editHtml}</main><footer></footer></body></html>`;
             }
-            streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\nPreview is live.`);
-            scrollChat();
-          } catch (e) { console.warn('[FastApply] Failed:', e.message); }
+            ai.executeTool('edit_page_content', { page_path: ctx.pagePath || '/', html: editHtml, trigger_preview: true })
+              .then((result) => {
+                try {
+                  const parsed = JSON.parse(result);
+                  if (parsed._action === 'refresh_preview' && parsed._preview_path) {
+                    setTimeout(() => navigateToPage(parsed._preview_path), 2000);
+                  }
+                  streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\nPreview is live.`);
+                } catch { /* */ }
+              }).catch((e) => {
+                streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\n⚠️ Save failed: ${e.message}`);
+              });
+          }
         }
       }
     }
@@ -3426,6 +3456,13 @@ function navigateToPage(path) {
     if (cachedPageHTML) console.debug(`[NAV] Page content pre-cached: ${path} (${cachedPageHTML.length} chars)`);
   }).catch(() => { /* non-blocking */ });
 }
+// Background pre-cache: refresh page HTML every 30s so Tier 1/2 always have fresh content
+setInterval(() => {
+  if (!cachedPageHTML && activeResourcePath && !document.hidden) {
+    ensurePageContext().catch(() => {});
+  }
+}, 30000);
+
 // Expose for ai.js tool handlers
 window.__EW_NAV = navigateToPage;
 

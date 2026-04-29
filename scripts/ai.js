@@ -5410,7 +5410,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const model = useFastModel ? MODEL_FAST : MODEL;
   const system = buildSystemParts(context, { fast: useFastModel });
   const _t0 = performance.now();
-  console.warn(`[AI] Model: ${model} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
+  console.debug(`[AI] Model: ${model} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
   // Fast mode: strip conversation history — only send the current prompt
   // Full history has prior tool results with 9K chars of HTML each = 25s input processing
