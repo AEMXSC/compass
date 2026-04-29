@@ -5405,16 +5405,14 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     }
   }
 
-  // Use fast model + minimal prompt for simple edits
+  // Simple edits → Haiku (fast, 1-2s TTFT, 180-token prompt)
+  // Complex tasks → Sonnet (smart, 3-5s TTFT, full prompt)
   const useFastModel = isSimpleEdit(promptText);
-  const raceModels = useFastModel; // Always race for simple edits — Haiku TTFT is 3x faster
   const model = useFastModel ? MODEL_FAST : MODEL;
   const system = buildSystemParts(context, { fast: useFastModel });
-  const fullSystem = raceModels ? buildSystemParts(context, { fast: false }) : null;
   const _t0 = performance.now();
-  console.debug(`[AI] Model: ${model} | Race: ${raceModels} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
+  console.debug(`[AI] Model: ${model} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
-  // Tiered tools: fast mode gets minimal tools, full mode gets intent-based
   const tools = useFastModel
     ? AEM_TOOLS.filter((t) => ['edit_page_content', 'get_page_content', 'preview_page', 'publish_page', 'list_site_pages', 'patch_aem_page_content', 'aem_read', 'aem_write'].includes(t.name))
     : getToolsForPrompt(promptText);
@@ -5422,76 +5420,28 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   let fullText = '';
   const MAX_TOOL_ROUNDS = useFastModel ? 3 : 8;
 
-  const apiHeaders = {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-    'anthropic-version': '2023-06-01',
-    'anthropic-dangerous-direct-browser-access': 'true',
-  };
-
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (abortCtrl.signal.aborted) break;
 
-    let resp;
-
-    // Race: fire Haiku + Sonnet, use whichever produces first content chunk
-    if (raceModels && round === 0) {
-      const haikuCtrl = new AbortController();
-      const sonnetCtrl = new AbortController();
-      abortCtrl.signal.addEventListener('abort', () => { haikuCtrl.abort(); sonnetCtrl.abort(); });
-
-      const makeBody = (m, sys, maxTok) => JSON.stringify({
-        model: m, max_tokens: maxTok, stream: true, system: sys, messages, tools,
-      });
-
-      // Race on first SSE data chunk, not fetch() headers
-      const raceOnFirstChunk = async (fetchP, label, cancelCtrl) => {
-        const r = await fetchP;
-        if (!r.ok) throw new Error(`${label}: ${r.status}`);
-        const reader = r.body.getReader();
-        const first = await reader.read();
-        // We got data — this model wins. Return a new ReadableStream that replays the first chunk
-        const replayed = new ReadableStream({
-          start(ctrl) { if (first.value) ctrl.enqueue(first.value); },
-          async pull(ctrl) {
-            const { done, value } = await reader.read();
-            if (done) { ctrl.close(); return; }
-            ctrl.enqueue(value);
-          },
-          cancel() { reader.cancel(); },
-        });
-        return { resp: new Response(replayed, { headers: r.headers }), model: label, cancel: cancelCtrl };
-      };
-
-      const haikuP = raceOnFirstChunk(
-        fetch(CLAUDE_API, { method: 'POST', signal: haikuCtrl.signal, headers: apiHeaders, body: makeBody(MODEL_FAST, system, 4096) }),
-        'haiku', sonnetCtrl,
-      );
-      const sonnetP = raceOnFirstChunk(
-        fetch(CLAUDE_API, { method: 'POST', signal: sonnetCtrl.signal, headers: apiHeaders, body: makeBody(MODEL, fullSystem, 8192) }),
-        'sonnet', haikuCtrl,
-      );
-
-      const winner = await Promise.race([haikuP, sonnetP]);
-      console.debug(`[AI] Race winner: ${winner.model} (${Math.round(performance.now() - _t0)}ms)`);
-      winner.cancel.abort();
-      resp = winner.resp;
-    } else {
-      resp = await fetch(CLAUDE_API, {
-        method: 'POST',
-        signal: abortCtrl.signal,
-        headers: apiHeaders,
-        body: JSON.stringify({
-          model,
-          max_tokens: useFastModel ? 4096 : 8192,
-          stream: true,
-          system,
-          messages,
-          tools: round === 0 ? tools : getToolsForSiteType(),
-        }),
-      });
-    }
+    const resp = await fetch(CLAUDE_API, {
+      method: 'POST',
+      signal: abortCtrl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: useFastModel ? 4096 : 8192,
+        stream: true,
+        system,
+        messages,
+        tools: round === 0 ? tools : getToolsForSiteType(),
+      }),
+    });
 
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
