@@ -5394,14 +5394,19 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     ? [...userMessage]
     : [{ role: 'user', content: userMessage }];
 
-  // Extract the latest USER prompt text for intent classification + model routing
-  // Search backwards for the last user message (skip assistant messages in history)
+  // Extract the latest USER prompt text (not tool results) for model routing
   let promptText = '';
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === 'user') {
       const c = messages[i].content;
-      promptText = typeof c === 'string' ? c : (Array.isArray(c) ? c.find((b) => b.type === 'text')?.text || '' : '');
-      break;
+      if (typeof c === 'string') { promptText = c; break; }
+      if (Array.isArray(c)) {
+        // Skip tool_result arrays — find the last real text message
+        const textBlock = c.find((b) => b.type === 'text');
+        if (textBlock) { promptText = textBlock.text; break; }
+        // If it's all tool_results, keep searching backwards
+        continue;
+      }
     }
   }
 

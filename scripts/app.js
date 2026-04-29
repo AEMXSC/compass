@@ -1883,6 +1883,9 @@ async function handleRealChat(text, file) {
 
   // ── Option 3: Client-side fast path for ultra-simple DA edits ──
   // Skip the AI entirely for "change X to Y" when we have page HTML.
+  if (!file && !ctx.pageHTML && ctx.siteType !== 'aem-cs') {
+    console.debug('[Chat] Fast path skipped: no pageHTML cached yet');
+  }
   if (!file && ctx.pageHTML && ctx.siteType !== 'aem-cs') {
     const fastResult = tryClientSideFastEdit(text, ctx);
     if (fastResult) {
