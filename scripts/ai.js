@@ -5412,6 +5412,12 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const _t0 = performance.now();
   console.warn(`[AI] Model: ${model} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
+  // Fast mode: strip conversation history — only send the current prompt
+  // Full history has prior tool results with 9K chars of HTML each = 25s input processing
+  if (useFastModel) {
+    messages = [{ role: 'user', content: promptText }];
+  }
+
   // Fast mode: no tools — Haiku returns text only, caller handles the edit
   const tools = useFastModel ? [] : getToolsForPrompt(promptText);
 
