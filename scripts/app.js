@@ -1776,9 +1776,25 @@ function tryClientSideFastEdit(text, ctx) {
     return /\b(something|anything|more|less|better|worse|different|creative|engaging|compelling|catchy|shorter|longer|simpler|punchier|fun|professional|formal|casual|persona|audience|target|about|related|relevant|focused)\b/i.test(value);
   }
 
-  // Only fast-path when user provides a literal value (often in quotes)
-  // Pattern: "change the hero headline to <value>"
-  const heroMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:hero\s+)?(?:headline|heading|title|h1)\s+(?:to|:)\s+[""“]?(.+?)[""”]?\s*$/i);
+  // Pattern: change “old text” to “new text” — find and replace in HTML
+  const findReplace = text.match(/(?:change|replace|update)\s+[“””]([^”””]+)[“””]\s+(?:to|with)\s+[“””]([^”””]+)[“””]\s*$/i);
+  if (findReplace && findReplace[1] && findReplace[2]) {
+    const oldText = findReplace[1];
+    const newText = findReplace[2];
+    if (ctx.pageHTML.includes(oldText)) {
+      const html = ctx.pageHTML.replace(oldText, newText);
+      return { html, description: `Changed “${oldText}” to “${newText}”` };
+    }
+    // Case-insensitive fallback
+    const idx = ctx.pageHTML.toLowerCase().indexOf(oldText.toLowerCase());
+    if (idx !== -1) {
+      const html = ctx.pageHTML.slice(0, idx) + newText + ctx.pageHTML.slice(idx + oldText.length);
+      return { html, description: `Changed “${oldText}” to “${newText}”` };
+    }
+  }
+
+  // Pattern: “change the hero headline to <value>”
+  const heroMatch = text.match(/(?:change|update|set|make)\s+(?:the\s+)?(?:hero\s+)?(?:headline|heading|title|h1)\s+(?:to|:)\s+[“””]?(.+?)[“””]?\s*$/i);
   if (heroMatch && heroMatch[1]) {
     const newValue = heroMatch[1].trim();
     if (isCreativeIntent(newValue)) return null;
