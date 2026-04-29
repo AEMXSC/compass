@@ -2193,6 +2193,36 @@ async function handleRealChat(text, file) {
 
     conversationHistory.push({ role: 'assistant', content: rawResponse });
 
+    // ── Fast edit apply: Haiku returned just the new text — apply it ──
+    if (ai.isSimpleEdit(text) && rawResponse && ctx.pageHTML && ctx.siteType !== 'aem-cs') {
+      const newText = rawResponse.replace(/^[""]|[""]$/g, '').trim();
+      if (newText && newText.length < 500 && !newText.includes('<')) {
+        // Find what to replace — extract target from user prompt
+        const replaceTarget = text.match(/(?:change|update|replace)\s+(?:the\s+)?(?:hero\s+)?(?:headline|heading|title|h1|cta|button|subtitle|h2)/i);
+        let editHtml = null;
+        if (replaceTarget) {
+          const tag = /h1|headline|title|hero/i.test(replaceTarget[0]) ? 'h1' : /h2|subtitle/i.test(replaceTarget[0]) ? 'h2' : null;
+          if (tag) {
+            editHtml = ctx.pageHTML.replace(new RegExp(`(<${tag}[^>]*>)[\\s\\S]*?(<\\/${tag}>)`), `$1${newText}$2`);
+          }
+        }
+        if (editHtml && editHtml !== ctx.pageHTML) {
+          try {
+            streamEl.innerHTML = md(`**Done!** Changed to: "${newText}"\n\nApplying...`);
+            scrollChat();
+            const result = await ai.executeTool('edit_page_content', { page_path: ctx.pagePath || '/', html: editHtml, trigger_preview: true });
+            const parsed = JSON.parse(result);
+            if (parsed._action === 'refresh_preview' && parsed._preview_path) {
+              setTimeout(() => navigateToPage(parsed._preview_path), 1500);
+              showToast('Page updated — preview refreshing', 'success');
+            }
+            streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\nPreview is live.`);
+            scrollChat();
+          } catch (e) { console.warn('[FastApply] Failed:', e.message); }
+        }
+      }
+    }
+
     // ── Contextual Suggestion Chips ──
     // Show smart follow-up actions based on which tools were called
     if (toolsCalled.size > 0) {

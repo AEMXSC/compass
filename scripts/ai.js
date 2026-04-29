@@ -5060,25 +5060,19 @@ Senior AEM architect who understands marketing KPIs. Technical precision meets b
 /* Returns an array of { type: 'text', text, cache_control? } blocks for the Claude API.
    Static layers get cache_control: { type: 'ephemeral' } so Claude can cache them
    across requests (~35KB saved per round-trip). Dynamic layers change per request. */
-const FAST_SYSTEM_PROMPT = `You are Compass, an AI assistant for Adobe Experience Manager content editing.
-You have tools to read and edit page content. When asked to change content:
-1. If page HTML is provided below, edit it directly with edit_page_content.
-2. If not, call get_page_content first, then edit_page_content with the modified HTML.
-3. Keep the existing HTML structure — only change the specific text/element requested.
-4. Always trigger preview after editing.
-Be concise. Execute immediately. Don't explain what you'll do — just do it.
-IMPORTANT: If the page HTML is provided below, call edit_page_content DIRECTLY with the modified HTML. Do NOT call get_page_content first — you already have the content.`;
+const FAST_SYSTEM_PROMPT = `You are Compass, a fast content editor for Adobe Experience Manager.
+When asked to change content, respond with ONLY the new text value. No HTML tags, no explanation, no tool calls.
+Just output the replacement text directly. Example:
+User: "Change the hero headline to something engaging for nurses"
+You: "Caring for Those Who Care: Healthcare Built for Nurses"
+That's it. One line. The new text value only.`;
 
 function buildSystemParts(context = {}, { fast = false } = {}) {
   // Fast mode: minimal prompt for simple edits (Haiku — every token counts)
   if (fast) {
     const blocks = [{ type: 'text', text: FAST_SYSTEM_PROMPT }];
-    // Add page context if available
     if (context.org?.orgId) {
-      let pageCtx = `Site: ${context.org.orgId}/${context.org.repo} (${context.siteType || 'unknown'})`;
-      if (context.pagePath) pageCtx += ` | Path: ${context.pagePath}`;
-      if (context.pageHTML) pageCtx += `\n\nPage HTML:\n\`\`\`html\n${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}\n\`\`\``;
-      blocks.push({ type: 'text', text: pageCtx });
+      blocks.push({ type: 'text', text: `Site: ${context.org.orgId}/${context.org.repo} | Path: ${context.pagePath || '/'}` });
     }
     return blocks;
   }
@@ -5364,7 +5358,7 @@ export function abortCurrentChat() {
 }
 
 /** Detect if a prompt is a simple content edit that can use the fast model (P2: expanded). */
-function isSimpleEdit(msg) {
+export function isSimpleEdit(msg) {
   if (typeof msg !== 'string') return false;
   const lower = msg.toLowerCase();
   const len = lower.length;
@@ -5418,16 +5412,25 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const _t0 = performance.now();
   console.warn(`[AI] Model: ${model} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
-  const tools = useFastModel
-    ? AEM_TOOLS.filter((t) => ['edit_page_content', 'get_page_content', 'preview_page', 'publish_page', 'list_site_pages', 'patch_aem_page_content', 'aem_read', 'aem_write'].includes(t.name))
-    : getToolsForPrompt(promptText);
+  // Fast mode: no tools — Haiku returns text only, caller handles the edit
+  const tools = useFastModel ? [] : getToolsForPrompt(promptText);
 
   let fullText = '';
-  const MAX_TOOL_ROUNDS = useFastModel ? 3 : 8;
+  const MAX_TOOL_ROUNDS = useFastModel ? 1 : 8;
 
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (abortCtrl.signal.aborted) break;
+
+    const body = {
+      model,
+      max_tokens: useFastModel ? 256 : 8192,
+      stream: true,
+      system,
+      messages,
+    };
+    if (tools.length > 0) body.tools = tools;
+    if (tools.length > 0 && round > 0) body.tools = getToolsForSiteType();
 
     const resp = await fetch(CLAUDE_API, {
       method: 'POST',
@@ -5438,14 +5441,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify({
-        model,
-        max_tokens: useFastModel ? 4096 : 8192,
-        stream: true,
-        system,
-        messages,
-        tools: round === 0 ? tools : getToolsForSiteType(),
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!resp.ok) {
