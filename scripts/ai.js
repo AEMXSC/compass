@@ -5410,20 +5410,12 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     }
   }
 
-  // Simple edits → Haiku (fast, 1-2s TTFT, 180-token prompt)
-  // Complex tasks → Sonnet (smart, 3-5s TTFT, full prompt)
-  // Only use Haiku when page HTML is available — otherwise it can't generate meaningful text
-  const useFastModel = isSimpleEdit(promptText) && !!context.pageHTML;
-  const model = useFastModel ? MODEL_FAST : MODEL;
-  const system = buildSystemParts(context, { fast: useFastModel });
+  // Always use Sonnet with full tools — Haiku text-only path was unreliable
+  const useFastModel = false;
+  const model = MODEL;
+  const system = buildSystemParts(context, { fast: false });
   const _t0 = performance.now();
-  console.debug(`[AI] Model: ${model} | Fast: ${useFastModel} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
-
-  // Fast mode: strip conversation history — only send the current prompt
-  // Full history has prior tool results with 9K chars of HTML each = 25s input processing
-  if (useFastModel) {
-    messages = [{ role: 'user', content: promptText }];
-  }
+  console.debug(`[AI] Model: ${model} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
   // Fast mode: no tools — Haiku returns text only, caller handles the edit
   const tools = useFastModel ? [] : getToolsForPrompt(promptText);

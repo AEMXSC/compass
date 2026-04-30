@@ -2202,64 +2202,6 @@ async function handleRealChat(text, file) {
 
     conversationHistory.push({ role: 'assistant', content: rawResponse });
 
-    // ── Fast edit apply: Haiku returned just the new text — apply it (DA + JCR) ──
-    if (ai.isSimpleEdit(text) && rawResponse && ctx.pageHTML) {
-      const newText = rawResponse.replace(/^[""]|[""]$/g, '').trim();
-      // Guard: don't use clarification questions or refusals as replacement text
-      const isQuestion = /\?|could you|can you|I need|I don't|please (provide|share|tell)|what is|what's the/i.test(newText);
-      if (newText && newText.length < 500 && !newText.includes('<') && !isQuestion) {
-        // Find what to replace — extract target from user prompt
-        const replaceTarget = text.match(/(?:change|update|replace)\s+(?:the\s+)?(?:hero\s+)?(?:headline|heading|title|h1|cta|button|subtitle|h2)/i);
-        let editHtml = null;
-        if (replaceTarget) {
-          const tag = /h1|headline|title|hero/i.test(replaceTarget[0]) ? 'h1' : /h2|subtitle/i.test(replaceTarget[0]) ? 'h2' : null;
-          if (tag) {
-            editHtml = ctx.pageHTML.replace(new RegExp(`(<${tag}[^>]*>)[\\s\\S]*?(<\\/${tag}>)`), `$1${newText}$2`);
-          }
-        }
-        if (editHtml && editHtml !== ctx.pageHTML) {
-          streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\nSaving...`);
-          cachedPageHTML = editHtml; cachedPageHTMLTimestamp = Date.now();
-          scrollChat();
-
-          if (ctx.siteType === 'aem-cs') {
-            // JCR: use patch_aem_page_content with ETag (or let AI handle next turn)
-            // Can't do optimistic preview for JCR (Worker proxy), just write
-            const patchInput = { page_path: ctx.pagePath || '/' };
-            if (cachedJcrEtag) patchInput.etag = cachedJcrEtag;
-            // For JCR, the field path is complex — let Sonnet handle it on next round
-            // Just show the result and let user know
-            streamEl.innerHTML = md(`**Generated:** "${newText}"\n\nFor JCR sites, use the full AI path to apply. Paste this value when prompted.`);
-          } else {
-            // DA: optimistic preview + background write
-            if (previewFrame && AEM_ORG.previewOrigin) {
-              const base = AEM_ORG.previewOrigin;
-              previewFrame.srcdoc = `<!DOCTYPE html><html><head>
-                <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-                <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
-                <script src="${base}/scripts/aem.js" type="module"><\/script>
-                <script src="${base}/scripts/scripts.js" type="module"><\/script>
-              </head><body><header></header><main>${editHtml}</main><footer></footer></body></html>`;
-            }
-            ai.executeTool('edit_page_content', { page_path: ctx.pagePath || '/', html: editHtml, trigger_preview: true })
-              .then(() => {
-                streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\nPreview is live.`);
-                showToast('Page updated', 'success');
-                // Reload preview from CDN after write (2s delay for CDN propagation)
-                setTimeout(() => {
-                  if (previewFrame && AEM_ORG.previewOrigin) {
-                    previewFrame.removeAttribute('srcdoc');
-                    previewFrame.src = AEM_ORG.previewOrigin + (ctx.pagePath || '/') + '?_t=' + Date.now();
-                  }
-                }, 2500);
-              }).catch((e) => {
-                streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\n⚠️ Save failed: ${e.message}`);
-              });
-          }
-        }
-      }
-    }
-
     // ── Contextual Suggestion Chips ──
     // Show smart follow-up actions based on which tools were called
     if (toolsCalled.size > 0) {
