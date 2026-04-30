@@ -921,6 +921,7 @@ function getBrandPolicies() {
 /* ── Get Page Context ── */
 let cachedPageHTML = null;
 let cachedPageUrl = null;
+let cachedPageHTMLTimestamp = 0; // when cachedPageHTML was last set
 let cachedJcrEtag = null;
 let cachedJcrEtagPath = null;
 
@@ -1890,24 +1891,18 @@ async function handleRealChat(text, file) {
       // Speculative execution — show success immediately, write in background
       streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\nSaving...`);
       conversationHistory.push({ role: 'assistant', content: `${fastResult.description} — applied directly.` });
-      cachedPageHTML = fastResult.html;
+      cachedPageHTML = fastResult.html; cachedPageHTMLTimestamp = Date.now();
       scrollChat();
 
       // Fire-and-forget: DA write + preview refresh in background
+      // Don't call navigateToPage — it clears cachedPageHTML and breaks subsequent fast edits
       ai.executeTool('edit_page_content', {
         page_path: ctx.pagePath || '/',
         html: fastResult.html,
         trigger_preview: true,
-      }).then((editResult) => {
-        try {
-          const parsed = JSON.parse(editResult);
-          streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\nPreview is live.`);
-          if (parsed._action === 'refresh_preview' && parsed._preview_path) {
-            activeResourcePath = parsed._preview_path;
-            setTimeout(() => navigateToPage(parsed._preview_path), 1500);
-            showToast('Page updated', 'success');
-          }
-        } catch { /* */ }
+      }).then(() => {
+        streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\nPreview is live.`);
+        showToast('Page updated', 'success');
       }).catch((e) => {
         streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\n⚠️ Save failed: ${e.message}`);
       });
@@ -2215,7 +2210,7 @@ async function handleRealChat(text, file) {
         }
         if (editHtml && editHtml !== ctx.pageHTML) {
           streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\nSaving...`);
-          cachedPageHTML = editHtml;
+          cachedPageHTML = editHtml; cachedPageHTMLTimestamp = Date.now();
           scrollChat();
 
           if (ctx.siteType === 'aem-cs') {
@@ -2238,14 +2233,9 @@ async function handleRealChat(text, file) {
               </head><body><header></header><main>${editHtml}</main><footer></footer></body></html>`;
             }
             ai.executeTool('edit_page_content', { page_path: ctx.pagePath || '/', html: editHtml, trigger_preview: true })
-              .then((result) => {
-                try {
-                  const parsed = JSON.parse(result);
-                  if (parsed._action === 'refresh_preview' && parsed._preview_path) {
-                    setTimeout(() => navigateToPage(parsed._preview_path), 2000);
-                  }
-                  streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\nPreview is live.`);
-                } catch { /* */ }
+              .then(() => {
+                streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\nPreview is live.`);
+                showToast('Page updated', 'success');
               }).catch((e) => {
                 streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\n⚠️ Save failed: ${e.message}`);
               });
@@ -3450,9 +3440,11 @@ function navigateToPage(path) {
   });
 
   // Pre-fetch page content in background so it's ready when the user chats.
-  // Same pattern as EW: "Source: Live document from editor" — zero latency on first prompt.
-  cachedPageHTML = null;
-  cachedPageUrl = null;
+  // Don't clear if recently set by an edit (user may be doing rapid edits)
+  if (Date.now() - cachedPageHTMLTimestamp > 10000) {
+    cachedPageHTML = null;
+    cachedPageUrl = null;
+  }
   ensurePageContext().then(() => {
     if (cachedPageHTML) console.debug(`[NAV] Page content pre-cached: ${path} (${cachedPageHTML.length} chars)`);
   }).catch(() => { /* non-blocking */ });
