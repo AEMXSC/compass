@@ -993,16 +993,17 @@ function getPageContext() {
       github: typeof hasGitHubToken === 'function' ? hasGitHubToken() : false,
     },
   };
-  // Try iframe DOM first (same-origin)
-  try {
-    const iframeDoc = previewFrame.contentDocument || previewFrame.contentWindow?.document;
-    if (iframeDoc?.body) {
-      ctx.pageHTML = iframeDoc.documentElement.outerHTML;
-    }
-  } catch { /* cross-origin */ }
-  // Use cached fetched HTML
-  if (!ctx.pageHTML && cachedPageHTML) {
+  // Prefer cached HTML (updated after edits) over iframe DOM (may have wrapper from srcdoc)
+  if (cachedPageHTML) {
     ctx.pageHTML = cachedPageHTML;
+  } else {
+    // Fallback: try iframe DOM (same-origin)
+    try {
+      const iframeDoc = previewFrame.contentDocument || previewFrame.contentWindow?.document;
+      if (iframeDoc?.body) {
+        ctx.pageHTML = iframeDoc.documentElement.outerHTML;
+      }
+    } catch { /* cross-origin */ }
   }
   // Attach pre-fetched ETag for JCR edits (saves one full round trip)
   if (cachedJcrEtag && cachedJcrEtagPath === (activeResourcePath || '/')) {
@@ -1776,8 +1777,8 @@ function tryClientSideFastEdit(text, ctx) {
     return /\b(something|anything|more|less|better|worse|different|creative|engaging|compelling|catchy|shorter|longer|simpler|punchier|fun|professional|formal|casual|persona|audience|target|about|related|relevant|focused)\b/i.test(value);
   }
 
-  // Pattern: change “old text” to “new text” — find and replace in HTML
-  const findReplace = text.match(/(?:change|replace|update)\s+[“””]([^”””]+)[“””]\s+(?:to|with)\s+[“””]([^”””]+)[“””]\s*$/i);
+  // Pattern: change “old text” to “new text” — or just “old text” to “new text”
+  const findReplace = text.match(/(?:(?:change|replace|update)\s+)?[“””]([^”””]+)[“””]\s+(?:to|with)\s+[“””]([^”””]+)[“””]\s*$/i);
   if (findReplace && findReplace[1] && findReplace[2]) {
     const oldText = findReplace[1];
     const newText = findReplace[2];

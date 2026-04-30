@@ -5372,6 +5372,8 @@ export function isSimpleEdit(msg) {
   if (/\b(translate|shorten|expand|summarize|simplify|reword|rephrase)\b/i.test(lower) && len < 300) return true;
   // Match: "add a CTA", "remove the banner", "move the hero"
   if (/\b(add|remove|delete|move|swap|hide|show)\b.*\b(the|a|an|this)\b/i.test(lower) && len < 200) return true;
+  // Match: "old text" to "new text" — bare quoted find-replace without leading verb
+  if (/[""][^""]+[""]\s+(?:to|with)\s+[""][^""]+[""]/.test(msg)) return true;
   return false;
 }
 
