@@ -1927,6 +1927,7 @@ async function handleRealChat(text, file) {
   // Tool call UI container — collapsible tool calls (like Claude.ai)
   let toolContainer = null;
   let toolCount = 0;
+  let firstChunkReceived = false;
 
   // Track which agent badges have been shown
 
@@ -2048,12 +2049,12 @@ async function handleRealChat(text, file) {
       stepEl.querySelector('.tool-call-status').textContent = 'Done';
     }
 
-    // Update thinking to show "Processing results..." between rounds
+    // Show thinking pulse in main chat between tool rounds
     const agentName = TOOL_AGENT_MAP[toolName] || 'Adobe Agent';
-    const group = agentContainers[agentName];
-    if (group) {
-      const thinkingEl = group.querySelector('.tool-group-thinking');
-      if (thinkingEl) { thinkingEl.textContent = 'Processing results...'; }
+    firstChunkReceived = false;
+    if (streamEl) {
+      streamEl.innerHTML += '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';
+      scrollChat();
     }
 
     // ── Tool Result Renderer Dispatch ──
@@ -2160,7 +2161,6 @@ async function handleRealChat(text, file) {
 
   // P3: Optimistic intent detection — parse streamed text for change intent
   let intentShown = false;
-  let firstChunkReceived = false;
 
   try {
     const rawResponse = await ai.streamChat(
