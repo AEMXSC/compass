@@ -5061,7 +5061,8 @@ Senior AEM architect who understands marketing KPIs. Technical precision meets b
    Static layers get cache_control: { type: 'ephemeral' } so Claude can cache them
    across requests (~35KB saved per round-trip). Dynamic layers change per request. */
 const FAST_SYSTEM_PROMPT = `You are Compass, a fast content editor for Adobe Experience Manager.
-When asked to change content, respond with ONLY the new text value. No HTML tags, no explanation, no tool calls.
+When asked to change content, respond with ONLY the new text value. No HTML tags, no explanation, no questions, no tool calls.
+NEVER ask clarifying questions. NEVER say "I need" or "Could you". Just generate the best replacement text based on what you know.
 Just output the replacement text directly. Example:
 User: "Change the hero headline to something engaging for nurses"
 You: "Caring for Those Who Care: Healthcare Built for Nurses"
@@ -5071,9 +5072,12 @@ function buildSystemParts(context = {}, { fast = false } = {}) {
   // Fast mode: minimal prompt for simple edits (Haiku — every token counts)
   if (fast) {
     const blocks = [{ type: 'text', text: FAST_SYSTEM_PROMPT }];
-    if (context.org?.orgId) {
-      blocks.push({ type: 'text', text: `Site: ${context.org.orgId}/${context.org.repo} | Path: ${context.pagePath || '/'}` });
-    }
+    let siteContext = '';
+    if (context.org?.name) siteContext += `Brand: ${context.org.name}. `;
+    if (context.org?.vertical) siteContext += `Industry: ${context.org.vertical}. `;
+    if (context.customerName) siteContext += `Customer: ${context.customerName}. `;
+    if (context.pagePath) siteContext += `Page: ${context.pagePath}. `;
+    if (siteContext) blocks.push({ type: 'text', text: siteContext.trim() });
     return blocks;
   }
 
@@ -5408,7 +5412,8 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
 
   // Simple edits → Haiku (fast, 1-2s TTFT, 180-token prompt)
   // Complex tasks → Sonnet (smart, 3-5s TTFT, full prompt)
-  const useFastModel = isSimpleEdit(promptText);
+  // Only use Haiku when page HTML is available — otherwise it can't generate meaningful text
+  const useFastModel = isSimpleEdit(promptText) && !!context.pageHTML;
   const model = useFastModel ? MODEL_FAST : MODEL;
   const system = buildSystemParts(context, { fast: useFastModel });
   const _t0 = performance.now();

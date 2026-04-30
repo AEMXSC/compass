@@ -1903,6 +1903,13 @@ async function handleRealChat(text, file) {
       }).then(() => {
         streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\nPreview is live.`);
         showToast('Page updated', 'success');
+        // Reload preview from CDN after write (2s delay for CDN propagation)
+        setTimeout(() => {
+          if (previewFrame && AEM_ORG.previewOrigin) {
+            previewFrame.removeAttribute('srcdoc');
+            previewFrame.src = AEM_ORG.previewOrigin + (ctx.pagePath || '/') + '?_t=' + Date.now();
+          }
+        }, 2500);
       }).catch((e) => {
         streamEl.innerHTML = md(`**Done.** ${fastResult.description}\n\n⚠️ Save failed: ${e.message}`);
       });
@@ -2198,7 +2205,9 @@ async function handleRealChat(text, file) {
     // ── Fast edit apply: Haiku returned just the new text — apply it (DA + JCR) ──
     if (ai.isSimpleEdit(text) && rawResponse && ctx.pageHTML) {
       const newText = rawResponse.replace(/^[""]|[""]$/g, '').trim();
-      if (newText && newText.length < 500 && !newText.includes('<')) {
+      // Guard: don't use clarification questions or refusals as replacement text
+      const isQuestion = /\?|could you|can you|I need|I don't|please (provide|share|tell)|what is|what's the/i.test(newText);
+      if (newText && newText.length < 500 && !newText.includes('<') && !isQuestion) {
         // Find what to replace — extract target from user prompt
         const replaceTarget = text.match(/(?:change|update|replace)\s+(?:the\s+)?(?:hero\s+)?(?:headline|heading|title|h1|cta|button|subtitle|h2)/i);
         let editHtml = null;
@@ -2236,6 +2245,13 @@ async function handleRealChat(text, file) {
               .then(() => {
                 streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\nPreview is live.`);
                 showToast('Page updated', 'success');
+                // Reload preview from CDN after write (2s delay for CDN propagation)
+                setTimeout(() => {
+                  if (previewFrame && AEM_ORG.previewOrigin) {
+                    previewFrame.removeAttribute('srcdoc');
+                    previewFrame.src = AEM_ORG.previewOrigin + (ctx.pagePath || '/') + '?_t=' + Date.now();
+                  }
+                }, 2500);
               }).catch((e) => {
                 streamEl.innerHTML = md(`**Done!** Updated to: **"${newText}"**\n\n⚠️ Save failed: ${e.message}`);
               });
