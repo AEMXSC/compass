@@ -17,7 +17,7 @@
 
 const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
 const IMS_CLIENT_ID = 'aem-extension-builder';
-const IMS_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext';
+const IMS_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext,aem_mcp';
 const IMSLIB_INIT_TIMEOUT_MS = 10000;
 
 const STORAGE_KEYS = Object.freeze({
