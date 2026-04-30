@@ -3171,9 +3171,28 @@ export async function executeTool(name, input) {
     /* ─── Governance Agent: Brand Guidelines ─── */
 
     case 'get_brand_guidelines': {
+      // Try live Governance MCP first (returns real brand policies from AEM)
+      if (await ensureAuth()) {
+        try {
+          const host = window.__EW_AEM_HOST || null;
+          const siteId = input.site_id || input.brand || null;
+          const result = await govMcp.getBrandPolicy(host, siteId);
+          if (result && !result.error) {
+            return JSON.stringify({
+              ...result,
+              _source: 'connected',
+              source: 'AEM Experience Governance MCP',
+              message: `Brand policy retrieved from AEM Governance Context.`,
+            }, null, 2);
+          }
+        } catch (err) {
+          console.debug('[get_brand_guidelines] Governance MCP failed, using profile fallback:', err.message);
+        }
+      }
+
+      // Fallback: customer profile static data
       const brandVoice = profile.brandVoice || {};
       const category = input.category || 'all';
-
       const guidelines = {
         voice: {
           tone: brandVoice.tone || 'Professional, warm, authoritative',
@@ -3209,15 +3228,12 @@ export async function executeTool(name, input) {
           restrictions: ['Never stretch or distort', 'Never change logo colors', 'Never place on busy backgrounds'],
         },
       };
-
       const result = category === 'all' ? guidelines : { [category]: guidelines[category] };
-
       return JSON.stringify({
         customer: profile.name || 'Current Customer',
         guidelines: result,
         last_updated: new Date(Date.now() - 15 * 86400000).toISOString().split('T')[0],
         _source: 'profile',
-        _note: 'Brand guidelines loaded from customer profile. For enterprise policies, wire Governance MCP get_brand_policy.',
         message: category === 'all'
           ? `Complete brand guidelines for ${profile.name}. Covers voice, colors, typography, imagery, and logo.`
           : `${category.charAt(0).toUpperCase() + category.slice(1)} guidelines for ${profile.name}.`,
