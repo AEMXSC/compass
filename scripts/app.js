@@ -214,6 +214,23 @@ function md(text) {
   html = html.replace(/<\/ul>\s*<ul>/g, '');
   html = html.replace(/<\/ol>\s*<ol>/g, '');
 
+  // Tables (| col | col | format)
+  html = html.replace(/(?:^|\n)((?:\|[^\n]+\|\n?)+)/gm, (match) => {
+    const rows = match.trim().split('\n').filter(r => r.includes('|'));
+    if (rows.length < 2) return match;
+    const parseRow = (r) => r.split('|').slice(1, -1).map(c => c.trim());
+    const header = parseRow(rows[0]);
+    const isSep = (r) => /^[\s|:-]+$/.test(r);
+    const startIdx = isSep(rows[1]) ? 2 : 1;
+    let table = '<table><thead><tr>' + header.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>';
+    for (let i = startIdx; i < rows.length; i++) {
+      if (isSep(rows[i])) continue;
+      table += '<tr>' + parseRow(rows[i]).map(c => `<td>${c}</td>`).join('') + '</tr>';
+    }
+    table += '</tbody></table>';
+    return table;
+  });
+
   // Paragraphs and line breaks
   html = html.replace(/\n{2,}/g, '<br><br>');
   html = html.replace(/\n/g, '<br>');

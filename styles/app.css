@@ -2844,6 +2844,28 @@ textarea:focus-visible,
   opacity: 0.6;
 }
 
+/* Markdown tables in chat */
+.stream-bubble table, .chat-bubble table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.stream-bubble th, .chat-bubble th {
+  background: rgba(255,255,255,0.05);
+  padding: 6px 10px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255,255,255,0.15);
+}
+.stream-bubble td, .chat-bubble td {
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.stream-bubble tr:hover td, .chat-bubble tr:hover td {
+  background: rgba(255,255,255,0.03);
+}
+
 .tool-group-thinking {
   font-size: 12px;
   color: var(--accent-light, #818cf8);
