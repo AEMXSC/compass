@@ -313,31 +313,38 @@ async function handleMcpProxy(request) {
   const mcpEndpoint = url.searchParams.get('endpoint') || '/adobe/mcp/aem';
   const targetUrl = `https://mcp.adobeaemcloud.com${mcpEndpoint}`;
 
-  // Always use S2S token for MCP calls — user tokens lack aem_mcp scope
-  const now = Date.now();
-  if (!cachedToken || tokenExpiry <= now + 300000) {
-    try {
-      const body = new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: IMS_CLIENT_ID,
-        client_secret: IMS_CLIENT_SECRET,
-        scope: IMS_SCOPE,
-      });
-      const imsResp = await fetch(IMS_TOKEN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body,
-      });
-      if (imsResp.ok) {
-        const data = await imsResp.json();
-        if (data.access_token) {
-          cachedToken = data.access_token;
-          tokenExpiry = now + (data.expires_in || 86400000);
+  // Prefer user's IMS token (passed from browser) for MCP calls
+  // User tokens have agents entitlement needed for Governance MCP
+  // Fall back to S2S for unauthenticated calls (Content MCP works with S2S)
+  const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '') || null;
+  let mcpToken = userToken;
+
+  if (!mcpToken) {
+    const now = Date.now();
+    if (!cachedToken || tokenExpiry <= now + 300000) {
+      try {
+        const body = new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: IMS_CLIENT_ID,
+          client_secret: IMS_CLIENT_SECRET,
+          scope: IMS_SCOPE,
+        });
+        const imsResp = await fetch(IMS_TOKEN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        });
+        if (imsResp.ok) {
+          const data = await imsResp.json();
+          if (data.access_token) {
+            cachedToken = data.access_token;
+            tokenExpiry = now + (data.expires_in || 86400000);
+          }
         }
-      }
-    } catch { /* S2S unavailable */ }
+      } catch { /* S2S unavailable */ }
+    }
+    mcpToken = cachedToken;
   }
-  const mcpToken = cachedToken;
 
   // Forward the request to MCP, preserving session ID
   const incomingBody = await request.text();
