@@ -5453,7 +5453,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     : getToolsForPrompt(promptText);
 
   let fullText = '';
-  const MAX_TOOL_ROUNDS = useFastModel ? 1 : 8;
+  const MAX_TOOL_ROUNDS = isSimple ? 3 : 8;
 
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -5461,7 +5461,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
 
     const body = {
       model,
-      max_tokens: useFastModel ? 256 : 8192,
+      max_tokens: 8192,
       stream: true,
       system,
       messages,
