@@ -231,9 +231,13 @@ function md(text) {
     return table;
   });
 
-  // Paragraphs and line breaks
-  html = html.replace(/\n{2,}/g, '<br><br>');
+  // Paragraphs and line breaks — but not after block elements
+  html = html.replace(/\n{3,}/g, '<br><br>');
+  html = html.replace(/\n{2}/g, '<br>');
   html = html.replace(/\n/g, '<br>');
+  // Clean up excessive breaks after block elements
+  html = html.replace(/(<\/(?:ul|ol|table|h[1-4]|pre|blockquote)>)\s*<br>/g, '$1');
+  html = html.replace(/<br>\s*(<(?:ul|ol|table|h[1-4]|pre|blockquote))/g, '$1');
 
   return html;
 }
