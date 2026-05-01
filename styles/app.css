@@ -4980,6 +4980,20 @@ textarea:focus-visible,
   color: var(--accent) !important;
 }
 
+.preview-action-export {
+  color: var(--text-muted) !important;
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+.preview-action-export.active {
+  color: var(--adobe-red, #e1251b) !important;
+  opacity: 1;
+  cursor: pointer !important;
+}
+.preview-action-export.active:hover {
+  background: rgba(225, 37, 27, 0.1);
+}
+
 /* ── Resources Panel ── */
 .panel-resources {
   display: flex;

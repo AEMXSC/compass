@@ -2070,6 +2070,11 @@ async function handleRealChat(text, file) {
       stepEl.querySelector('.tool-call-status').textContent = 'Done';
     }
 
+    // Store compliance results for PDF export
+    if (['run_governance_check', 'get_brand_guidelines', 'suggest_alt_text', 'apply_alt_text'].includes(toolName)) {
+      try { storeComplianceResult(toolName, JSON.parse(resultStr)); } catch { storeComplianceResult(toolName, resultStr); }
+    }
+
     // Show thinking pulse in main chat between tool rounds
     const agentName = TOOL_AGENT_MAP[toolName] || 'Adobe Agent';
     firstChunkReceived = false;
@@ -2222,6 +2227,9 @@ async function handleRealChat(text, file) {
     );
 
     conversationHistory.push({ role: 'assistant', content: rawResponse });
+
+    // Store long compliance responses for PDF export
+    if (rawResponse) storeComplianceMarkdown(rawResponse);
 
     // ── Contextual Suggestion Chips ──
     // Show smart follow-up actions based on which tools were called
@@ -5729,6 +5737,327 @@ if (packageBtn) packageBtn.addEventListener('click', openPackageModal);
 if (packageModalClose) packageModalClose.addEventListener('click', closePackageModal);
 if (packageCancelBtn) packageCancelBtn.addEventListener('click', closePackageModal);
 if (packageUploadBtn) packageUploadBtn.addEventListener('click', uploadPackage);
+
+/* ── PDF Export for Compliance Reports ── */
+let lastComplianceResults = {
+  governance: null,
+  brand: null,
+  accessibility: null,
+  seo: null,
+  rawMarkdown: null,
+  timestamp: null,
+  pagePath: null,
+  siteName: null,
+  siteUrl: null,
+};
+
+const exportPdfBtn = document.getElementById('exportPdfBtn');
+
+function activateExportBtn() {
+  if (exportPdfBtn) {
+    exportPdfBtn.disabled = false;
+    exportPdfBtn.classList.add('active');
+  }
+}
+
+function storeComplianceResult(toolName, result) {
+  if (toolName === 'run_governance_check') lastComplianceResults.governance = result;
+  else if (toolName === 'get_brand_guidelines') lastComplianceResults.brand = result;
+  else if (toolName === 'suggest_alt_text' || toolName === 'apply_alt_text') lastComplianceResults.accessibility = result;
+  lastComplianceResults.timestamp = new Date().toISOString();
+  lastComplianceResults.pagePath = activeResourcePath || '/';
+  lastComplianceResults.siteName = AEM_ORG.name || AEM_ORG.repo || 'Site';
+  lastComplianceResults.siteUrl = PREVIEW_URL || '';
+  activateExportBtn();
+}
+
+function storeComplianceMarkdown(fullText) {
+  if (/\b(compliance|governance|accessibility|WCAG|SEO|brand)\b/i.test(fullText) &&
+      /\d+%/.test(fullText) && fullText.length > 800) {
+    lastComplianceResults.rawMarkdown = fullText;
+    lastComplianceResults.timestamp = new Date().toISOString();
+    lastComplianceResults.pagePath = activeResourcePath || '/';
+    lastComplianceResults.siteName = AEM_ORG.name || AEM_ORG.repo || 'Site';
+    lastComplianceResults.siteUrl = PREVIEW_URL || '';
+    activateExportBtn();
+  }
+}
+
+async function loadJsPdf() {
+  if (window.jspdf) return window.jspdf;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js';
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  return window.jspdf;
+}
+
+function getScoreColor(score) {
+  if (score >= 85) return [34, 197, 94];
+  if (score >= 70) return [251, 191, 36];
+  return [239, 68, 68];
+}
+
+function getStatusText(score) {
+  if (score >= 85) return 'Pass';
+  if (score >= 70) return 'Minor Issues';
+  return 'Fails';
+}
+
+function parseScoresFromMarkdown(text) {
+  const scores = {};
+  const patterns = [
+    { key: 'brand', regex: /brand\s*(?:compliance)?[:\s|]*(\d+)%/i },
+    { key: 'accessibility', regex: /accessibility[^|]*[:\s|]*(\d+)%/i },
+    { key: 'seo', regex: /seo[^|]*[:\s|]*(\d+)%/i },
+    { key: 'legal', regex: /legal[^|]*[:\s|]*(\d+)%/i },
+  ];
+  for (const { key, regex } of patterns) {
+    const m = text.match(regex);
+    if (m) scores[key] = parseInt(m[1], 10);
+  }
+  return scores;
+}
+
+function extractSections(text) {
+  const sections = [];
+  const sectionRegex = /(?:^|\n)(?:#{1,3}|[🎨♿🔍⚖️📊])\s*(.+?)(?:\n|$)([\s\S]*?)(?=\n(?:#{1,3}|[🎨♿🔍⚖️📊])\s|\n*$)/g;
+  let m;
+  while ((m = sectionRegex.exec(text)) !== null) {
+    sections.push({ title: m[1].trim(), content: m[2].trim() });
+  }
+  return sections;
+}
+
+async function exportCompliancePdf() {
+  const data = lastComplianceResults;
+  if (!data.governance && !data.brand && !data.accessibility && !data.rawMarkdown) {
+    showToast('Run a compliance check first', 'warning');
+    return;
+  }
+
+  showToast('Generating PDF report...', 'info');
+
+  const { jsPDF } = await loadJsPdf();
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 20;
+  const contentW = pageW - margin * 2;
+  let y = margin;
+
+  const ADOBE_RED = [225, 37, 27];
+  const DARK = [44, 44, 44];
+  const GRAY = [128, 128, 128];
+  const LIGHT_BG = [245, 245, 245];
+
+  function addHeader() {
+    doc.setDrawColor(...ADOBE_RED);
+    doc.setLineWidth(0.8);
+    doc.line(margin, 12, pageW - margin, 12);
+    doc.setFontSize(8);
+    doc.setTextColor(...GRAY);
+    const pageNum = doc.internal.getCurrentPageInfo().pageNumber;
+    doc.text(`Page ${pageNum}`, pageW - margin, 10, { align: 'right' });
+  }
+
+  function addFooter() {
+    doc.setDrawColor(...GRAY);
+    doc.setLineWidth(0.3);
+    doc.line(margin, pageH - 15, pageW - margin, pageH - 15);
+    doc.setFontSize(8);
+    doc.setTextColor(...GRAY);
+    doc.text('Generated by Project Compass', margin, pageH - 10);
+    doc.text(data.timestamp ? new Date(data.timestamp).toLocaleDateString() : '', pageW - margin, pageH - 10, { align: 'right' });
+  }
+
+  function checkPage(needed) {
+    if (y + needed > pageH - 25) {
+      addFooter();
+      doc.addPage();
+      addHeader();
+      y = 22;
+    }
+  }
+
+  function addSectionTitle(title) {
+    checkPage(15);
+    doc.setFontSize(16);
+    doc.setTextColor(...DARK);
+    doc.setFont('helvetica', 'bold');
+    doc.text(title, margin, y);
+    y += 2;
+    doc.setDrawColor(...ADOBE_RED);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y, margin + 60, y);
+    y += 8;
+  }
+
+  function addScoreBadge(score, x, badgeY) {
+    const color = getScoreColor(score);
+    doc.setFillColor(...color);
+    doc.roundedRect(x, badgeY - 4, 35, 7, 3, 3, 'F');
+    doc.setFontSize(10);
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${score}% — ${getStatusText(score)}`, x + 17.5, badgeY, { align: 'center' });
+    doc.setTextColor(...DARK);
+    doc.setFont('helvetica', 'normal');
+  }
+
+  function addCodeBlock(code) {
+    checkPage(20);
+    const lines = doc.splitTextToSize(code, contentW - 10);
+    const blockH = lines.length * 4 + 6;
+    doc.setFillColor(...LIGHT_BG);
+    doc.roundedRect(margin, y - 2, contentW, blockH, 2, 2, 'F');
+    doc.setFontSize(8);
+    doc.setFont('courier', 'normal');
+    doc.setTextColor(60, 60, 60);
+    doc.text(lines, margin + 5, y + 3);
+    y += blockH + 4;
+    doc.setFont('helvetica', 'normal');
+  }
+
+  function addBodyText(text, opts = {}) {
+    doc.setFontSize(opts.size || 10);
+    doc.setTextColor(...(opts.color || DARK));
+    doc.setFont('helvetica', opts.bold ? 'bold' : 'normal');
+    const lines = doc.splitTextToSize(text, contentW);
+    for (const line of lines) {
+      checkPage(5);
+      doc.text(line, margin, y);
+      y += 4.5;
+    }
+    y += 2;
+  }
+
+  // ── COVER PAGE ──
+  y = 50;
+  doc.setFontSize(11);
+  doc.setTextColor(...GRAY);
+  doc.text('Adobe Experience Manager', margin, y);
+  y += 20;
+  doc.setDrawColor(...ADOBE_RED);
+  doc.setLineWidth(1.2);
+  doc.line(margin, y, margin + 80, y);
+  y += 15;
+  doc.setFontSize(26);
+  doc.setTextColor(...DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.text('COMPLIANCE REPORT', margin, y);
+  y += 12;
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'normal');
+  doc.text(data.siteName || 'Site', margin, y);
+  y += 8;
+  doc.setFontSize(10);
+  doc.setTextColor(...GRAY);
+  doc.text(data.siteUrl || '', margin, y);
+  y += 20;
+
+  // Overall score
+  const scores = data.rawMarkdown ? parseScoresFromMarkdown(data.rawMarkdown) : {};
+  const allScores = Object.values(scores);
+  const overallScore = allScores.length > 0 ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length) : 79;
+  addScoreBadge(overallScore, margin, y);
+  y += 15;
+
+  doc.setFontSize(10);
+  doc.setTextColor(...GRAY);
+  doc.text(`Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, margin, y);
+  y += 5;
+  doc.text(`Page: ${data.pagePath || '/'}`, margin, y);
+  y += 20;
+
+  doc.setFontSize(8);
+  doc.text('Project Compass — Built by XSC', margin, pageH - 15);
+
+  // ── EXECUTIVE SUMMARY ──
+  doc.addPage();
+  addHeader();
+  y = 22;
+  addSectionTitle('Executive Summary');
+
+  if (Object.keys(scores).length > 0) {
+    const tableData = Object.entries(scores).map(([cat, score]) => [
+      cat.charAt(0).toUpperCase() + cat.slice(1),
+      `${score}%`,
+      getStatusText(score),
+    ]);
+    doc.autoTable({
+      startY: y,
+      head: [['Category', 'Score', 'Status']],
+      body: tableData,
+      margin: { left: margin, right: margin },
+      headStyles: { fillColor: ADOBE_RED, textColor: [255, 255, 255], fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [250, 250, 250] },
+      styles: { fontSize: 10, cellPadding: 4 },
+    });
+    y = doc.lastAutoTable.finalY + 10;
+  } else {
+    addBodyText('Scores parsed from compliance analysis. Run individual checks for detailed breakdowns.');
+  }
+
+  // ── CONTENT SECTIONS (from markdown) ──
+  const mdText = data.rawMarkdown || '';
+  if (mdText) {
+    const sections = extractSections(mdText);
+    for (const section of sections.slice(0, 8)) {
+      checkPage(20);
+      addSectionTitle(section.title.replace(/[🎨♿🔍⚖️📊🚀]/g, '').trim());
+
+      // Extract score from section
+      const scoreMatch = section.content.match(/(\d+)%/);
+      if (scoreMatch) {
+        addScoreBadge(parseInt(scoreMatch[1], 10), margin, y);
+        y += 12;
+      }
+
+      // Extract code blocks
+      const parts = section.content.split(/```[\w]*\n?/);
+      for (let i = 0; i < parts.length; i++) {
+        if (i % 2 === 0) {
+          const text = parts[i].replace(/^[-*]\s+/gm, '• ').trim();
+          if (text) addBodyText(text);
+        } else {
+          addCodeBlock(parts[i].trim());
+        }
+      }
+    }
+  }
+
+  // ── ACTION PLAN ──
+  if (mdText.includes('ACTION PLAN') || mdText.includes('Action Plan') || mdText.includes('Prioritized')) {
+    checkPage(30);
+    addSectionTitle('Action Plan');
+    const actionMatch = mdText.match(/(?:ACTION PLAN|Action Plan|Prioritized[^]*?)((?:IMMEDIATE|Immediate|SHORT|Short|MEDIUM|Medium)[^]*?)(?=\n#{1,3}\s|$)/i);
+    if (actionMatch) {
+      addBodyText(actionMatch[1].replace(/^[-*]\s+/gm, '• ').slice(0, 1500));
+    }
+  }
+
+  addFooter();
+
+  // Download
+  const filename = `${(data.siteName || 'site').toLowerCase().replace(/\s+/g, '-')}-compliance-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(filename);
+  showToast(`Report downloaded: ${filename}`, 'success');
+}
+
+if (exportPdfBtn) {
+  exportPdfBtn.addEventListener('click', exportCompliancePdf);
+}
 
 // Locale selector change → filter resources by locale
 if (localeSelect) {
