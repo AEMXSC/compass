@@ -5079,24 +5079,30 @@ Senior AEM architect who understands marketing KPIs. Technical precision meets b
 /* Returns an array of { type: 'text', text, cache_control? } blocks for the Claude API.
    Static layers get cache_control: { type: 'ephemeral' } so Claude can cache them
    across requests (~35KB saved per round-trip). Dynamic layers change per request. */
-const FAST_SYSTEM_PROMPT = `You are Compass, a fast content editor for Adobe Experience Manager.
-When asked to change content, respond with ONLY the new text value. No HTML tags, no explanation, no questions, no tool calls.
-NEVER ask clarifying questions. NEVER say "I need" or "Could you". Just generate the best replacement text based on what you know.
-Just output the replacement text directly. Example:
-User: "Change the hero headline to something engaging for nurses"
-You: "Caring for Those Who Care: Healthcare Built for Nurses"
-That's it. One line. The new text value only.`;
+const FAST_SYSTEM_PROMPT = `You are Compass, an AEM content editor. Execute edits quickly with minimal explanation.
+
+RULES:
+- Read the page HTML provided, make the requested change, call edit_page_content with the modified HTML.
+- For DA sites: call edit_page_content directly with the full modified page HTML.
+- For JCR sites: call get_page_content first (for ETag), then patch_aem_page_content.
+- Keep your text response to 1-2 sentences confirming what you changed. No lengthy analysis.
+- NEVER ask clarifying questions. Just make the best edit based on context.`;
 
 function buildSystemParts(context = {}, { fast = false } = {}) {
-  // Fast mode: minimal prompt for simple edits (Haiku — every token counts)
+  // Fast mode: concise prompt + page HTML for simple edits (Sonnet with fewer tokens)
   if (fast) {
     const blocks = [{ type: 'text', text: FAST_SYSTEM_PROMPT }];
     let siteContext = '';
     if (context.org?.name) siteContext += `Brand: ${context.org.name}. `;
     if (context.org?.vertical) siteContext += `Industry: ${context.org.vertical}. `;
     if (context.customerName) siteContext += `Customer: ${context.customerName}. `;
-    if (context.pagePath) siteContext += `Page: ${context.pagePath}. `;
+    if (context.pagePath) siteContext += `Page path: ${context.pagePath}. `;
+    if (context.siteType) siteContext += `Type: ${context.siteType}. `;
     if (siteContext) blocks.push({ type: 'text', text: siteContext.trim() });
+    // Include page HTML so Sonnet can edit it (truncated to 8K for speed)
+    if (context.pageHTML) {
+      blocks.push({ type: 'text', text: `Current page HTML:\n${context.pageHTML.slice(0, 8000)}` });
+    }
     return blocks;
   }
 
@@ -5429,24 +5435,22 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     }
   }
 
-  // Sonnet for everything, but trim history for simple edits to reduce latency
-  const useFastModel = false;
+  // Simple edits: use fast system prompt + minimal tools + trimmed history
   const isSimple = isSimpleEdit(promptText);
   const model = MODEL;
-  const system = buildSystemParts(context, { fast: false });
+  const system = buildSystemParts(context, { fast: isSimple });
   const _t0 = performance.now();
   console.debug(`[AI] Model: ${model} | Simple: ${isSimple} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
-  // For simple edits, trim conversation history to reduce input tokens (50s → ~8s)
-  // Keep only the last 2 user/assistant pairs + current message
-  if (isSimple && messages.length > 5) {
-    const current = messages.slice(-1);
-    const recent = messages.filter(m => m.role === 'user' || m.role === 'assistant').slice(-4);
-    messages = [...recent, ...current];
+  // For simple edits: trim history + use only edit tools (not all 40+)
+  if (isSimple) {
+    messages = messages.slice(-3); // current + at most 1 prior exchange
   }
 
-  // Fast mode: no tools — Haiku returns text only, caller handles the edit
-  const tools = useFastModel ? [] : getToolsForPrompt(promptText);
+  // Simple edits get only the edit tool; complex tasks get full tool set
+  const tools = isSimple
+    ? getToolsForPrompt(promptText).filter(t => ['edit_page_content', 'preview_page', 'patch_aem_page_content', 'get_page_content'].includes(t.name))
+    : getToolsForPrompt(promptText);
 
   let fullText = '';
   const MAX_TOOL_ROUNDS = useFastModel ? 1 : 8;
