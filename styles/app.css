@@ -2866,28 +2866,61 @@ textarea:focus-visible,
   background: rgba(255,255,255,0.03);
 }
 
-/* Tighter chat content styling */
+/* Summit-style chat content */
 .stream-bubble, .chat-bubble {
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-primary);
 }
 .stream-bubble h2, .chat-bubble h2 {
-  font-size: 16px;
-  margin: 12px 0 4px;
-  color: var(--accent-light, #818cf8);
+  font-size: 15px;
+  font-weight: 700;
+  margin: 14px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
 }
 .stream-bubble h3, .chat-bubble h3 {
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 600;
   margin: 10px 0 4px;
-  color: var(--text-secondary, #a1a1aa);
+  color: var(--accent-light, #818cf8);
+}
+.stream-bubble h4, .chat-bubble h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 8px 0 3px;
+  color: var(--text-secondary);
 }
 .stream-bubble ul, .chat-bubble ul,
 .stream-bubble ol, .chat-bubble ol {
   margin: 4px 0;
-  padding-left: 20px;
+  padding-left: 18px;
 }
 .stream-bubble li, .chat-bubble li {
   margin: 2px 0;
+  color: var(--text-primary);
+}
+.stream-bubble li::marker {
+  color: var(--accent-light, #818cf8);
+}
+.stream-bubble strong, .chat-bubble strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.stream-bubble code, .chat-bubble code {
+  background: var(--bg-card);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+.stream-bubble blockquote, .chat-bubble blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 4px 10px;
+  margin: 6px 0;
+  color: var(--text-secondary);
+  font-style: italic;
 }
 .stream-bubble br + br, .chat-bubble br + br {
   display: none;
