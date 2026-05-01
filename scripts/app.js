@@ -2093,39 +2093,20 @@ async function handleRealChat(text, file) {
     try {
       const result = JSON.parse(resultStr);
 
-      // GitHub write — content committed, refresh after CDN propagation
-      if (result._action === 'local_write' && result._preview_path) {
-        const path = result._preview_path;
-        setTimeout(() => {
-          navigateToPage(path);
-          showToast(`Page ${path} saved via GitHub — preview refreshed`, 'success');
-        }, 1500);
-      }
-
-      // Invalidate cached ETag after any write (it's stale now)
-      if (result._action === 'refresh_preview') {
-        cachedJcrEtag = null;
-        cachedJcrEtagPath = null;
-      }
-
-      // Content saved — refresh preview (works for both DA/EDS and JCR/xwalk sites).
-      if (result._action === 'refresh_preview' && result._preview_path) {
+      // Any write action — refresh preview
+      if ((result._action === 'refresh_preview' || result._action === 'local_write') && result._preview_path) {
         const path = result._preview_path;
         activeResourcePath = path;
+        cachedJcrEtag = null;
+        cachedJcrEtagPath = null;
+        showToast('Preview refreshing...', 'info');
 
         if (window.__JCR_PREVIEW_CONFIG) {
-          showToast('Updating preview...', 'info');
           setTimeout(() => window.__refreshJcrPreview?.(), 2000);
-          setTimeout(() => window.__refreshJcrPreview?.(), 8000);
-        } else if (previewFrame) {
-          const previewUrl = AEM_ORG.previewOrigin + path;
-          showToast('Preview refreshing...', 'info');
-
-          // Always reload from CDN after a short delay for propagation
-          // The preview trigger already fired in edit_page_content
+        } else if (previewFrame && AEM_ORG.previewOrigin) {
           setTimeout(() => {
             previewFrame.removeAttribute('srcdoc');
-            previewFrame.src = previewUrl + '?_t=' + Date.now();
+            previewFrame.src = AEM_ORG.previewOrigin + path + '?_t=' + Date.now();
             cachedPageHTML = null;
             cachedPageHTMLTimestamp = 0;
           }, 3000);

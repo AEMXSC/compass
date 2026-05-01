@@ -167,15 +167,17 @@ const AEM_TOOLS = [
 
   {
     name: 'edit_page_content',
-    description: 'DA Editing Agent — Write complete HTML content to an AEM page via Document Authoring (DA). This is a REAL operation — it writes to admin.da.live, triggers AEM preview, and the preview iframe refreshes automatically. Use this to create or update page content. Always call get_page_content first to read existing content before editing.',
+    description: 'DA Editing Agent — Edit an AEM page. Two modes: (1) find_replace for quick text swaps (PREFERRED for speed), (2) full html for page creation/rewrite. Always prefer find_replace for single-element changes — it is 10x faster.',
     input_schema: {
       type: 'object',
       properties: {
-        page_path: { type: 'string', description: 'Page path to write (e.g., "/coffee", "/about"). Will be suffixed with .html automatically.' },
-        html: { type: 'string', description: 'Complete HTML content for the page. Use AEM EDS block markup (div tables with block class names). Include sections separated by <hr> tags.' },
-        trigger_preview: { type: 'boolean', description: 'Whether to trigger AEM preview after writing (default: true). Set false for draft-only saves.' },
+        page_path: { type: 'string', description: 'Page path (e.g., "/coffee", "/about").' },
+        html: { type: 'string', description: 'Complete HTML content. Only use for full page creation/rewrite. Omit if using find_replace.' },
+        find: { type: 'string', description: 'Text to find in the current page HTML (exact match). Use with replace for quick edits.' },
+        replace: { type: 'string', description: 'Replacement text. Used with find.' },
+        trigger_preview: { type: 'boolean', description: 'Trigger AEM preview after writing (default: true).' },
       },
-      required: ['page_path', 'html'],
+      required: ['page_path'],
     },
   },
   {
@@ -2319,8 +2321,22 @@ export async function executeTool(name, input) {
       const daEditPath = pagePath === '/' ? '/index' : pagePath;
       const daUrl = `https://da.live/edit#/${org}/${repo}${daEditPath}`;
 
+      // ── Find/Replace mode: fetch current HTML, swap text, write back ──
+      if (input.find && input.replace && !input.html) {
+        let currentHTML = null;
+        if (await ensureAuth()) {
+          try { currentHTML = await da.getPage(htmlPath); } catch { /* fall through */ }
+        }
+        if (!currentHTML && hasGitHubToken()) {
+          try { currentHTML = await ghReadContent(org, repo, pagePath, branch); } catch { /* */ }
+        }
+        if (!currentHTML) return JSON.stringify({ error: 'Could not read current page for find/replace', _action: 'auth_required' });
+        if (!currentHTML.includes(input.find)) return JSON.stringify({ error: `Text not found on page: "${input.find.slice(0, 50)}..."`, page_path: pagePath });
+        input.html = currentHTML.replace(input.find, input.replace);
+        console.debug(`[edit_page_content] Find/replace: "${input.find.slice(0, 30)}" → "${input.replace.slice(0, 30)}"`);
+      }
+
       // ── DA MCP write (primary — native path for DA-backed sites) ──
-      // Requires IMS Bearer token. Auto-refresh if token missing/expired.
       console.debug(`[edit_page_content] ── START ── org=${org} repo=${repo} path=${htmlPath} htmlLen=${input.html?.length || 0} auth=${isSignedIn()} ghToken=${hasGitHubToken()}`);
       if (await ensureAuth()) {
         try {
@@ -5079,14 +5095,14 @@ Senior AEM architect who understands marketing KPIs. Technical precision meets b
 /* Returns an array of { type: 'text', text, cache_control? } blocks for the Claude API.
    Static layers get cache_control: { type: 'ephemeral' } so Claude can cache them
    across requests (~35KB saved per round-trip). Dynamic layers change per request. */
-const FAST_SYSTEM_PROMPT = `You are Compass, an AEM content editor. Execute edits quickly with minimal explanation.
+const FAST_SYSTEM_PROMPT = `You are Compass, an AEM content editor. Execute edits fast.
 
 RULES:
-- Read the page HTML provided, make the requested change, call edit_page_content with the modified HTML.
-- For DA sites: call edit_page_content directly with the full modified page HTML.
-- For JCR sites: call get_page_content first (for ETag), then patch_aem_page_content.
-- Keep your text response to 1-2 sentences confirming what you changed. No lengthy analysis.
-- NEVER ask clarifying questions. Just make the best edit based on context.`;
+- Use edit_page_content with find/replace params for text changes (10x faster than full HTML):
+  {"page_path": "/", "find": "old headline text", "replace": "new headline text"}
+- Only use the full "html" param for page creation or complete rewrites.
+- Keep response to 1 sentence confirming the change.
+- NEVER ask questions. Just make the edit.`;
 
 function buildSystemParts(context = {}, { fast = false } = {}) {
   // Fast mode: concise prompt + page HTML for simple edits (Sonnet with fewer tokens)
