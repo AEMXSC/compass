@@ -5751,12 +5751,13 @@ let lastComplianceResults = {
   siteUrl: null,
 };
 
-const exportPdfBtn = document.getElementById('exportPdfBtn');
+function getExportBtn() { return document.getElementById('exportPdfBtn'); }
 
 function activateExportBtn() {
-  if (exportPdfBtn) {
-    exportPdfBtn.disabled = false;
-    exportPdfBtn.classList.add('active');
+  const btn = getExportBtn();
+  if (btn) {
+    btn.disabled = false;
+    btn.classList.add('active');
   }
 }
 
@@ -5772,8 +5773,8 @@ function storeComplianceResult(toolName, result) {
 }
 
 function storeComplianceMarkdown(fullText) {
-  if (/\b(compliance|governance|accessibility|WCAG|SEO|brand)\b/i.test(fullText) &&
-      /\d+%/.test(fullText) && fullText.length > 800) {
+  if (/\b(compliance|governance|accessibility|WCAG|SEO|brand.*(check|guideline|audit))\b/i.test(fullText) &&
+      fullText.length > 500) {
     lastComplianceResults.rawMarkdown = fullText;
     lastComplianceResults.timestamp = new Date().toISOString();
     lastComplianceResults.pagePath = activeResourcePath || '/';
@@ -6055,9 +6056,10 @@ async function exportCompliancePdf() {
   showToast(`Report downloaded: ${filename}`, 'success');
 }
 
-if (exportPdfBtn) {
-  exportPdfBtn.addEventListener('click', exportCompliancePdf);
-}
+// Attach export click — use event delegation since button may not exist at module load
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#exportPdfBtn')) exportCompliancePdf();
+});
 
 // Locale selector change → filter resources by locale
 if (localeSelect) {
