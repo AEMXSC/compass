@@ -5429,12 +5429,21 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     }
   }
 
-  // Always use Sonnet with full tools — Haiku text-only path was unreliable
+  // Sonnet for everything, but trim history for simple edits to reduce latency
   const useFastModel = false;
+  const isSimple = isSimpleEdit(promptText);
   const model = MODEL;
   const system = buildSystemParts(context, { fast: false });
   const _t0 = performance.now();
-  console.debug(`[AI] Model: ${model} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
+  console.debug(`[AI] Model: ${model} | Simple: ${isSimple} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
+
+  // For simple edits, trim conversation history to reduce input tokens (50s → ~8s)
+  // Keep only the last 2 user/assistant pairs + current message
+  if (isSimple && messages.length > 5) {
+    const current = messages.slice(-1);
+    const recent = messages.filter(m => m.role === 'user' || m.role === 'assistant').slice(-4);
+    messages = [...recent, ...current];
+  }
 
   // Fast mode: no tools — Haiku returns text only, caller handles the edit
   const tools = useFastModel ? [] : getToolsForPrompt(promptText);

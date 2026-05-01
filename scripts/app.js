@@ -196,23 +196,17 @@ function md(text) {
   html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
   html = html.replace(/<\/blockquote>\n<blockquote>/g, '\n');
 
-  // Numbered lists
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>[\s\S]*?<\/li>)(?=\n(?!\d+\. |[-*] )|\n*$)/g, (match) => {
-    if (match.includes('<li>')) return `<ol>${match}</ol>`;
-    return match;
+  // Lists — handle both indented and non-indented bullets/numbers
+  // Process ordered lists first (numbered)
+  html = html.replace(/((?:^\s*\d+\.\s+.+$\n?)+)/gm, (block) => {
+    const items = block.replace(/^\s*\d+\.\s+(.+)$/gm, '<li>$1</li>');
+    return `<ol>${items.trim()}</ol>`;
   });
-
-  // Unordered lists
-  html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
-
-  // Wrap consecutive <li> in <ul> or <ol>
-  html = html.replace(/(?:^|\n)(<li>[\s\S]*?<\/li>)(?:\n|$)/g, (match) => {
-    if (match.includes('<ol>')) return match;
-    return `<ul>${match.trim()}</ul>`;
+  // Then unordered lists (-, *, •)
+  html = html.replace(/((?:^\s*[-*•]\s+.+$\n?)+)/gm, (block) => {
+    const items = block.replace(/^\s*[-*•]\s+(.+)$/gm, '<li>$1</li>');
+    return `<ul>${items.trim()}</ul>`;
   });
-  html = html.replace(/<\/ul>\s*<ul>/g, '');
-  html = html.replace(/<\/ol>\s*<ol>/g, '');
 
   // Tables (| col | col | format)
   html = html.replace(/(?:^|\n)((?:\|[^\n]+\|\n?)+)/gm, (match) => {
@@ -2120,42 +2114,21 @@ async function handleRealChat(text, file) {
         activeResourcePath = path;
 
         if (window.__JCR_PREVIEW_CONFIG) {
-          // JCR/xwalk: reload Worker proxy
           showToast('Updating preview...', 'info');
           setTimeout(() => window.__refreshJcrPreview?.(), 2000);
           setTimeout(() => window.__refreshJcrPreview?.(), 8000);
         } else if (previewFrame) {
           const previewUrl = AEM_ORG.previewOrigin + path;
+          showToast('Preview refreshing...', 'info');
 
-          // DA/EDS: optimistic render — fetch fresh HTML from DA Admin API (instant)
-          if (isSignedIn() && da.getOrg()) {
-            try {
-              const htmlPath = (path === '/' ? '/index' : path) + '.html';
-              const freshHTML = await da.getPage(htmlPath);
-              if (typeof freshHTML === 'string' && freshHTML.length > 0) {
-                const base = AEM_ORG.previewOrigin;
-                previewFrame.srcdoc = `<!DOCTYPE html><html><head>
-                  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-                  <base href="${base}/"><link rel="stylesheet" href="${base}/styles/styles.css">
-                  <script src="${base}/scripts/aem.js" type="module"><\/script>
-                  <script src="${base}/scripts/scripts.js" type="module"><\/script>
-                </head><body><header></header><main>${freshHTML}</main><footer></footer></body></html>`;
-                cachedPageHTML = freshHTML;
-                cachedPageUrl = previewUrl;
-                showToast(`Page ${path} saved — preview updated`, 'success');
-              }
-            } catch (e) {
-              console.warn('[Preview] Optimistic render failed:', e.message);
-            }
-          }
-
-          // Swap to real CDN after propagation
+          // Always reload from CDN after a short delay for propagation
+          // The preview trigger already fired in edit_page_content
           setTimeout(() => {
-            if (previewFrame && previewFrame.srcdoc) {
-              previewFrame.removeAttribute('srcdoc');
-              previewFrame.src = previewUrl;
-            }
-          }, 5000);
+            previewFrame.removeAttribute('srcdoc');
+            previewFrame.src = previewUrl + '?_t=' + Date.now();
+            cachedPageHTML = null;
+            cachedPageHTMLTimestamp = 0;
+          }, 3000);
         }
       }
 
