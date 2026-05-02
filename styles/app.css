@@ -4994,6 +4994,23 @@ textarea:focus-visible,
   background: rgba(225, 37, 27, 0.1);
 }
 
+.chat-export-link {
+  margin: 8px 0;
+}
+.export-inline-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--adobe-red, #e1251b);
+  color: var(--adobe-red, #e1251b);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.export-inline-btn:hover {
+  background: rgba(225, 37, 27, 0.1);
+}
+
 /* ── Resources Panel ── */
 .panel-resources {
   display: flex;

@@ -2182,8 +2182,14 @@ async function handleRealChat(text, file) {
 
     conversationHistory.push({ role: 'assistant', content: rawResponse });
 
-    // Store long compliance responses for PDF export
-    if (rawResponse) storeComplianceMarkdown(rawResponse);
+    // Store long compliance responses for PDF export + show inline export link
+    if (rawResponse) {
+      storeComplianceMarkdown(rawResponse);
+      if (lastComplianceResults.rawMarkdown) {
+        const exportLink = addRawHTML(`<div class="chat-export-link"><button class="export-inline-btn" onclick="document.getElementById('exportPdfBtn')?.click()">📄 Export as PDF</button></div>`);
+        scrollChat();
+      }
+    }
 
     // ── Contextual Suggestion Chips ──
     // Show smart follow-up actions based on which tools were called
@@ -5742,14 +5748,14 @@ async function loadJsPdf() {
   if (window.jspdf) return window.jspdf;
   await new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js';
+    s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
     s.onload = resolve;
     s.onerror = reject;
     document.head.appendChild(s);
   });
   await new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+    s.src = 'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js';
     s.onload = resolve;
     s.onerror = reject;
     document.head.appendChild(s);
@@ -5803,7 +5809,13 @@ async function exportCompliancePdf() {
 
   showToast('Generating PDF report...', 'info');
 
-  const { jsPDF } = await loadJsPdf();
+  let jsPDF;
+  try {
+    ({ jsPDF } = await loadJsPdf());
+  } catch (e) {
+    showToast('Failed to load PDF library: ' + e.message, 'error');
+    return;
+  }
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
