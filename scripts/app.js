@@ -2162,6 +2162,12 @@ async function handleRealChat(text, file) {
 
         // P3: Detect "I'll change X to Y" / "Changed to: Y" patterns in streamed text
         // Flash the preview panel to signal an incoming change
+        // Activate Export button as soon as compliance content streams
+        if (!lastComplianceResults.rawMarkdown && full.length > 300 &&
+            /\b(compliance|governance|accessibility|brand|audit|WCAG|SEO)\b/i.test(full)) {
+          storeComplianceMarkdown(full);
+        }
+
         if (!intentShown && full.length > 30) {
           const changeMatch = full.match(/(?:chang(?:e|ed|ing)\s+(?:the\s+)?(?:headline|title|heading|hero|text|copy|cta|button)\s+(?:to|from)[\s:]+[""]([^""]+)[""]|Changed\s+to:\s*[""]?([^"""\n]+))/i);
           if (changeMatch) {
