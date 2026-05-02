@@ -2065,8 +2065,9 @@ async function handleRealChat(text, file) {
     }
 
     // Store compliance results for PDF export
-    if (['run_governance_check', 'get_brand_guidelines', 'suggest_alt_text', 'apply_alt_text'].includes(toolName)) {
+    if (['run_governance_check', 'get_brand_guidelines', 'suggest_alt_text', 'apply_alt_text', 'get_page_content', 'check_citation_readability'].includes(toolName)) {
       try { storeComplianceResult(toolName, JSON.parse(resultStr)); } catch { storeComplianceResult(toolName, resultStr); }
+      console.warn('[Export] Tool result stored:', toolName);
     }
 
     // Show thinking pulse in main chat between tool rounds
@@ -5715,6 +5716,7 @@ function getExportBtn() { return document.getElementById('exportPdfBtn'); }
 
 function activateExportBtn() {
   const btn = getExportBtn();
+  console.warn('[Export] Activating button, found:', !!btn);
   if (btn) {
     btn.disabled = false;
     btn.classList.add('active');
@@ -5725,6 +5727,7 @@ function storeComplianceResult(toolName, result) {
   if (toolName === 'run_governance_check') lastComplianceResults.governance = result;
   else if (toolName === 'get_brand_guidelines') lastComplianceResults.brand = result;
   else if (toolName === 'suggest_alt_text' || toolName === 'apply_alt_text') lastComplianceResults.accessibility = result;
+  else if (toolName === 'get_page_content') lastComplianceResults.pageContent = result;
   lastComplianceResults.timestamp = new Date().toISOString();
   lastComplianceResults.pagePath = activeResourcePath || '/';
   lastComplianceResults.siteName = AEM_ORG.name || AEM_ORG.repo || 'Site';
