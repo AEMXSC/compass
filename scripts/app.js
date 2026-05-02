@@ -2189,14 +2189,8 @@ async function handleRealChat(text, file) {
 
     conversationHistory.push({ role: 'assistant', content: rawResponse });
 
-    // Store long compliance responses for PDF export + show inline export link
-    if (rawResponse) {
-      storeComplianceMarkdown(rawResponse);
-      if (lastComplianceResults.rawMarkdown) {
-        const exportLink = addRawHTML(`<div class="chat-export-link"><button class="export-inline-btn" onclick="document.getElementById('exportPdfBtn')?.click()">📄 Export as PDF</button></div>`);
-        scrollChat();
-      }
-    }
+    // Store long compliance responses for PDF export
+    if (rawResponse) storeComplianceMarkdown(rawResponse);
 
     // ── Contextual Suggestion Chips ──
     // Show smart follow-up actions based on which tools were called
