@@ -5709,13 +5709,16 @@ function getExportBtn() { return document.getElementById('exportPdfBtn'); }
 
 function activateExportBtn() {
   const btn = getExportBtn();
+  console.debug('[Export] activateExportBtn called, btn:', !!btn);
   if (btn) {
     btn.disabled = false;
     btn.classList.add('active');
+    console.debug('[Export] Button activated');
   }
 }
 
 function storeComplianceResult(toolName, result) {
+  console.debug('[Export] storeComplianceResult:', toolName);
   if (toolName === 'run_governance_check') lastComplianceResults.governance = result;
   else if (toolName === 'get_brand_guidelines') lastComplianceResults.brand = result;
   else if (toolName === 'suggest_alt_text' || toolName === 'apply_alt_text') lastComplianceResults.accessibility = result;
@@ -5727,6 +5730,7 @@ function storeComplianceResult(toolName, result) {
 }
 
 function storeComplianceMarkdown(fullText) {
+  console.debug('[Export] storeComplianceMarkdown called, length:', fullText?.length, 'regex:', /\b(compliance|governance|accessibility|WCAG|SEO|brand.*(check|guideline|audit))\b/i.test(fullText || ''));
   if (/\b(compliance|governance|accessibility|WCAG|SEO|brand.*(check|guideline|audit))\b/i.test(fullText) &&
       fullText.length > 500) {
     lastComplianceResults.rawMarkdown = fullText;
