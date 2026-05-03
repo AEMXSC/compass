@@ -4037,10 +4037,13 @@ async function connectCustomSite(input) {
     const token = getToken();
     if (token) previewParams.set('token', token);
     const inlinePreviewUrl = `${WORKER_BASE}/preview?${previewParams}`;
+    // Load author page directly — user's IMS cookie authenticates the request
+    // This gives pixel-perfect preview (same as UE) with full CSS/JS decoration
+    const authorDirectUrl = `${authorUrl}${jcrPath}.html`;
 
     if (previewFrame) {
       previewFrame.removeAttribute('srcdoc');
-      previewFrame.src = inlinePreviewUrl;
+      previewFrame.src = authorDirectUrl;
     }
 
     // Pre-fetch ETag so AI can patch without a read call (saves one full round trip)
@@ -4072,18 +4075,9 @@ async function connectCustomSite(input) {
     const cfg = window.__JCR_PREVIEW_CONFIG;
     if (!cfg || !previewFrame) return;
     showToast('Updating preview...', 'info');
-    const params = new URLSearchParams({
-      publish: cfg.publishUrl,
-      author: cfg.authorUrl,
-      path: cfg.jcrPath + '.html',
-      mode: 'hybrid',
-      codeBase: `https://${cfg.branch}--${cfg.repo.toLowerCase()}--${cfg.org.toLowerCase()}.aem.page`,
-      _t: Date.now(),
-    });
-    const tk = getToken();
-    if (tk) params.set('token', tk);
+    // Load author page directly — IMS cookie authenticates, full CSS/JS renders
     previewFrame.removeAttribute('srcdoc');
-    previewFrame.src = `${cfg.workerBase}/preview?${params}`;
+    previewFrame.src = cfg.authorPageUrl + '?_t=' + Date.now();
   };
 
   loadResources();
