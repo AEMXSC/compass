@@ -2,6 +2,10 @@ name = "compass-ims-proxy"
 main = "ims-token-proxy.js"
 compatibility_date = "2024-01-01"
 
+# Browser Rendering — pixel-perfect JCR author preview
+[browser]
+binding = "BROWSER"
+
 # Deploy:  npx wrangler deploy
 #
 # Adobe IMS Secrets (same OAuth credential for S2S + user auth):

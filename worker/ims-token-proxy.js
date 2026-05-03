@@ -51,11 +51,25 @@ const STATE_TTL_MS = 600000; // 10 minutes
 
 /* ─── Router ─── */
 
-addEventListener('fetch', (event) => {
-  event.respondWith(route(event.request));
-});
+export default {
+  async fetch(request, env) {
+    return route(request, env);
+  },
+};
 
-async function route(request) {
+// Module-level env reference for secrets (set on each request)
+let _env = {};
+
+async function route(request, env) {
+  _env = env || {};
+  // Make secrets available globally for existing functions
+  if (typeof globalThis.IMS_CLIENT_ID === 'undefined' && env?.IMS_CLIENT_ID) {
+    globalThis.IMS_CLIENT_ID = env.IMS_CLIENT_ID;
+    globalThis.IMS_CLIENT_SECRET = env.IMS_CLIENT_SECRET;
+    globalThis.GITHUB_CLIENT_ID = env.GITHUB_CLIENT_ID;
+    globalThis.GITHUB_CLIENT_SECRET = env.GITHUB_CLIENT_SECRET;
+    globalThis.COMPASS_OAUTH_SECRET = env.COMPASS_OAUTH_SECRET;
+  }
   const url = new URL(request.url);
 
   if (request.method === 'OPTIONS') {
@@ -78,6 +92,9 @@ async function route(request) {
   }
   if (url.pathname === '/preview' && request.method === 'GET') {
     return handlePreview(request);
+  }
+  if (url.pathname === '/render' && request.method === 'GET') {
+    return handleBrowserRender(request, env);
   }
   if (url.pathname === '/mcp' && request.method === 'POST') {
     return handleMcpProxy(request);
@@ -1167,5 +1184,119 @@ async function verifyState(state) {
     return payload;
   } catch {
     return null;
+  }
+}
+
+/* ─── GET /render — Pixel-perfect author preview via Browser Rendering ─── */
+/* Uses CF Browser Rendering to load the AEM author page in a headless browser,
+   authenticate with the user's IMS token, wait for JS decoration, and return
+   the fully-rendered DOM as HTML. Session keep-alive for sub-second re-renders. */
+
+import puppeteer from '@cloudflare/puppeteer';
+
+// Keep browser sessions alive for fast re-renders (Worker memory)
+let activeBrowser = null;
+let activeSession = null;
+let sessionLastUsed = 0;
+const SESSION_TTL_MS = 60000; // 60s keep-alive
+
+async function handleBrowserRender(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const url = new URL(request.url);
+  const pageUrl = url.searchParams.get('url');
+  const token = url.searchParams.get('token');
+
+  if (!pageUrl) {
+    return new Response('Missing ?url= parameter', { status: 400 });
+  }
+
+  // Validate host
+  try {
+    const host = new URL(pageUrl).hostname;
+    if (!host.endsWith('.adobeaemcloud.com')) {
+      return new Response('Only adobeaemcloud.com URLs allowed', { status: 403 });
+    }
+  } catch {
+    return new Response('Invalid URL', { status: 400 });
+  }
+
+  if (!env.BROWSER) {
+    return new Response('Browser Rendering not available — upgrade to Workers Paid plan', { status: 503 });
+  }
+
+  try {
+    const now = Date.now();
+
+    // Reuse existing browser session if warm
+    if (activeBrowser && activeSession && (now - sessionLastUsed) < SESSION_TTL_MS) {
+      sessionLastUsed = now;
+    } else {
+      // Close stale session
+      if (activeBrowser) {
+        try { await activeBrowser.close(); } catch { /* */ }
+      }
+      activeBrowser = await puppeteer.launch(env.BROWSER, { keep_alive: 60000 });
+      activeSession = await activeBrowser.newPage();
+      sessionLastUsed = now;
+    }
+
+    const page = activeSession;
+
+    // Set viewport
+    await page.setViewport({ width: 1440, height: 900 });
+
+    // Authenticate: set IMS token as cookie on the AEM domain
+    if (token) {
+      const domain = new URL(pageUrl).hostname;
+      await page.setCookie({
+        name: 'login-token',
+        value: token,
+        domain,
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        sameSite: 'None',
+      });
+    }
+
+    // Navigate and wait for full render (JS decoration)
+    await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: 15000 });
+
+    // Wait a bit more for late-loading EDS blocks
+    await page.waitForTimeout(1000);
+
+    // Extract the fully-rendered HTML
+    const renderedHTML = await page.content();
+
+    // Return as HTML with CORS
+    return new Response(renderedHTML, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Render-Source': 'browser',
+        'X-Render-Time': `${Date.now() - now}ms`,
+        'Access-Control-Allow-Origin': origin,
+        'Access-Control-Expose-Headers': 'X-Render-Source, X-Render-Time',
+      },
+    });
+  } catch (err) {
+    // On error, close the browser to reset state
+    if (activeBrowser) {
+      try { await activeBrowser.close(); } catch { /* */ }
+      activeBrowser = null;
+      activeSession = null;
+    }
+    return new Response(`Render error: ${err.message}`, {
+      status: 502,
+      headers: {
+        'Access-Control-Allow-Origin': origin,
+        'Content-Type': 'text/plain',
+      },
+    });
   }
 }
