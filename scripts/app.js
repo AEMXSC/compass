@@ -5326,8 +5326,21 @@ async function enableDesignMode() {
   // the production iframe is cross-origin, so we need same-origin DOM access)
   await ensurePageContext();
   let html = cachedPageHTML;
+
+  // DA/EDS sites: fetch from .aem.page .plain.html
+  if (!html && base) {
+    try {
+      const plainUrl = base + (path === '/' ? '/index' : path) + '.plain.html';
+      const resp = await fetch(plainUrl);
+      if (resp.ok) {
+        html = await resp.text();
+        cachedPageHTML = html;
+      }
+    } catch { /* .plain.html fetch failed */ }
+  }
+
+  // Worker preview (JCR sites): fetch raw HTML
   if (!html && previewFrame.src?.includes('/preview?')) {
-    // Worker preview: fetch raw HTML directly
     try {
       const rawUrl = previewFrame.src.replace(/mode=hybrid/, 'mode=raw').replace(/_t=\d+/, `_t=${Date.now()}`);
       const resp = await fetch(rawUrl);
@@ -5339,6 +5352,7 @@ async function enableDesignMode() {
       }
     } catch { /* fetch failed */ }
   }
+
   if (!html) {
     showToast('Could not load page content for design mode', 'warn');
     return;
