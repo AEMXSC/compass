@@ -1851,9 +1851,12 @@ function requireDaSite() {
 }
 
 function getDmDeliveryHost() {
+  // JCR/AEM CS: author → delivery host
   const host = window.__EW_AEM_HOST || '';
   const bare = host.replace(/^https?:\/\//, '');
   if (bare.startsWith('author-')) return `https://${bare.replace('author-', 'delivery-')}`;
+  // DA/EDS: use preview origin (EDS handles image optimization via ?width=&format=&optimize=)
+  if (typeof AEM_ORG !== 'undefined' && AEM_ORG.previewOrigin) return AEM_ORG.previewOrigin;
   return null;
 }
 
