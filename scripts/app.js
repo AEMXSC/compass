@@ -1891,6 +1891,15 @@ async function handleRealChat(text, file) {
   streamEl.innerHTML = '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';
   scrollChat();
 
+  // Live timer — shows elapsed seconds so user knows it's working
+  const thinkingStart = Date.now();
+  const thinkingTimer = setInterval(() => {
+    if (!streamEl.querySelector('.thinking-pulse')) { clearInterval(thinkingTimer); return; }
+    const elapsed = Math.round((Date.now() - thinkingStart) / 1000);
+    const dots = streamEl.querySelector('.thinking-pulse');
+    if (dots) dots.innerHTML = `<span class="thinking-dots"><span></span><span></span><span></span></span> Thinking... ${elapsed}s`;
+  }, 1000);
+
   // Pre-fetch page context (non-blocking — don't wait if it's slow)
   try { await Promise.race([ensurePageContext(), sleep(2000)]); } catch (e) { console.warn('[Chat] ensurePageContext failed:', e); }
   let ctx;
@@ -2075,7 +2084,8 @@ async function handleRealChat(text, file) {
     const agentName = TOOL_AGENT_MAP[toolName] || 'Adobe Agent';
     firstChunkReceived = false;
     if (streamEl) {
-      streamEl.innerHTML += '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';
+      const elapsed = Math.round((Date.now() - thinkingStart) / 1000);
+      streamEl.innerHTML += `<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Processing... ${elapsed}s</div>`;
       scrollChat();
     }
 
@@ -2220,6 +2230,7 @@ async function handleRealChat(text, file) {
   } catch (err) {
     streamEl.innerHTML = `<span style="color:var(--accent)">AI Error: ${escapeHtml(err.message)}</span><br>Check your API key in settings.`;
   } finally {
+    clearInterval(thinkingTimer);
     setGenerating(false);
   }
  } catch (fatal) {
