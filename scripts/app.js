@@ -3983,12 +3983,7 @@ async function connectCustomSite(input) {
 
     if (previewFrame) {
       previewFrame.removeAttribute('srcdoc');
-      // Try Browser Rendering (pixel-perfect), fall back to hybrid proxy
-      const authorPageUrl = `${authorUrl}${jcrPath}.html`;
-      const renderUrl = `${WORKER_BASE}/render?url=${encodeURIComponent(authorPageUrl)}&token=${encodeURIComponent(token || '')}`;
-      previewFrame.src = renderUrl;
-      // Fallback: if /render returns 503 (not available), iframe shows error —
-      // the __refreshJcrPreview fallback handles subsequent loads
+      previewFrame.src = inlinePreviewUrl;
     }
 
     // Pre-fetch ETag so AI can patch without a read call (saves one full round trip)
@@ -4020,26 +4015,18 @@ async function connectCustomSite(input) {
     const cfg = window.__JCR_PREVIEW_CONFIG;
     if (!cfg || !previewFrame) return;
     showToast('Updating preview...', 'info');
-
+    const params = new URLSearchParams({
+      publish: cfg.publishUrl,
+      author: cfg.authorUrl,
+      path: cfg.jcrPath + '.html',
+      mode: 'hybrid',
+      codeBase: `https://${cfg.branch}--${cfg.repo.toLowerCase()}--${cfg.org.toLowerCase()}.aem.page`,
+      _t: Date.now(),
+    });
     const tk = getToken();
-    const authorPageUrl = `${cfg.authorUrl}${cfg.jcrPath}.html`;
-
-    // Try Browser Rendering first (pixel-perfect), fall back to hybrid proxy
-    const renderUrl = `${cfg.workerBase}/render?url=${encodeURIComponent(authorPageUrl)}&token=${encodeURIComponent(tk || '')}`;
+    if (tk) params.set('token', tk);
     previewFrame.removeAttribute('srcdoc');
-    previewFrame.src = renderUrl;
-
-    // If /render fails (503 = not available), fall back to hybrid mode
-    previewFrame.onerror = () => {
-      const params = new URLSearchParams({
-        publish: cfg.publishUrl, author: cfg.authorUrl,
-        path: cfg.jcrPath + '.html', mode: 'hybrid',
-        codeBase: `https://${cfg.branch}--${cfg.repo.toLowerCase()}--${cfg.org.toLowerCase()}.aem.page`,
-        _t: Date.now(),
-      });
-      if (tk) params.set('token', tk);
-      previewFrame.src = `${cfg.workerBase}/preview?${params}`;
-    };
+    previewFrame.src = `${cfg.workerBase}/preview?${params}`;
   };
 
   loadResources();
