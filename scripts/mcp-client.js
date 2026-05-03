@@ -231,9 +231,9 @@ export const contentQaMcp = createMcpClient('/adobe/mcp/loki/content-qa', 'Conte
 // ── Content Generation Skills ──
 export const contentGenMcp = createMcpClient('/adobe/mcp/loki/skills', 'Content-Gen');
 
-// ── Analytics & Insights (correct hosts) ──
-export const cjaMcp = createMcpClient('https://cja-mcp.adobe.io/mcp', 'CJA');
-export const aaMcp = createMcpClient('https://aa-mcp.adobe.io/mcp', 'Adobe-Analytics');
+// ── Analytics & Insights (prod gateway) ──
+export const cjaMcp = createMcpClient('https://mcp-gateway.adobe.io/cja/mcp', 'CJA');
+export const aaMcp = createMcpClient('https://mcp-gateway.adobe.io/aa/mcp', 'Adobe-Analytics');
 
 // ── Adobe Express ──
 export const expressMcp = createMcpClient('https://express-mcp-service.adobe.io/mcp', 'Adobe-Express');
@@ -242,7 +242,13 @@ export const expressMcp = createMcpClient('https://express-mcp-service.adobe.io/
 export const acrobatMcp = createMcpClient('/adobe/mcp/acrobat', 'Acrobat');
 export const marketingMcp = createMcpClient('https://aep-ai-ama-stage.adobe.io/mcp', 'Marketing-Agent');
 export const targetMcp = createMcpClient('/adobe/mcp/target', 'Target');
-export const rtcdpMcp = createMcpClient('/adobe/mcp/rtcdp', 'RT-CDP');
+export const rtcdpMcp = createMcpClient('https://rtcdp-mcp.adobe.io/mcp', 'RT-CDP');
+
+// ── AEP (Adobe Experience Platform) ──
+export const aepMcp = createMcpClient('https://aep-mcp.adobe.io/mcp', 'AEP');
+
+// ── AJO Prod (standalone host) ──
+export const ajoProdMcp = createMcpClient('https://ajo-mcp.adobe.io/mcp', 'AJO-Prod');
 
 // ── ACPC (Adobe Campaign/Personalization) ──
 export const acpcMcp = createMcpClient('https://emcee-stage.adobe.io/mcp', 'ACPC');
