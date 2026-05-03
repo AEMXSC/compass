@@ -12,7 +12,7 @@ import { buildCustomerContext, getActiveProfile } from './customer-profiles.js';
 import { KNOWN_SITES, resolveSite, listKnownSites, buildKnownSitesPrompt } from './known-sites.js';
 import * as da from './da-client.js';
 import { isSignedIn, getToken, signIn } from './ims.js';
-import { hasGitHubToken, writeContent as ghWriteContent, triggerPreview as ghTriggerPreview, getRepoInfo, listBranches as ghListBranches } from './github-content.js';
+import { hasGitHubToken, readContent as ghReadContent, writeContent as ghWriteContent, triggerPreview as ghTriggerPreview, getRepoInfo, listBranches as ghListBranches } from './github-content.js';
 import * as aemContent from './aem-content-mcp-client.js';
 import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
@@ -20,7 +20,6 @@ import * as spacecatMcp from './spacecat-mcp-client.js';
 import * as aemAssets from './aem-assets-client.js';
 import { contentUpdaterMcp, developmentMcp, cjaMcp, aaMcp, acrobatMcp, marketingMcp, targetMcp, rtcdpMcp, aemUnifiedMcp } from './mcp-client.js';
 import * as wf from './workfront.js';
-const { hasWebhook, createTaskViaWebhook } = wf;
 import { getSiteType } from './site-detect.js';
 import { buildPlaybookPrompt } from './xsc-playbook.js';
 import { buildKnowledgePrompt } from './aem-knowledge.js';
@@ -28,7 +27,6 @@ import { checkCitationReadability, formatResultForChat, renderResultsHTML } from
 
 const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
-const MODEL_FAST = 'claude-haiku-4-5-20251001';
 const STORAGE_KEY = 'ew-claude-key';
 const HTML_TRUNCATE_THRESHOLD = 15000;
 
@@ -1856,12 +1854,11 @@ function requireDaSite() {
 }
 
 function getDmDeliveryHost() {
-  // JCR/AEM CS: author → delivery host
   const host = window.__EW_AEM_HOST || '';
   const bare = host.replace(/^https?:\/\//, '');
   if (bare.startsWith('author-')) return `https://${bare.replace('author-', 'delivery-')}`;
-  // DA/EDS: use preview origin (EDS handles image optimization via ?width=&format=&optimize=)
-  if (typeof AEM_ORG !== 'undefined' && AEM_ORG.previewOrigin) return AEM_ORG.previewOrigin;
+  const org = window.__EW_ORG || {};
+  if (org.previewOrigin) return org.previewOrigin;
   return null;
 }
 
@@ -4185,7 +4182,7 @@ export async function executeTool(name, input) {
       if (!pageUrl) {
         const orgCtx = window.__EW_ORG || {};
         if (orgCtx.previewOrigin) {
-          pageUrl = orgCtx.previewOrigin + (activeResourcePath || '/');
+          pageUrl = orgCtx.previewOrigin + (window.__EW_ACTIVE_PATH || '/');
         } else {
           pageUrl = window.__EW_PREVIEW_URL || document.querySelector('.preview-frame')?.src || '';
         }
@@ -4220,7 +4217,7 @@ export async function executeTool(name, input) {
           if (aemHost) {
             try {
               const publishUrl = aemHost.replace('author-', 'publish-');
-              const jcrPath = window.__EW_ORG?.activePath || activeResourcePath || '/content';
+              const jcrPath = window.__EW_ORG?.activePath || window.__EW_ACTIVE_PATH || '/content';
               const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
               const resp = await fetch(`${workerBase}/preview?mode=raw&publish=${encodeURIComponent(publishUrl)}&path=${encodeURIComponent(jcrPath + '.html')}`);
               if (resp.ok) return resp.text();
@@ -5373,67 +5370,6 @@ export async function chat(userMessage, context = {}, _depth = 0) {
 }
 
 /* ── Governance Analysis ── */
-export async function analyzeGovernance(pageHTML, pageUrl) {
-  const prompt = `Analyze this AEM page for governance compliance. Check:
-
-1. **Brand compliance** — consistent styling, proper use of brand elements
-2. **Legal** — required disclaimers, privacy links, terms of service
-3. **Accessibility (WCAG 2.1 AA)** — alt text, heading hierarchy, ARIA, color contrast indicators
-4. **SEO** — meta description, title, heading structure, canonical URL, image optimization
-
-Return a structured report with:
-- Overall compliance score (0-100%)
-- Category breakdown (Brand, Legal, A11y, SEO) with pass/warn/fail
-- Specific issues found with severity and suggested fixes
-- Which issues can be auto-fixed
-
-Be specific — reference actual elements from the HTML.`;
-
-  return chat(prompt, { pageHTML, pageUrl });
-}
-
-/* ── Brief Analysis ── */
-export async function analyzeBrief(briefText) {
-  const prompt = `Analyze this campaign brief and extract structured requirements for creating an AEM page:
-
-Brief content:
-${briefText}
-
-Extract and return:
-1. **Campaign name** and description
-2. **Target audience** details
-3. **Required page sections** (hero, content blocks, CTAs, etc.)
-4. **Key messages** and copy direction
-5. **Brand assets** needed (images, icons, logos)
-6. **Governance pre-check** — flag any potential brand/legal/a11y concerns
-7. **Suggested AEM block structure** — map requirements to EDS blocks (hero, cards, columns, etc.)
-
-Format as a clear, actionable checklist.`;
-
-  return chat(prompt, {});
-}
-
-/* ── Page Content Generation ── */
-export async function generatePageContent(briefAnalysis, customerName) {
-  const prompt = `Based on this campaign brief analysis, generate AEM Edge Delivery Services page content.
-
-Brief Analysis:
-${briefAnalysis}
-
-Customer: ${customerName}
-
-Generate:
-1. Complete HTML content structure using EDS block patterns
-2. Section-by-section content with placeholder text based on the brief
-3. Metadata block with SEO title, description, and OG tags
-4. Suggested image placements with alt text
-
-Return the content as clean HTML that can be authored in DA (Document Authoring).
-Use EDS block table format where appropriate.`;
-
-  return chat(prompt, { customerName });
-}
-
 /* ── Streaming Chat with Tool Use ── */
 /*
  * This is the main chat function. It streams the AI response and handles

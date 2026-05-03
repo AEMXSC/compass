@@ -95,6 +95,7 @@ let pendingFile = null; // { name, type, size, content (text or base64), mediaTy
 let currentView = 'home'; // 'home' | 'editor'
 let sitePages = []; // loaded from query-index.json
 let activeResourcePath = null;
+Object.defineProperty(window, '__EW_ACTIVE_PATH', { get: () => activeResourcePath });
 let detectedLocales = []; // e.g. ['en', 'fr', 'de'] — auto-detected from page paths
 let activeLocale = ''; // current locale filter (empty = global / all)
 
@@ -126,17 +127,6 @@ function escapeHtml(str) {
 }
 
 /** Truncate a string and add ellipsis */
-function truncate(str, len = 30) {
-  if (!str) return '';
-  return str.length > len ? str.slice(0, len) + '...' : str;
-}
-
-/** Mask a token for display (show first N chars + ...) */
-function maskToken(token, len = TOKEN_PREVIEW_LENGTH) {
-  if (!token) return '(empty)';
-  return token.slice(0, len) + '...';
-}
-
 /* ── Toast Notification System ── */
 function showToast(message, type = 'info', duration = TOAST_DURATION_MS) {
   let container = document.getElementById('toastContainer');
@@ -929,10 +919,6 @@ function initBrandGovernance() {
 }
 
 // Export brand policies for use in governance scans
-function getBrandPolicies() {
-  return activeBrandPolicies;
-}
-
 /* ── Get Page Context ── */
 let cachedPageHTML = null;
 let cachedPageUrl = null;
@@ -1906,10 +1892,7 @@ async function handleRealChat(text, file) {
   try { ctx = getPageContext(); } catch (e) { console.warn('[Chat] getPageContext failed:', e); ctx = {}; }
 
   // ── Option 3: Client-side fast path for ultra-simple DA edits ──
-  // Skip the AI entirely for "change X to Y" when we have page HTML.
-  if (!file && !ctx.pageHTML && ctx.siteType !== 'aem-cs') {
-    console.debug('[Chat] Fast path skipped: no pageHTML cached yet');
-  }
+  // Tier 1: Client-side fast path for literal text replacements
   if (!file && ctx.pageHTML && ctx.siteType !== 'aem-cs') {
     const fastResult = tryClientSideFastEdit(text, ctx);
     if (fastResult) {
@@ -1942,12 +1925,6 @@ async function handleRealChat(text, file) {
     }
   }
 
-  // Tier 1 fallback: if pageHTML missing but pattern matches, note it
-  if (!file && !ctx.pageHTML && ctx.siteType !== 'aem-cs') {
-    if (tryClientSideFastEdit(text, { ...ctx, pageHTML: '<h1>x</h1>' })) {
-      console.debug('[Chat] Tier 1 pattern matched but no pageHTML — falling to Tier 2/3');
-    }
-  }
 
   // Tool call UI container — collapsible tool calls (like Claude.ai)
   let toolContainer = null;
@@ -2077,7 +2054,6 @@ async function handleRealChat(text, file) {
     // Store compliance results for PDF export
     if (['run_governance_check', 'get_brand_guidelines', 'suggest_alt_text', 'apply_alt_text', 'get_page_content', 'check_citation_readability'].includes(toolName)) {
       try { storeComplianceResult(toolName, JSON.parse(resultStr)); } catch { storeComplianceResult(toolName, resultStr); }
-      console.warn('[Export] Tool result stored:', toolName);
     }
 
     // Show thinking pulse in main chat between tool rounds
@@ -3743,7 +3719,6 @@ function renderRecentRepos() {
 }
 
 /* ── Connect Custom Site (AEMCoder-style org/repo input) ── */
-let customSiteConnected = false;
 
 /**
  * Parse any AEM-related URL or org/repo string into { org, repo, branch }.
@@ -3935,7 +3910,6 @@ async function connectCustomSite(input) {
     const initialPath = parsed.path || '/';
     PREVIEW_URL = previewOrigin + initialPath;
   }
-  customSiteConnected = true;
   window.__EW_ORG = AEM_ORG;
 
   // Org mismatch check: warn before agents waste time on 403s
@@ -4157,10 +4131,6 @@ async function connectCustomSite(input) {
 }
 
 /* ── Preview (hidden iframe for page context) ── */
-function loadPreview() {
-  navigateToPage(activeResourcePath || '/');
-}
-
 /* ── Flow Router ── */
 function runBrief() {
   if (!ai.hasApiKey()) { requireApiKey(); return; }
@@ -5768,7 +5738,6 @@ function getExportBtn() { return document.getElementById('exportPdfBtn'); }
 
 function activateExportBtn() {
   const btn = getExportBtn();
-  console.warn('[Export] Activating button, found:', !!btn);
   if (btn) {
     btn.disabled = false;
     btn.classList.add('active');
