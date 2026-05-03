@@ -360,13 +360,8 @@ async function handleMcpProxy(request) {
     return fetch(targetUrl, { method: 'POST', headers, body: incomingBody });
   }
 
-  // Try user token first, fall back to S2S on auth failure
-  let mcpResp = await forwardToMcp(mcpToken);
-
-  // If user token fails with 401/403 and we have S2S, retry with S2S
-  if ((mcpResp.status === 401 || mcpResp.status === 403) && userToken && cachedToken && cachedToken !== userToken) {
-    mcpResp = await forwardToMcp(cachedToken);
-  }
+  // Use the token directly — no silent fallback to S2S (which lacks AEM permissions)
+  const mcpResp = await forwardToMcp(mcpToken);
 
   // Capture session ID from MCP response
   const sessionId = mcpResp.headers.get('mcp-session-id') || '';
