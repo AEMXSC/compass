@@ -5101,27 +5101,53 @@ Senior AEM architect who understands marketing KPIs. Technical precision meets b
 /* Returns an array of { type: 'text', text, cache_control? } blocks for the Claude API.
    Static layers get cache_control: { type: 'ephemeral' } so Claude can cache them
    across requests (~35KB saved per round-trip). Dynamic layers change per request. */
-const FAST_SYSTEM_PROMPT = `You are Compass, an AEM content editor. Execute edits fast.
+const OPS_BRAIN = `You are Compass in operations mode. You execute content operations like a senior AEM author — fast, precise, no questions.
 
-RULES:
-- Use edit_page_content with find/replace params for text changes (10x faster than full HTML):
-  {"page_path": "/", "find": "old headline text", "replace": "new headline text"}
-- Only use the full "html" param for page creation or complete rewrites.
-- Keep response to 1 sentence confirming the change.
-- NEVER ask questions. Just make the edit.`;
+## How you work
+1. Read the intent from the user message + conversation history above
+2. Execute using tools — one turn, multiple tool calls if needed
+3. Confirm what you did in 1-2 sentences
+4. Suggest the logical next step (don't execute it, just offer it)
+
+## Workflow chains (execute in sequence, don't stop between steps)
+- "fix issues" → read page → apply fixes via find/replace → trigger preview → report what changed
+- "change X to Y" → find/replace on page → trigger preview → confirm
+- "create a page" → build HTML → edit_page_content → trigger preview → show result
+- "publish" → preview_page first → then publish if available → confirm
+- "update alt text" → read page → find images → replace alt attrs → preview
+
+## Tool usage
+- Use edit_page_content with {find, replace} for text/attribute changes (fast, minimal output)
+- Use edit_page_content with {html} only for new page creation or full rewrites
+- Use get_page_content if you need to read current content (but prefer the page HTML in context)
+- After ANY write: trigger preview automatically (trigger_preview: true)
+
+## Rules
+- NEVER ask "Would you like me to..." — just do it
+- NEVER present Option A/B/C menus
+- NEVER say "I need more context" — the context is in conversation history above
+- If user says "fix them" / "do it" / "go" → execute based on your prior analysis
+- Keep responses SHORT: what you did + what's next
+- When fixing multiple issues: batch them into one turn with multiple find/replace calls
+
+## EDS markup knowledge
+- Blocks = div tables: <div class="blockname"><div><div>row</div></div></div>
+- Sections separated by <hr>
+- Metadata block at end: <div class="metadata"><div><div>key</div><div>value</div></div></div>
+- Default content: headings, paragraphs, images, links (no wrapper needed)
+- Images: <picture><source><img></picture> or simple <img> with alt text`;
 
 function buildSystemParts(context = {}, { fast = false } = {}) {
-  // Fast mode: concise prompt + page HTML for simple edits (Sonnet with fewer tokens)
+  // Operations brain: AEMcoder-style — fast, focused, auto-chaining
   if (fast) {
-    const blocks = [{ type: 'text', text: FAST_SYSTEM_PROMPT }];
+    const blocks = [{ type: 'text', text: OPS_BRAIN }];
     let siteContext = '';
     if (context.org?.name) siteContext += `Brand: ${context.org.name}. `;
     if (context.org?.vertical) siteContext += `Industry: ${context.org.vertical}. `;
     if (context.customerName) siteContext += `Customer: ${context.customerName}. `;
-    if (context.pagePath) siteContext += `Page path: ${context.pagePath}. `;
+    if (context.pagePath) siteContext += `Page: ${context.pagePath}. `;
     if (context.siteType) siteContext += `Type: ${context.siteType}. `;
     if (siteContext) blocks.push({ type: 'text', text: siteContext.trim() });
-    // Include page HTML so Sonnet can edit it (truncated to 8K for speed)
     if (context.pageHTML) {
       blocks.push({ type: 'text', text: `Current page HTML:\n${context.pageHTML.slice(0, 8000)}` });
     }
@@ -5408,23 +5434,29 @@ export function abortCurrentChat() {
   }
 }
 
-/** Detect if a prompt is a simple content edit that can use the fast model (P2: expanded). */
+/** Detect if a prompt is an operational action (uses Operations Brain — fast, focused). */
 export function isSimpleEdit(msg) {
   if (typeof msg !== 'string') return false;
   const lower = msg.toLowerCase();
   const len = lower.length;
-  // Short prompts about content changes → Haiku (3-5x faster)
   if (len > 500) return false;
-  // Exclude complex multi-tool tasks
-  if (/\b(analyze|audit|governance|generate|search|find|list|compare|explain|create.*page|migrate|import)\b/i.test(lower)) return false;
-  // Match: "change X to Y", "update the headline", "make it more compelling"
-  if (/\b(change|update|set|replace|make|rename|edit|fix|rewrite|rephrase)\b.*\b(to|with|as|more|less|better|shorter|longer)\b/i.test(lower)) return true;
-  // Match: "translate to X", "shorten the", "expand the", "summarize"
-  if (/\b(translate|shorten|expand|summarize|simplify|reword|rephrase)\b/i.test(lower) && len < 300) return true;
-  // Match: "add a CTA", "remove the banner", "move the hero"
-  if (/\b(add|remove|delete|move|swap|hide|show)\b.*\b(the|a|an|this)\b/i.test(lower) && len < 200) return true;
-  // Match: "old text" to "new text" — bare quoted find-replace without leading verb
+
+  // THINKING brain: analysis, audits, strategy, discovery — needs full 35KB prompt
+  if (/\b(analyze|audit|governance|brand\s*check|compliance|personali[sz]|strategy|compare|explain|how|why|what\s+is|tell\s+me\s+about|search\s+for|find\s+assets|list\s+all|generate\s+report|plan\s+for)\b/i.test(lower)) return false;
+
+  // OPERATIONS brain: actions, edits, fixes, creates, publishes
+  // Direct edits
+  if (/\b(change|update|set|replace|make|rename|edit|rewrite|rephrase)\b/i.test(lower)) return true;
+  // Fix commands (including follow-ups like "fix them", "fix the issues")
+  if (/\b(fix|repair|correct|resolve)\b/i.test(lower)) return true;
+  // Create/publish/preview operations
+  if (/\b(create|publish|preview|add|remove|delete|move|swap|hide|show)\b/i.test(lower) && len < 300) return true;
+  // Short follow-up commands that reference prior context
+  if (/^(do it|go|yes|proceed|confirm|ok|apply|execute|run it)\s*[.!]?$/i.test(lower.trim())) return true;
+  // Quoted find-replace
   if (/[""][^""]+[""]\s+(?:to|with)\s+[""][^""]+[""]/.test(msg)) return true;
+  // Translate/shorten/expand
+  if (/\b(translate|shorten|expand|summarize|simplify)\b/i.test(lower) && len < 300) return true;
   return false;
 }
 
@@ -5457,25 +5489,27 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     }
   }
 
-  // Simple edits: use fast system prompt + minimal tools + trimmed history
-  const isSimple = isSimpleEdit(promptText);
+  // Route: Operations Brain (fast, focused) vs Thinking Brain (full, analytical)
+  const isOps = isSimpleEdit(promptText);
   const model = MODEL;
-  const system = buildSystemParts(context, { fast: isSimple });
+  const system = buildSystemParts(context, { fast: isOps });
   const _t0 = performance.now();
-  console.debug(`[AI] Model: ${model} | Simple: ${isSimple} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
+  console.debug(`[AI] Brain: ${isOps ? 'OPS' : 'FULL'} | Prompt: "${promptText.slice(0, 60)}" | PageHTML: ${context.pageHTML ? context.pageHTML.length + ' chars' : 'none'}`);
 
-  // For simple edits: trim history + use only edit tools (not all 40+)
-  if (isSimple) {
-    messages = messages.slice(-3); // current + at most 1 prior exchange
+  // Operations brain: keep recent history (for "fix them" follow-ups) but trim old exchanges
+  if (isOps && messages.length > 7) {
+    messages = messages.slice(-7);
   }
 
-  // Simple edits get only the edit tool; complex tasks get full tool set
-  const tools = isSimple
-    ? getToolsForPrompt(promptText).filter(t => ['edit_page_content', 'preview_page', 'patch_aem_page_content', 'get_page_content'].includes(t.name))
+  // Operations brain: only content editing tools (fast tool parsing)
+  // Thinking brain: full tool set
+  const OPS_TOOLS = ['edit_page_content', 'preview_page', 'patch_aem_page_content', 'get_page_content', 'publish_page'];
+  const tools = isOps
+    ? getToolsForPrompt(promptText).filter(t => OPS_TOOLS.includes(t.name))
     : getToolsForPrompt(promptText);
 
   let fullText = '';
-  const MAX_TOOL_ROUNDS = isSimple ? 3 : 8;
+  const MAX_TOOL_ROUNDS = isOps ? 5 : 8;
 
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
