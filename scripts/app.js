@@ -2114,7 +2114,9 @@ async function handleRealChat(text, file) {
         showToast('Preview refreshing...', 'info');
 
         if (window.__JCR_PREVIEW_CONFIG) {
+          // JCR edits take time to propagate — refresh twice
           setTimeout(() => window.__refreshJcrPreview?.(), 2000);
+          setTimeout(() => window.__refreshJcrPreview?.(), 6000);
         } else if (previewFrame && AEM_ORG.previewOrigin) {
           setTimeout(() => {
             previewFrame.removeAttribute('srcdoc');
