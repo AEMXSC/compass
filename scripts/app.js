@@ -101,15 +101,6 @@ let activeLocale = ''; // current locale filter (empty = global / all)
 
 /* ── Constants ── */
 const TOAST_DURATION_MS = 4000;
-const TOKEN_PREVIEW_LENGTH = 12;
-const MAX_PDF_PAGES = 30;
-const MAX_BRAND_TEXT_LENGTH = 3000;
-const MIN_PANEL_WIDTH = 280;
-const MAX_PANEL_RATIO = 0.6;
-const ONE_MINUTE_MS = 60000;
-const ONE_HOUR_MS = 3600000;
-const ONE_DAY_MS = 86400000;
-const MAX_FILE_CONTENT_LENGTH = 30000;
 
 /* ── Utility ── */
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -1317,28 +1308,6 @@ const TOOL_RENDERERS = {
           <span class="so-opp-summary">${summary.high_priority || 0} high · ${summary.medium_priority || 0} med · ${summary.low_priority || 0} low</span>
         </div>
         <div class="so-opp-list">${oppRows}</div>
-      </div>`;
-  },
-
-  /* ─ AEM Content Agent: Page Created Card ─ */
-  copy_aem_page(result, profile) {
-    if (result.status !== 'created') return null;
-    const title = result.title || result.path?.replace(/^\//, '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || 'New Page';
-    const siteName = profile?.name || 'AEM Site';
-    const ueUrl = result.edit_urls?.universal_editor;
-    const daUrl = result.edit_urls?.document_authoring;
-    const profileName = profile?.contactName || 'Author';
-    return `
-      <div class="page-card">
-        <div class="page-card-header">
-          <div class="page-card-icon">📄</div>
-          <div class="page-card-meta">
-            <div class="page-card-title">${title} — Live on ${siteName}</div>
-            <div class="page-card-author">Created by: ${profileName} — just now</div>
-          </div>
-        </div>
-        ${ueUrl ? `<a href="${ueUrl}" target="_blank" rel="noopener" class="page-card-link">Open in Universal Editor →</a>` : ''}
-        ${daUrl ? `<a href="${daUrl}" target="_blank" rel="noopener" class="page-card-link page-card-link-secondary">Open in Document Authoring →</a>` : ''}
       </div>`;
   },
 
@@ -4575,10 +4544,6 @@ function setGenerating(active) {
   }
 }
 
-// Hook into the existing addTyping/removeTyping to toggle send/stop button
-const _origAddTyping = addTyping;
-const _origRemoveTyping = removeTyping;
-// Override addTyping to also set generating state
 window.__compassSetGenerating = setGenerating; // expose for streaming hooks
 
 /** Contextual prompt chips above chat input — change based on what's loaded */

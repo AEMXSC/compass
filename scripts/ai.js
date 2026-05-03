@@ -837,25 +837,6 @@ const AEM_TOOLS = [
     },
   },
   {
-    name: 'create_form',
-    description: 'Experience Production Agent — Create or import a form using generative AI. Generates an AEM Edge Delivery form with fields, validation, and submit action based on a natural language description.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        description: { type: 'string', description: 'Natural language description of the form (e.g., "contact form with name, email, phone, and message fields")' },
-        form_type: { type: 'string', description: 'Form type', enum: ['contact', 'lead-gen', 'survey', 'registration', 'newsletter', 'custom'] },
-        fields: {
-          type: 'array',
-          items: { type: 'object' },
-          description: 'Optional explicit field definitions: [{ name, type, label, required, options }]',
-        },
-        submit_action: { type: 'string', description: 'Form submit destination (e.g., "email", "spreadsheet", "api-endpoint")' },
-        page_path: { type: 'string', description: 'Page to place the form on' },
-      },
-      required: ['description'],
-    },
-  },
-  {
     name: 'modernize_content',
     description: 'Experience Production Agent — Modernize page content using Generate Variations (Firefly GenAI). Refreshes copy, updates tone to match brand voice, improves readability, and generates content variations. Supports dry-run mode.',
     input_schema: {
@@ -1581,7 +1562,6 @@ export const TOOL_AGENT_MAP = {
   publish_page: 'Experience Production Agent',
   extract_brief_content: 'Experience Production Agent',
   translate_page: 'Experience Production Agent',
-  create_form: 'Experience Production Agent',
   modernize_content: 'Experience Production Agent',
   copy_aem_page: 'Experience Production Agent',
   patch_aem_page_content: 'Experience Production Agent',
@@ -1715,6 +1695,8 @@ export const TOOL_AGENT_MAP = {
   check_citation_readability: 'LLM Optimizer',
   // Web Fetch
   fetch_url: 'Web Research',
+  // Discovery Agent (MCP service listing)
+  list_mcp_services: 'Discovery Agent',
 };
 
 /* ── Site-Type-Aware Tool Filtering ── */
@@ -1765,7 +1747,7 @@ const TIER2_KEYWORDS = {
   destinations: ['list_destinations', 'list_destination_flow_runs', 'get_destination_health'],
   support: ['create_support_ticket', 'get_ticket_status', 'search_experience_league', 'get_product_release_notes'],
   optimizer: ['get_site_opportunities', 'get_site_audit'],
-  forms: ['create_form', 'generate_form'],
+  forms: ['generate_form'],
   pdf: ['extract_pdf_content', 'extract_brief_content'],
   admin: ['unpublish_preview', 'unpublish_live', 'purge_cache', 'bulk_preview', 'bulk_publish', 'reindex_page', 'get_page_status'],
 };
@@ -3168,28 +3150,6 @@ export async function executeTool(name, input) {
         }, null, 2);
       } catch (err) {
         return mcpError('translate_page', err);
-      }
-    }
-
-    /* ─── Experience Production Agent: Create Form ─── */
-
-    case 'create_form': {
-      if (!(await ensureAuth())) return authRequiredError('create_form');
-      try {
-        const result = await contentUpdaterMcp.callTool('create_form', {
-          form_type: input.form_type,
-          description: input.description,
-          fields: input.fields,
-          page_path: input.page_path,
-          submit_action: input.submit_action,
-        });
-        return JSON.stringify({
-          ...result,
-          _source: 'connected',
-          source: 'Experience Production Agent — Form Builder',
-        }, null, 2);
-      } catch (err) {
-        return mcpError('create_form', err);
       }
     }
 
@@ -4801,7 +4761,6 @@ These tools write to the real Document Authoring API. The user must be signed in
 ### Experience Production Agent (content creation & transformation)
 - **extract_brief_content** — Extract structured content from an uploaded brief (PDF/Word).
 - **translate_page** — Translate an AEM page to a target language. Preserves block structure, metadata, and formatting.
-- **create_form** — Create an AEM form from a description. Generates fields, validation rules, and submit actions.
 - **modernize_content** — Modernize page content via Generate Variations (Firefly GenAI). Refreshes copy, updates tone to match brand voice, improves readability, and generates content variations.
 
 ### Target Agent (A/B Testing & Personalization)
@@ -4905,7 +4864,7 @@ Use these when users ask about:
 9. For PDF document extraction, call extract_pdf_content.
 10. For multi-step pipelines (brief → page → governance → publish), chain tools in sequence. You can do up to 8 rounds of tool calls.
 11. For image transformations (crop, mirror, resize), call transform_image. For multi-channel renditions, call create_image_renditions.
-12. For content translation, call translate_page. For form creation, call create_form. For content modernization, call modernize_content.
+12. For content translation, call translate_page. For form creation, call generate_form. For content modernization, call modernize_content.
 13. For asset rights/DRM/expiry checks, call check_asset_expiry. For content quality audits, call audit_content.
 14. For adding assets to collections, call add_to_collection.
 15. For journey conflict analysis (scheduling, audience overlap), call analyze_journey_conflicts.
@@ -4935,16 +4894,6 @@ Use these when users ask about:
     - \`aem_write\` + \`create_workfront_task\` (update content while creating approval task)
     - \`cja_kpi_pulse\` + \`explore_audiences\` (get metrics while checking audiences)
     - \`suggest_alt_text\` + \`run_governance_check\` (accessibility + brand audit simultaneously)
-34. **CONVERSATION MEMORY**: You have full conversation history. When the user references something from earlier ("fix those issues", "do what you suggested", "the 23 issues"), look back at YOUR OWN prior messages to find what they mean. Never say "I need more context" when the context is in the conversation above. If you ran a governance check and found 23 issues, and the user says "fix them" — you know exactly what to fix.
-
-35. **HUMAN IN THE LOOP**: For WRITE operations, state what you'll do and wait for "go":
-    - ✅ "I'll fix all 23 issues: add alt text to 6 images, fix heading hierarchy, add meta description. Go?"
-    - ✅ "I'll update the hero headline to 'Advanced Care, Personal Touch'. Confirm?"
-    - ❌ NEVER present Option A/B/C menus
-    - ❌ NEVER say "Would you like me to..." or "What would be most helpful?"
-    - ❌ NEVER say "I need more context" when the answer is in prior messages
-    - For READ operations (governance, analysis, audits): execute immediately
-    - After user says "fix", "do it", "go", "yes": execute ALL fixes in one turn
 
 ## Capabilities — 50 Tools, 22 Agents, Full Adobe Stack
 - **Page Analysis**: Analyze EDS pages — structure, blocks, sections, metadata, performance
