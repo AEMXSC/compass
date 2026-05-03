@@ -1267,7 +1267,7 @@ async function handleBrowserRender(request, env) {
     await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: 15000 });
 
     // Wait a bit more for late-loading EDS blocks
-    await page.waitForTimeout(1000);
+    await new Promise(r => setTimeout(r, 1000));
 
     // Extract the fully-rendered HTML
     const renderedHTML = await page.content();
