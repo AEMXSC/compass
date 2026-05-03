@@ -101,6 +101,11 @@ const AEM_TOOLS = [
   /* ─── AEM Content MCP ─── */
 
   {
+    name: 'list_mcp_services',
+    description: 'Show all connected Adobe MCP servers, their endpoints, and connection status. Only call when user explicitly asks to see MCP services or what is connected.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
     name: 'get_aem_sites',
     description: 'List all AEM Edge Delivery sites available via AEM Content MCP.',
     input_schema: { type: 'object', properties: {}, required: [] },
@@ -1906,6 +1911,31 @@ export async function executeTool(name, input) {
   const profile = getActiveProfile() || {};
 
   switch (name) {
+
+    /* ─── MCP Service Discovery ─── */
+    case 'list_mcp_services': {
+      const services = [
+        { name: 'AEM Content', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/content', purpose: 'Page CRUD, content fragments, asset import' },
+        { name: 'AEM DA', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/da', purpose: 'Document Authoring for EDS sites' },
+        { name: 'AEM Governance', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/experience-governance', purpose: 'Brand policy check, compliance' },
+        { name: 'Experience Production', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/experience-production', purpose: 'DA content authoring agent' },
+        { name: 'AEM Odin (Cloud Manager)', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/odin/prod', purpose: 'Programs, environments, pipelines' },
+        { name: 'Firefly', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/loki/firefly', purpose: 'AI image generation' },
+        { name: 'Content QA Agent', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/loki/content-qa', purpose: 'Content quality checks' },
+        { name: 'Content Generation', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/loki/skills', purpose: 'AI content generation skills' },
+        { name: 'Adobe Journey Optimizer', endpoint: 'ajo-mcp.adobe.io/mcp', purpose: 'Journey orchestration, campaigns' },
+        { name: 'CJA', endpoint: 'mcp-gateway.adobe.io/cja/mcp', purpose: 'Customer Journey Analytics' },
+        { name: 'Adobe Analytics', endpoint: 'mcp-gateway.adobe.io/aa/mcp', purpose: 'Adobe Analytics reporting' },
+        { name: 'RT-CDP', endpoint: 'rtcdp-mcp.adobe.io/mcp', purpose: 'Real-time CDP segments, audiences' },
+        { name: 'AEP', endpoint: 'aep-mcp.adobe.io/mcp', purpose: 'Experience Platform data, profiles' },
+        { name: 'Adobe Express', endpoint: 'express-mcp-service.adobe.io/mcp', purpose: 'Creative templates, quick design' },
+        { name: 'Marketing Agent', endpoint: 'aep-ai-ama-stage.adobe.io/mcp', purpose: 'Marketing automation agent' },
+        { name: 'ACPC', endpoint: 'emcee-stage.adobe.io/mcp', purpose: 'Campaign personalization' },
+        { name: 'Acrobat', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/acrobat', purpose: 'PDF extraction, processing' },
+        { name: 'Spacecat', endpoint: 'spacecat.experiencecloud.live/api/v1/mcp', purpose: 'Site optimization, performance' },
+      ];
+      return JSON.stringify({ services, count: services.length, auth: isSignedIn() ? 'user' : 'none' }, null, 2);
+    }
 
     /* ─── AEM Content MCP (real endpoints) ─── */
 
@@ -4947,25 +4977,7 @@ Use these when users ask about:
 - **AEM Architecture**: Deep knowledge of EDS blocks, section metadata, content modeling, three-phase loading
 
 ## Connected Adobe MCP Services (Model Context Protocol)
-16 MCP connectors are registered and live. You have access to the full Adobe Experience Cloud stack:
-
-| Connector | Environment | Endpoint | Status |
-|-----------|------------|----------|--------|
-| Acrobat MCP | Prod | acrobat-mcp.adobe.io/mcp/call | ✓ Live |
-| Adobe Analytics MCP | Prod | mcp-gateway.adobe.io/aa/mcp | ✓ Live |
-| Adobe CJA MCP | Prod | mcp-gateway.adobe.io/cja/mcp | ✓ Live |
-| Adobe Express MCP | Prod | — | ✓ Live |
-| Adobe Illustrator MCP | Stage | — | ✓ Live |
-| Adobe Marketing Agent MCP | Prod | — | ✓ Live |
-| AEM Content | Prod | — | ✓ Live |
-| AEM DA | Prod | admin.da.live | ✓ Live |
-| AEM Odin | Prod | — | ✓ Live |
-| AEP Destinations MCP | Prod | aep-destinations-mcp.adobe.io/mcp | ✓ Live |
-| Experience League MCP | Prod | exl-ia-mcp-service.ethos55-prod-va7.ethos.adobe.net/mcp | ✓ Live |
-| Spacecat Sites Optimizer | Prod | spacecat.experiencecloud.live/api/v1/mcp | ✓ Live |
-| GitHub Integration | Prod | — | ✓ Live |
-
-When referencing these services in responses, use the exact connector names above. When users ask about analytics, audiences, journeys, segments, creative services, documentation, site audits, or destinations, reference the specific MCP connector.
+You have access to 20+ Adobe MCP servers across the Experience Cloud. Do NOT list them in responses unless the user explicitly asks "show MCP servers" or "what's connected" — in that case, call the list_mcp_services tool.
 
 ## AEM Edge Delivery Services — Deep Technical Knowledge
 
