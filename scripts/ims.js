@@ -43,7 +43,9 @@ export function getToken() {
     const t = window.adobeIMS.getAccessToken();
     if (t?.token) return t.token;
   }
-  return localStorage.getItem(STORAGE_KEYS.TOKEN) || null;
+  const fallback = localStorage.getItem(STORAGE_KEYS.TOKEN) || null;
+  if (fallback) console.warn('[IMS] Using S2S fallback token — imslib token not available. imsReady:', imsReady);
+  return fallback;
 }
 
 export function isSignedIn() { return !!getToken(); }
