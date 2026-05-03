@@ -253,6 +253,9 @@ export const ajoProdMcp = createMcpClient('https://ajo-mcp.adobe.io/mcp', 'AJO-P
 // ── ACPC (Adobe Campaign/Personalization) ──
 export const acpcMcp = createMcpClient('https://emcee-stage.adobe.io/mcp', 'ACPC');
 
+// ── Sites & LLM Optimizer ──
+export const sitesOptimizerMcp = createMcpClient('https://m-mcp-demo.adobe.io/mcp', 'Sites-Optimizer');
+
 // ── External ──
 export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
 
