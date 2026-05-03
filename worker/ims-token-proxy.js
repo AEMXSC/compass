@@ -491,7 +491,8 @@ async function handlePreview(request) {
     const pageUrl = `${publishUrl}${pagePath}`;
     const authorPageUrl = `${authorBase}${pagePath}`;
 
-    if (authToken) {
+    // Only attempt author fetch with a USER token (not S2S — S2S lacks AEM permissions)
+    if (authLevel === 'user' && authToken) {
       try {
         const resp = await fetch(authorPageUrl, {
           headers: {
@@ -502,10 +503,8 @@ async function handlePreview(request) {
         if (resp.ok) {
           html = await resp.text();
           htmlSource = 'author';
-        } else {
-          console.log(`[Preview] Author fetch ${resp.status} for ${authorPageUrl}`);
         }
-      } catch (e) { console.log(`[Preview] Author fetch error: ${e.message}`); }
+      } catch { /* author fetch failed */ }
     }
 
     if (!html) {
