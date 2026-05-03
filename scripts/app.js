@@ -5370,8 +5370,25 @@ async function enableDesignMode() {
     previewFrame.dataset.designSavedSrc = previewFrame.src;
   }
 
-  // Render as srcdoc with injected design mode handler
-  previewFrame.srcdoc = `<!DOCTYPE html>
+  // JCR sites: use the styled preview (Worker inlines CSS) as the base
+  // DA/EDS sites: use srcdoc with EDS CDN styles
+  const isJcr = window.__EW_SITE_TYPE === 'aem-cs' || base?.includes('adobeaemcloud.com');
+
+  if (isJcr && previewFrame.src?.includes('/preview')) {
+    // JCR: inject design mode script into the existing Worker preview via srcdoc
+    // Fetch the full styled page from Worker and add design mode on top
+    try {
+      const resp = await fetch(previewFrame.src.replace(/_t=\d+/, `_t=${Date.now()}`));
+      if (resp.ok) {
+        let fullPage = await resp.text();
+        // Inject design mode script before </body>
+        fullPage = fullPage.replace('</body>', `<style>body{cursor:crosshair}*:hover{cursor:crosshair;outline:2px solid rgba(74,92,219,0.5)!important}</style><script>${DESIGN_MODE_SCRIPT}<\/script></body>`);
+        previewFrame.srcdoc = fullPage;
+      }
+    } catch { /* fallback below */ }
+  } else {
+    // DA/EDS: srcdoc with EDS CDN styles
+    previewFrame.srcdoc = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -5380,7 +5397,7 @@ async function enableDesignMode() {
   <link rel="stylesheet" href="${base}/styles/styles.css">
   <script src="${base}/scripts/aem.js" type="module"><\/script>
   <script src="${base}/scripts/scripts.js" type="module"><\/script>
-  <style>body { cursor: crosshair; } *:hover { cursor: crosshair; }</style>
+  <style>body { cursor: crosshair; } *:hover { cursor: crosshair; outline: 2px solid rgba(74,92,219,0.5) !important; }</style>
 </head>
 <body>
   <header></header>
@@ -5389,6 +5406,7 @@ async function enableDesignMode() {
   <script>${DESIGN_MODE_SCRIPT}<\/script>
 </body>
 </html>`;
+  }
  } catch (e) {
   console.warn('[Design] enableDesignMode failed:', e.message);
   showToast('Design mode failed to load', 'error');
