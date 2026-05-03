@@ -244,6 +244,9 @@ export const marketingMcp = createMcpClient('https://aep-ai-ama-stage.adobe.io/m
 export const targetMcp = createMcpClient('/adobe/mcp/target', 'Target');
 export const rtcdpMcp = createMcpClient('/adobe/mcp/rtcdp', 'RT-CDP');
 
+// ── ACPC (Adobe Campaign/Personalization) ──
+export const acpcMcp = createMcpClient('https://emcee-stage.adobe.io/mcp', 'ACPC');
+
 // ── External ──
 export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
 
