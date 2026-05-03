@@ -5322,24 +5322,19 @@ async function enableDesignMode() {
   const base = AEM_ORG.previewOrigin;
   showToast('Loading design mode...', 'info');
 
-  // Fetch page HTML for srcdoc rendering (always use srcdoc for design mode —
-  // the production iframe is cross-origin, so we need same-origin DOM access)
-  await ensurePageContext();
+  // Fetch page HTML — try multiple sources, first one wins
   let html = cachedPageHTML;
 
-  // DA/EDS sites: fetch from .aem.page .plain.html
+  // 1. DA/EDS: .plain.html (most reliable for DA sites)
   if (!html && base) {
     try {
       const plainUrl = base + (path === '/' ? '/index' : path) + '.plain.html';
-      const resp = await fetch(plainUrl);
-      if (resp.ok) {
-        html = await resp.text();
-        cachedPageHTML = html;
-      }
-    } catch { /* .plain.html fetch failed */ }
+      const resp = await fetch(plainUrl, { cache: 'no-store' });
+      if (resp.ok) html = await resp.text();
+    } catch { /* */ }
   }
 
-  // Worker preview (JCR sites): fetch raw HTML
+  // 2. JCR/Worker preview: fetch raw mode
   if (!html && previewFrame.src?.includes('/preview?')) {
     try {
       const rawUrl = previewFrame.src.replace(/mode=hybrid/, 'mode=raw').replace(/_t=\d+/, `_t=${Date.now()}`);
@@ -5348,15 +5343,23 @@ async function enableDesignMode() {
         const full = await resp.text();
         const bodyMatch = full.match(/<body[^>]*>([\s\S]*)<\/body>/i);
         html = bodyMatch ? bodyMatch[1] : full;
-        cachedPageHTML = html;
       }
-    } catch { /* fetch failed */ }
+    } catch { /* */ }
+  }
+
+  // 3. Try iframe DOM (same-origin check)
+  if (!html) {
+    try {
+      const doc = previewFrame.contentDocument || previewFrame.contentWindow?.document;
+      if (doc?.body) html = doc.body.innerHTML;
+    } catch { /* cross-origin */ }
   }
 
   if (!html) {
     showToast('Could not load page content for design mode', 'warn');
     return;
   }
+  cachedPageHTML = html;
 
   // Save original src so we can restore on exit
   if (!previewFrame.dataset.designSavedSrc) {
