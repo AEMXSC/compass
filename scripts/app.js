@@ -1885,7 +1885,8 @@ async function handleRealChat(text, file) {
     } catch { /* non-blocking */ }
   }
 
-  // Show thinking indicator IMMEDIATELY (before any async work)
+  // Show thinking indicator + switch send button to stop mode
+  setGenerating(true);
   const streamEl = addStreamMessage('Compass');
   streamEl.innerHTML = '<div class="thinking-pulse"><span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...</div>';
   scrollChat();
@@ -2218,10 +2219,13 @@ async function handleRealChat(text, file) {
     }
   } catch (err) {
     streamEl.innerHTML = `<span style="color:var(--accent)">AI Error: ${escapeHtml(err.message)}</span><br>Check your API key in settings.`;
+  } finally {
+    setGenerating(false);
   }
  } catch (fatal) {
   console.error('[Chat] Fatal error in handleRealChat:', fatal);
   addMessage('assistant', `<span style="color:var(--accent)">Error: ${escapeHtml(fatal.message)}</span>`);
+  setGenerating(false);
  }
 }
 
