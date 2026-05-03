@@ -1194,11 +1194,7 @@ async function verifyState(state) {
 
 import puppeteer from '@cloudflare/puppeteer';
 
-// Keep browser sessions alive for fast re-renders (Worker memory)
-let activeBrowser = null;
-let activeSession = null;
-let sessionLastUsed = 0;
-const SESSION_TTL_MS = 60000; // 60s keep-alive
+const KEEP_ALIVE_MS = 60000;
 
 async function handleBrowserRender(request, env) {
   const origin = request.headers.get('Origin') || '';
@@ -1214,7 +1210,6 @@ async function handleBrowserRender(request, env) {
     return new Response('Missing ?url= parameter', { status: 400 });
   }
 
-  // Validate host
   try {
     const host = new URL(pageUrl).hostname;
     if (!host.endsWith('.adobeaemcloud.com')) {
@@ -1231,20 +1226,15 @@ async function handleBrowserRender(request, env) {
   try {
     const now = Date.now();
 
-    // Reuse existing browser session if warm
-    if (activeBrowser && activeSession && (now - sessionLastUsed) < SESSION_TTL_MS) {
-      sessionLastUsed = now;
-    } else {
-      // Close stale session
-      if (activeBrowser) {
-        try { await activeBrowser.close(); } catch { /* */ }
-      }
-      activeBrowser = await puppeteer.launch(env.BROWSER, { keep_alive: 60000 });
-      activeSession = await activeBrowser.newPage();
-      sessionLastUsed = now;
+    // Try to reconnect to a kept-alive session, otherwise launch new
+    let browser;
+    try {
+      browser = await puppeteer.connect(env.BROWSER);
+    } catch {
+      browser = await puppeteer.launch(env.BROWSER, { keep_alive: KEEP_ALIVE_MS });
     }
 
-    const page = activeSession;
+    const page = await browser.newPage();
 
     // Set viewport
     await page.setViewport({ width: 1440, height: 900 });
@@ -1272,7 +1262,12 @@ async function handleBrowserRender(request, env) {
     // Extract the fully-rendered HTML
     const renderedHTML = await page.content();
 
-    // Return as HTML with CORS
+    // Close page (not browser) — browser stays alive via keep_alive
+    await page.close();
+
+    // Disconnect (don't close) — keeps browser session for reconnect
+    browser.disconnect();
+
     return new Response(renderedHTML, {
       status: 200,
       headers: {
@@ -1285,12 +1280,6 @@ async function handleBrowserRender(request, env) {
       },
     });
   } catch (err) {
-    // On error, close the browser to reset state
-    if (activeBrowser) {
-      try { await activeBrowser.close(); } catch { /* */ }
-      activeBrowser = null;
-      activeSession = null;
-    }
     return new Response(`Render error: ${err.message}`, {
       status: 502,
       headers: {
