@@ -197,31 +197,31 @@ export function createMcpClient(endpointPath, label = 'MCP') {
 }
 
 /* ─── Pre-built endpoint clients ─── */
-/* ALL routed through CF Worker /mcp proxy for CORS (mcp-session-id header) + S2S auth injection */
+/* Direct connection to mcp.adobeaemcloud.com — CORS is open, no proxy needed */
 
 // ── AEM Content (Critical) ──
-export const daMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/da', 'DA-MCP');
-export const contentMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/content', 'AEM-Content');
-export const contentReadonlyMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/content-readonly', 'AEM-ReadOnly');
-export const contentUpdaterMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/content-updater', 'AEM-Updater');
-export const aemUnifiedMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/aem', 'AEM-Unified');
+export const daMcp = createMcpClient('/adobe/mcp/da', 'DA-MCP');
+export const contentMcp = createMcpClient('/adobe/mcp/content', 'AEM-Content');
+export const contentReadonlyMcp = createMcpClient('/adobe/mcp/content-readonly', 'AEM-ReadOnly');
+export const contentUpdaterMcp = createMcpClient('/adobe/mcp/content-updater', 'AEM-Updater');
+export const aemUnifiedMcp = createMcpClient('/adobe/mcp/aem', 'AEM-Unified');
 
 // ── AEM Governance & Discovery (Critical) ──
-export const governanceMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/experience-governance', 'AEM-Governance');
-export const discoveryMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/discovery', 'AEM-Discovery');
+export const governanceMcp = createMcpClient('/adobe/mcp/experience-governance', 'AEM-Governance');
+export const discoveryMcp = createMcpClient('/adobe/mcp/discovery', 'AEM-Discovery');
 
 // ── AEM Development ──
-export const developmentMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/development', 'AEM-Dev');
+export const developmentMcp = createMcpClient('/adobe/mcp/development', 'AEM-Dev');
 
 // ── Analytics & Insights (High Value) ──
-export const cjaMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/cja', 'CJA');
-export const aaMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/adobe-analytics', 'Adobe-Analytics');
+export const cjaMcp = createMcpClient('/adobe/mcp/cja', 'CJA');
+export const aaMcp = createMcpClient('/adobe/mcp/adobe-analytics', 'Adobe-Analytics');
 
 // ── Cross-Product (High Value) ──
-export const acrobatMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/acrobat', 'Acrobat');
-export const marketingMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/marketing-agent', 'Marketing-Agent');
-export const targetMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/target', 'Target');
-export const rtcdpMcp = createMcpClient(WORKER_MCP_BASE + '/adobe/mcp/rtcdp', 'RT-CDP');
+export const acrobatMcp = createMcpClient('/adobe/mcp/acrobat', 'Acrobat');
+export const marketingMcp = createMcpClient('/adobe/mcp/marketing-agent', 'Marketing-Agent');
+export const targetMcp = createMcpClient('/adobe/mcp/target', 'Target');
+export const rtcdpMcp = createMcpClient('/adobe/mcp/rtcdp', 'RT-CDP');
 
 // ── External (not Adobe MCP — different protocol) ──
 export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
