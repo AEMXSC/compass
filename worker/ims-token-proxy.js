@@ -477,13 +477,18 @@ async function handlePreview(request) {
     if (authToken) {
       try {
         const resp = await fetch(authorPageUrl, {
-          headers: { Authorization: `Bearer ${authToken}` },
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'Cache-Control': 'no-cache',
+          },
         });
         if (resp.ok) {
           html = await resp.text();
           htmlSource = 'author';
+        } else {
+          console.log(`[Preview] Author fetch ${resp.status} for ${authorPageUrl}`);
         }
-      } catch { /* author fetch failed — fall back to publish */ }
+      } catch (e) { console.log(`[Preview] Author fetch error: ${e.message}`); }
     }
 
     if (!html) {
