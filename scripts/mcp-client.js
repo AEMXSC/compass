@@ -197,7 +197,7 @@ export function createMcpClient(endpointPath, label = 'MCP') {
 }
 
 /* ─── Pre-built endpoint clients ─── */
-/* Direct connection to mcp.adobeaemcloud.com — CORS is open, no proxy needed */
+/* Direct connection — CORS is open on all Adobe MCP endpoints */
 
 // ── AEM Content (Critical) ──
 export const daMcp = createMcpClient('/adobe/mcp/da', 'DA-MCP');
@@ -206,24 +206,45 @@ export const contentReadonlyMcp = createMcpClient('/adobe/mcp/content-readonly',
 export const contentUpdaterMcp = createMcpClient('/adobe/mcp/content-updater', 'AEM-Updater');
 export const aemUnifiedMcp = createMcpClient('/adobe/mcp/aem', 'AEM-Unified');
 
-// ── AEM Governance & Discovery (Critical) ──
+// ── AEM Governance & Discovery ──
 export const governanceMcp = createMcpClient('/adobe/mcp/experience-governance', 'AEM-Governance');
 export const discoveryMcp = createMcpClient('/adobe/mcp/discovery', 'AEM-Discovery');
 
 // ── AEM Development ──
 export const developmentMcp = createMcpClient('/adobe/mcp/development', 'AEM-Dev');
 
-// ── Analytics & Insights (High Value) ──
-export const cjaMcp = createMcpClient('/adobe/mcp/cja', 'CJA');
-export const aaMcp = createMcpClient('/adobe/mcp/adobe-analytics', 'Adobe-Analytics');
+// ── AEM Odin (Cloud Manager) ──
+export const odinMcp = createMcpClient('/adobe/mcp/odin/prod', 'AEM-Odin');
 
-// ── Cross-Product (High Value) ──
+// ── Experience Production Agent (DA content authoring via MCP) ──
+export const experienceProductionMcp = createMcpClient('/adobe/mcp/experience-production', 'Experience-Production');
+
+// ── Firefly (Image Generation) ──
+export const fireflyMcp = createMcpClient('/adobe/mcp/loki/firefly', 'Firefly');
+
+// ── Adobe Journey Optimizer ──
+export const ajoMcp = createMcpClient('/adobe/mcp/loki/ajo', 'AJO');
+
+// ── Content QA Agent ──
+export const contentQaMcp = createMcpClient('/adobe/mcp/loki/content-qa', 'Content-QA');
+
+// ── Content Generation Skills ──
+export const contentGenMcp = createMcpClient('/adobe/mcp/loki/skills', 'Content-Gen');
+
+// ── Analytics & Insights (correct hosts) ──
+export const cjaMcp = createMcpClient('https://cja-mcp.adobe.io/mcp', 'CJA');
+export const aaMcp = createMcpClient('https://aa-mcp.adobe.io/mcp', 'Adobe-Analytics');
+
+// ── Adobe Express ──
+export const expressMcp = createMcpClient('https://express-mcp-service.adobe.io/mcp', 'Adobe-Express');
+
+// ── Cross-Product ──
 export const acrobatMcp = createMcpClient('/adobe/mcp/acrobat', 'Acrobat');
-export const marketingMcp = createMcpClient('/adobe/mcp/marketing-agent', 'Marketing-Agent');
+export const marketingMcp = createMcpClient('https://aep-ai-ama-stage.adobe.io/mcp', 'Marketing-Agent');
 export const targetMcp = createMcpClient('/adobe/mcp/target', 'Target');
 export const rtcdpMcp = createMcpClient('/adobe/mcp/rtcdp', 'RT-CDP');
 
-// ── External (not Adobe MCP — different protocol) ──
+// ── External ──
 export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
 
 /**
