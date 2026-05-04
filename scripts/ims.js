@@ -18,6 +18,7 @@
 const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
 const IMS_CLIENT_ID = 'darkalley';
 const IMS_SCOPE = 'AdobeID,openid,gnav,read_organizations,additional_info.projectedProductContext,account_cluster.read';
+const IMS_WORKER = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
 const IMSLIB_INIT_TIMEOUT_MS = 10000;
 
 const STORAGE_KEYS = Object.freeze({
@@ -76,14 +77,52 @@ export function getUserOrgs() { return userOrgs; }
 /* ─── Public API: Sign in (imslib redirect — no popup) ─── */
 
 export async function signIn() {
-  if (imsReady && window.adobeIMS) {
-    // Redirect flow: page navigates to IMS, returns with token in hash
-    // imslib's onReady picks up the token on return
-    window.adobeIMS.signIn();
-    return true;
+  // Worker popup flow: opens IMS login via Worker callback (aem-extension-builder client)
+  // Worker exchanges code for token server-side, redirects popup back with token in hash
+  const returnTo = encodeURIComponent(window.location.origin + '/');
+  const loginUrl = `${IMS_WORKER}/ims/login?return_to=${returnTo}`;
+  const w = 500, h = 700;
+  const left = Math.round((screen.width - w) / 2);
+  const top = Math.round((screen.height - h) / 2);
+  const popup = window.open(loginUrl, 'adobeSignIn', `width=${w},height=${h},left=${left},top=${top}`);
+
+  if (!popup) {
+    console.warn('[IMS] Popup blocked');
+    return false;
   }
-  console.warn('[IMS] imslib not ready — cannot sign in');
-  return false;
+
+  return new Promise((resolve) => {
+    const checkClosed = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(checkClosed);
+        resolve(!!getToken());
+      }
+    }, 500);
+
+    // Listen for token via postMessage from popup
+    const onMessage = (event) => {
+      if (!event.data || event.data.type !== 'ew-ims-relay') return;
+      const { token, expires_in: expiresIn } = event.data;
+      if (!token) return;
+      window.removeEventListener('message', onMessage);
+      clearInterval(checkClosed);
+      localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+      localStorage.setItem(STORAGE_KEYS.METHOD, 'user');
+      if (expiresIn) localStorage.setItem(STORAGE_KEYS.EXPIRY, String(Date.now() + Number(expiresIn) * 1000));
+      authMethod = 'user';
+      syncImsProfile();
+      dispatchAuthEvent(true);
+      resolve(true);
+    };
+    window.addEventListener('message', onMessage);
+
+    // Timeout after 3 minutes
+    setTimeout(() => {
+      window.removeEventListener('message', onMessage);
+      clearInterval(checkClosed);
+      resolve(!!getToken());
+    }, 180000);
+  });
 }
 
 /* ─── Public API: Sign out ─── */
@@ -152,6 +191,30 @@ export async function fetchWithToken(url, opts = {}) {
 /* ─── Public API: Init ─── */
 
 export async function loadIms() {
+  // Handle return from Worker popup sign-in (token in hash)
+  const hash = window.location.hash;
+  if (hash.includes('ims_token=') || hash.includes('access_token=')) {
+    const params = new URLSearchParams(hash.slice(1));
+    const token = params.get('ims_token') || params.get('access_token');
+    const expiresIn = params.get('expires_in');
+    const isPopup = params.get('auth_popup');
+
+    if (token) {
+      if (isPopup && window.opener) {
+        // We're in the popup — relay token to opener and close
+        window.opener.postMessage({ type: 'ew-ims-relay', token, expires_in: expiresIn }, '*');
+        window.close();
+        return { anonymous: false, method: 'user' };
+      }
+      // Direct return (not popup) — save token
+      localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+      localStorage.setItem(STORAGE_KEYS.METHOD, 'user');
+      if (expiresIn) localStorage.setItem(STORAGE_KEYS.EXPIRY, String(Date.now() + Number(expiresIn) * 1000));
+      authMethod = 'user';
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }
+
   // Clean up stale tokens from wrong clients (aem-extension-builder → darkalley migration)
   try {
     const keysToRemove = [];
@@ -174,8 +237,8 @@ export async function loadIms() {
       resolve({ anonymous: true, method: 'none' });
     }, IMSLIB_INIT_TIMEOUT_MS);
 
-    // Configure imslib — redirect flow (same as AEMcoder)
-    // Full-page redirect to IMS, returns with token in URL hash
+    // Configure imslib — used for token validation/refresh only (not for sign-in)
+    // Sign-in uses the Worker popup flow (aem-extension-builder client with registered callback)
     window.adobeid = {
       client_id: IMS_CLIENT_ID,
       scope: IMS_SCOPE,
