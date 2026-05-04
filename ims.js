@@ -34,12 +34,17 @@ export function getToken() {
       window.adobeIMS.refreshToken?.();
     }
   }
-  // Check imslib's direct localStorage entry (works even if imsLibLoaded is false due to tracking prevention)
+  // Check imslib's direct localStorage entry — ONLY for the configured client (darkalley)
+  // Ignore tokens from other clients (e.g. aem-extension-builder) as they may lack AEM entitlements
   try {
-    const imsEntry = localStorage.getItem('adobeid_ims_access_token');
+    const imsKey = `adobeid_ims_access_token/${IMS_CLIENT_ID}`;
+    const imsEntry = localStorage.getItem(imsKey) || localStorage.getItem('adobeid_ims_access_token');
     if (imsEntry) {
       const parsed = JSON.parse(imsEntry);
-      if (parsed?.tokenValue && parsed?.expire && Date.now() < parsed.expire) {
+      // Only use if it matches our client_id
+      if (parsed?.client_id && parsed.client_id !== IMS_CLIENT_ID) {
+        // Wrong client — skip
+      } else if (parsed?.tokenValue && parsed?.expire && Date.now() < parsed.expire) {
         return parsed.tokenValue;
       }
     }
@@ -353,6 +358,18 @@ export async function handlePkceCallback() { return false; }
 /* ─── Init ─── */
 
 export async function loadIms() {
+  // Clean up stale tokens from wrong clients (aem-extension-builder tokens don't work for AEM author)
+  const staleKeys = ['adobeid_ims_access_token/aem-extension-builder', 'nonce:adobeIMSClient:aem-extension-builder'];
+  staleKeys.forEach((k) => { try { localStorage.removeItem(k); } catch { /* */ } });
+  // Also remove the generic key if it holds a wrong-client token
+  try {
+    const generic = localStorage.getItem('adobeid_ims_access_token');
+    if (generic) {
+      const p = JSON.parse(generic);
+      if (p?.client_id && p.client_id !== IMS_CLIENT_ID) localStorage.removeItem('adobeid_ims_access_token');
+    }
+  } catch { /* */ }
+
   // Check for token in hash (imslib redirect or Worker callback)
   const hash = window.location.hash;
   if (hash.includes('access_token=') || hash.includes('ims_token=')) {
