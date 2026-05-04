@@ -1731,16 +1731,10 @@ async function handleRealChat(text, file) {
               previewFrame.srcdoc = html;
               cachedPageHTML = html;
             } else {
-              // Fallback: reload .aem.page
-              const org = AEM_ORG.orgId || '';
-              const repo = AEM_ORG.repo || '';
-              const branch = AEM_ORG.branch || 'main';
-              const edsOrigin = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
-              const pagePath = path.replace('/content/', '').replace(/^[^/]+\/[^/]+\//, '');
-              previewFrame.src = `${edsOrigin}/${pagePath}?_t=${Date.now()}`;
+              showToast('Preview refresh failed — use UE to see changes', 'warning');
             }
           }).catch(() => {
-            previewFrame.src = previewFrame.src; // simple reload
+            showToast('Preview refresh failed — use UE to see changes', 'warning');
           });
           showToast(`Page ${path} updated — preview refreshing`, 'success');
         } else {
@@ -3556,15 +3550,12 @@ async function connectCustomSite(input) {
         <div style="text-align:center"><p>Loading JCR page preview...</p><p style="font-size:12px">${jcrPath}</p></div></body></html>`;
     }
 
-    // JCR preview strategy:
-    // 1. Try /render (Browser Rendering with auth — pixel-perfect author content)
-    // 2. Fallback to .aem.page (public EDS delivery — may be stale)
-    // 3. Fallback to Worker hybrid proxy (publish content with inlined CSS)
+    // JCR preview: use Browser Rendering (headless Chrome with auth) — only viable path
+    // for pure JCR sites. If it fails, show error with UE link.
     (async () => {
       const authorHost = parsed.aemHost;
       const pagePath = jcrPath.replace('/content/', '').replace(/^[^/]+\/[^/]+\//, '');
       const authorPageUrl = `https://${authorHost}${jcrPath}.html`;
-      const aemPageUrl = `${edsPreviewOrigin}/${pagePath}`;
       const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
       const token = getToken();
 
@@ -3572,7 +3563,6 @@ async function connectCustomSite(input) {
 
       try {
         if (previewFrame) {
-          // Try Browser Rendering first (pixel-perfect author page)
           const renderUrl = `${workerBase}/render?url=${encodeURIComponent(authorPageUrl)}&token=${encodeURIComponent(token || '')}`;
           const renderResp = await fetch(renderUrl, { mode: 'cors' });
 
@@ -3584,10 +3574,11 @@ async function connectCustomSite(input) {
             cachedPageUrl = authorPageUrl;
             console.log(`[EW] JCR preview: loaded via Browser Rendering (${renderResp.headers.get('X-Render-Time')})`);
           } else {
-            // Fallback to .aem.page
-            console.log(`[EW] JCR preview: /render failed (${renderResp.status}), falling back to .aem.page`);
-            previewFrame.removeAttribute('srcdoc');
-            previewFrame.src = aemPageUrl;
+            const errMsg = renderResp.status === 503
+              ? 'Browser Rendering unavailable — deploy Worker with Workers Paid plan'
+              : `Author preview failed (${renderResp.status}). Use the UE button to edit.`;
+            console.warn(`[EW] JCR preview: /render failed: ${errMsg}`);
+            previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center;max-width:500px"><h2 style="color:#e5e7eb">Preview unavailable</h2><p>${errMsg}</p><p style="font-size:12px;color:#64748b">${jcrPath}</p></div></body></html>`;
           }
 
           // Cache page HTML for AI context
