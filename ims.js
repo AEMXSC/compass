@@ -141,11 +141,43 @@ async function tryImsLib() {
 /* ─── Sign in ─── */
 
 export async function signIn() {
-  // Strategy: Try Worker-proxied IMS auth first (popup flow).
-  // If that fails (redirect_uri not registered), fall back to S2S.
-  // The Worker /ims/callback page postMessages the token back to this window.
+  // Strategy 1: imslib native sign-in (darkalley client, implicit grant, no server secret)
+  // This produces tokens identical to your real browser's AEM auth.
+  if (imsLibLoaded && window.adobeIMS) {
+    try {
+      console.log('[IMS] Triggering imslib sign-in (darkalley)...');
+      window.adobeIMS.signIn();
+      // imslib handles the popup and token — onAccessToken callback fires on success
+      // Wait for the token to arrive (max 3 minutes)
+      const imsResult = await new Promise((resolve) => {
+        const onToken = () => {
+          window.removeEventListener('ew-auth-change', onToken);
+          resolve(true);
+        };
+        window.addEventListener('ew-auth-change', onToken);
+        setTimeout(() => {
+          window.removeEventListener('ew-auth-change', onToken);
+          resolve(false);
+        }, 180000);
+      });
+      if (imsResult && window.adobeIMS.getAccessToken()?.token) {
+        console.log('[IMS] imslib sign-in succeeded (darkalley)');
+        localStorage.setItem(TOKEN_KEY, window.adobeIMS.getAccessToken().token);
+        localStorage.setItem('ew-ims-method', 'user');
+        localStorage.setItem('ew-ims', 'true');
+        const expiresAt = window.adobeIMS.getAccessToken()?.expire?.valueOf();
+        if (expiresAt) localStorage.setItem(EXPIRY_KEY, String(expiresAt));
+        authMethod = 'imslib';
+        return true;
+      }
+    } catch (e) {
+      console.warn('[IMS] imslib sign-in failed:', e.message);
+    }
+  }
+
+  // Strategy 2: Worker-proxied OAuth popup (aem-extension-builder, code exchange)
   {
-    console.log('[IMS] Opening Adobe sign-in popup via Worker...');
+    console.log('[IMS] Trying Worker popup sign-in...');
     const returnTo = encodeURIComponent(window.location.href);
     const loginUrl = `${IMS_WORKER}/ims/login?return_to=${returnTo}`;
     const w = 500, h = 700;
@@ -154,7 +186,6 @@ export async function signIn() {
     const popup = window.open(loginUrl, 'adobeSignIn',
       `width=${w},height=${h},left=${left},top=${top}`);
     if (popup) {
-      // Token arrives via handleRelayMessage (postMessage listener already active)
       const result = await new Promise((resolve) => {
         const checkClosed = setInterval(() => {
           if (popup.closed) {
@@ -162,7 +193,6 @@ export async function signIn() {
             resolve(authMethod === 'relay');
           }
         }, 500);
-        // Also resolve immediately if we get a relay token
         const onAuth = (e) => {
           if (e.detail?.method === 'relay') {
             clearInterval(checkClosed);
@@ -171,7 +201,6 @@ export async function signIn() {
           }
         };
         window.addEventListener('ew-auth-change', onAuth);
-        // Timeout after 3 minutes
         setTimeout(() => {
           clearInterval(checkClosed);
           window.removeEventListener('ew-auth-change', onAuth);
@@ -179,11 +208,10 @@ export async function signIn() {
         }, 180000);
       });
       if (result) {
-        console.log('[IMS] User-level token received via Worker popup');
+        console.log('[IMS] User token received via Worker popup');
         return true;
       }
       console.log('[IMS] Worker popup closed without token');
-      // Fall through to S2S
     } else {
       console.warn('[IMS] Popup blocked');
     }
