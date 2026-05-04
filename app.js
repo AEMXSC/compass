@@ -3558,8 +3558,9 @@ async function connectCustomSite(input) {
       const authorPageUrl = `https://${authorHost}${jcrPath}.html`;
       const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
       const token = getToken();
+      const tokenMethod = localStorage.getItem('ew-ims-method') || 'unknown';
 
-      console.log(`[EW] JCR preview: trying /render for author content: ${authorPageUrl}`);
+      console.log(`[EW] JCR preview: trying /render for author content: ${authorPageUrl} (token method: ${tokenMethod}, token: ${token ? token.slice(0, 20) + '...' : 'NONE'})`);
 
       try {
         if (previewFrame) {
