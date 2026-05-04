@@ -77,10 +77,21 @@ export function getUserOrgs() { return userOrgs; }
 
 export async function signIn() {
   if (imsReady && window.adobeIMS) {
-    // imslib handles redirect to IMS login page and back.
-    // The full page reloads after auth — imslib picks up the token on return.
     window.adobeIMS.signIn();
-    return true;
+    // Wait for onAccessToken callback (popup mode) — max 3 minutes
+    return new Promise((resolve) => {
+      const onAuth = (e) => {
+        if (e.detail?.signedIn) {
+          window.removeEventListener('ew-auth-change', onAuth);
+          resolve(true);
+        }
+      };
+      window.addEventListener('ew-auth-change', onAuth);
+      setTimeout(() => {
+        window.removeEventListener('ew-auth-change', onAuth);
+        resolve(!!getToken());
+      }, 180000);
+    });
   }
   console.warn('[IMS] imslib not ready — cannot sign in');
   return false;
