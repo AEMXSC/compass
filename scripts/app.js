@@ -734,11 +734,11 @@ window.addEventListener('ew-auth-change', async (e) => {
     // Pre-warm DA MCP session so first edit is fast
     warmups.push(
       Promise.resolve(da.isAuthenticated())
-        .then((ok) => console.debug('[Auth] DA MCP ready:', ok))
+        .then(() => {})
         .catch(() => {})
     );
 
-    console.debug('[Auth] Signed in — warming sessions...');
+    console.log('[Auth] Signed in — warming sessions...');
     await Promise.all(warmups);
 
     // Refresh page tree now that DA auth is available
@@ -925,7 +925,6 @@ async function fetchPageHTML(url) {
       const path = u.pathname === '/' ? '/index' : u.pathname.replace(/\/$/, '');
       const result = await da.getPage(`${path}.html`);
       if (typeof result === 'string' && result.length > 0) {
-        console.debug(`[fetchPageHTML] DA Admin API: ${path} (${result.length} chars)`);
         return result;
       }
     } catch (e) { console.warn('[fetchPageHTML] DA Admin API failed:', e.message); }
@@ -3356,7 +3355,6 @@ function navigateToPage(path) {
     cachedPageUrl = null;
   }
   ensurePageContext().then(() => {
-    if (cachedPageHTML) console.debug(`[NAV] Page content pre-cached: ${path} (${cachedPageHTML.length} chars)`);
   }).catch(() => { /* non-blocking */ });
 }
 // Background pre-cache: refresh page HTML every 30s so Tier 1/2 always have fresh content
@@ -3554,7 +3552,6 @@ async function loadFileTree() {
     if (!resp.ok) throw new Error(`GitHub API ${resp.status}`);
     const data = await resp.json();
     const items = data.tree || [];
-    console.debug(`[FileTree] GitHub tree: ${items.length} items from ${ghOrg}/${ghRepo}`);
 
     const root = buildTreeFromGitHub(items);
     fileTreeEl.innerHTML = '';
@@ -3785,7 +3782,6 @@ async function connectCustomSite(input) {
   try {
   // Parse the input (URL or org/repo)
   const parsed = parseConnectInput(input);
-  console.debug('[EW] parseConnectInput result:', JSON.stringify(parsed));
   if (parsed.error) {
     if (statusEl) {
       statusEl.textContent = parsed.message;
@@ -3832,7 +3828,6 @@ async function connectCustomSite(input) {
     if (!edsWorks) {
       // EDS preview doesn't exist — use author URL for JCR preview
       previewOrigin = `https://${parsed.aemHost}`;
-      console.debug(`[EW] JCR site: EDS preview unavailable, using author URL: ${previewOrigin}`);
     }
   }
 
@@ -3903,22 +3898,21 @@ async function connectCustomSite(input) {
   if (parsed.aemHost) {
     window.__EW_AEM_HOST = `https://${parsed.aemHost}`;
     window.__EW_SITE_TYPE = 'aem-cs';
-    console.debug(`[EW] AEM CS site: ${parsed.aemHost} — site type set to aem-cs`);
+    console.log(`[EW] AEM CS site: ${parsed.aemHost}`);
   }
 
   // Reconfigure DA client (skip for known JCR sites — DA won't work)
   if (!parsed.jcr) {
     da.configure({ org, repo, branch });
-    console.debug(`[EW] DA client reconfigured: ${org}/${repo} (${branch}), da.getOrg()=${da.getOrg()}, da.getRepo()=${da.getRepo()}`);
+    console.log(`[EW] DA site: ${org}/${repo} (${branch})`);
   } else {
-    console.debug(`[EW] JCR site — DA client not configured. AEM Content MCP tools available via ${parsed.aemHost}`);
   }
 
   // Detect site type (DA vs AEM CS) via fstab.yaml — AWAIT so AI knows the type before first prompt
   // Skip if already set from author URL
   const detectedType = parsed.aemHost ? 'aem-cs' : await detectAndCacheSiteType(org, repo, branch);
   const typeLabel = detectedType === 'aem-cs' ? 'AEM CS (xwalk)' : detectedType === 'da' ? 'DA' : detectedType;
-  console.debug(`[EW] Site type: ${typeLabel}`);
+  console.log(`[EW] Site type: ${typeLabel}`);
 
   // Update UI (home view elements may not exist when switching from toolbar)
   if (statusEl) {
@@ -3953,8 +3947,7 @@ async function connectCustomSite(input) {
   // Update contextual prompt chips for the connected site
   if (typeof updateContextChips === 'function') updateContextChips();
 
-  // For JCR/xwalk sites: Worker standard preview (content + fallback CSS)
-  // Punch-out Preview button opens the real page in a new tab for pixel-perfect view.
+  // JCR/xwalk sites: render author page via headless Chrome (Browser Rendering)
   if (parsed.jcr && parsed.aemHost && previewOrigin.includes('adobeaemcloud.com')) {
     const jcrPath = parsed.path || '/content';
     activeResourcePath = jcrPath;
@@ -3963,30 +3956,42 @@ async function connectCustomSite(input) {
     if (previewDot) previewDot.classList.add('connected');
 
     const WORKER_BASE = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
-    const authorHost = parsed.aemHost;
-    const publishUrl = `https://${authorHost.replace('author-', 'publish-')}`;
-    const authorUrl = `https://${authorHost}`;
-
-    // Hybrid Worker preview: inlines CSS (S2S auth) + keeps scripts proxied for decoration
-    const edsOrigin = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
-    const previewParams = new URLSearchParams({
-      publish: publishUrl,
-      author: authorUrl,
-      path: jcrPath + '.html',
-      mode: 'hybrid',
-      codeBase: edsOrigin,
-      _t: Date.now(),
-    });
+    const authorUrl = `https://${parsed.aemHost}`;
+    const authorPageUrl = `${authorUrl}${jcrPath}.html`;
     const token = getToken();
-    if (token) previewParams.set('token', token);
-    const inlinePreviewUrl = `${WORKER_BASE}/preview?${previewParams}`;
+    const tokenMethod = localStorage.getItem('ew-ims-method') || 'unknown';
 
+    console.log(`[Preview] JCR render: ${authorPageUrl} (auth: ${tokenMethod})`);
+
+    // Load author page via Browser Rendering (headless Chrome with auth)
     if (previewFrame) {
-      previewFrame.removeAttribute('srcdoc');
-      previewFrame.src = inlinePreviewUrl;
+      previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><p>Loading author preview...</p><p style="font-size:12px;color:#64748b">${jcrPath}</p></div></body></html>`;
+
+      const renderUrl = `${WORKER_BASE}/render?url=${encodeURIComponent(authorPageUrl)}&token=${encodeURIComponent(token || '')}`;
+      fetch(renderUrl, { mode: 'cors' }).then(async (resp) => {
+        if (resp.ok) {
+          const html = await resp.text();
+          previewFrame.srcdoc = html;
+          cachedPageHTML = html;
+          cachedPageUrl = authorPageUrl;
+          console.log(`[Preview] Author page loaded (${resp.headers.get('X-Render-Time') || '?'})`);
+        } else {
+          const status = resp.status;
+          const msg = status === 503
+            ? 'Browser Rendering unavailable — deploy Worker with Paid plan'
+            : status === 401
+              ? 'Author auth failed — sign out and sign back in, then reconnect'
+              : `Author preview failed (${status}). Use the UE button to edit visually.`;
+          previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center;max-width:500px"><h2 style="color:#e5e7eb">Preview unavailable</h2><p>${msg}</p><p style="font-size:12px;color:#64748b">${jcrPath}</p></div></body></html>`;
+          console.warn(`[Preview] /render failed: ${status}`);
+        }
+      }).catch((err) => {
+        previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h2 style="color:#e5e7eb">Preview unavailable</h2><p>Network error: ${err.message}</p></div></body></html>`;
+        console.warn('[Preview] /render network error:', err.message);
+      });
     }
 
-    // Pre-fetch ETag so AI can patch without a read call (saves one full round trip)
+    // Pre-fetch ETag for AI edits
     if (isSignedIn() && window.__EW_AEM_HOST) {
       import('./aem-content-mcp-client.js').then(async (aemContent) => {
         try {
@@ -3994,39 +3999,38 @@ async function connectCustomSite(input) {
           if (result?.etag) {
             cachedJcrEtag = result.etag;
             cachedJcrEtagPath = jcrPath;
-            console.debug(`[EW] Pre-fetched ETag for ${jcrPath}`);
           }
-        } catch (e) { console.warn('[EW] ETag pre-fetch failed:', e.message); }
+        } catch (e) { console.warn('[Preview] ETag pre-fetch failed:', e.message); }
       });
     }
 
     window.__JCR_PREVIEW_CONFIG = {
-      workerBase: WORKER_BASE, publishUrl, authorUrl, jcrPath, org, repo, branch,
-      publishPageUrl: `${publishUrl}${jcrPath}.html`,
-      authorPageUrl: `${authorUrl}${jcrPath}.html`,
+      workerBase: WORKER_BASE, authorUrl, jcrPath, org, repo, branch,
+      authorPageUrl,
     };
-    window.__JCR_PREVIEW_URL = inlinePreviewUrl;
   } else {
     navigateToPage(parsed.path || '/');
   }
 
-  // Refresh JCR preview after edits
+  // Refresh JCR preview after edits — re-render from author
   window.__refreshJcrPreview = () => {
     const cfg = window.__JCR_PREVIEW_CONFIG;
     if (!cfg || !previewFrame) return;
-    showToast('Updating preview...', 'info');
-    const params = new URLSearchParams({
-      publish: cfg.publishUrl,
-      author: cfg.authorUrl,
-      path: cfg.jcrPath + '.html',
-      mode: 'hybrid',
-      codeBase: `https://${cfg.branch}--${cfg.repo.toLowerCase()}--${cfg.org.toLowerCase()}.aem.page`,
-      _t: Date.now(),
-    });
+    showToast('Refreshing author preview...', 'info');
     const tk = getToken();
-    if (tk) params.set('token', tk);
-    previewFrame.removeAttribute('srcdoc');
-    previewFrame.src = `${cfg.workerBase}/preview?${params}`;
+    const renderUrl = `${cfg.workerBase}/render?url=${encodeURIComponent(cfg.authorPageUrl)}&token=${encodeURIComponent(tk || '')}`;
+    fetch(renderUrl, { mode: 'cors' }).then(async (resp) => {
+      if (resp.ok) {
+        const html = await resp.text();
+        previewFrame.srcdoc = html;
+        cachedPageHTML = html;
+        showToast('Preview updated', 'success');
+      } else {
+        showToast('Preview refresh failed — use UE to see changes', 'warning');
+      }
+    }).catch(() => {
+      showToast('Preview refresh failed — network error', 'warning');
+    });
   };
 
   loadResources();
@@ -4082,7 +4086,6 @@ async function connectCustomSite(input) {
     siteType: window.__EW_SITE_TYPE || 'unknown',
   });
   if (mem?.lastPrompts?.length) {
-    console.debug(`[Memory] Restored project memory for ${org}/${repo}:`, mem);
   }
 
   } catch (err) {
@@ -4870,7 +4873,7 @@ const COMPASS_WORKER = 'https://compass-ims-proxy.compass-xsc.workers.dev';
     // Validate and store async
     validateAndStoreGitHubToken(token).then((result) => {
       if (result.ok) {
-        console.debug(`[GH] OAuth sign-in: ${result.login}`);
+        console.log(`[GH] Signed in: ${result.login}`);
       } else {
         console.warn('[GH] OAuth token invalid:', result.error);
         const status = document.getElementById('githubMenuStatus');
@@ -6454,7 +6457,7 @@ async function init() {
   buildOrgSelector();
   initProfileGenerator();
 
-  console.debug('[EW] init v25 — repo management, real branch picker, recent repos');
+  console.log('[Compass] init v25');
 
   // Render recent repos on home view
   renderRecentRepos();
@@ -6486,7 +6489,7 @@ async function init() {
   }
 
   if (ai.hasApiKey()) {
-    console.debug(`Claude API key found — live AI mode${AEM_ORG.name ? ` for ${AEM_ORG.name}` : ''}`);
+    console.log(`[Compass] AI mode active${AEM_ORG.name ? ` for ${AEM_ORG.name}` : ''}`);
   }
 
   // Context prefetch: pre-discover all AEM environments (like Adobe's AI Assistant pattern)
@@ -6531,7 +6534,6 @@ async function prefetchAemEnvironments() {
       }
     }
 
-    console.debug(`[Compass] Prefetched ${envList.length} AEM environments`, Object.keys(window.__AEM_ENV_BY_AUTHOR));
   } catch (err) {
     console.warn('[Compass] Environment prefetch failed:', err.message);
     window.__AEM_ENVIRONMENTS = [];
