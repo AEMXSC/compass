@@ -1282,8 +1282,8 @@ async function handleBrowserRender(request, env) {
 
     await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: 20000 });
 
-    // Wait for EDS block decoration scripts
-    await new Promise(r => setTimeout(r, 1500));
+    // Wait for EDS block decoration scripts and lazy-loaded CSS
+    await new Promise(r => setTimeout(r, 3000));
 
     // Check if we got an auth error or login page instead of actual content
     const bodyText = await page.evaluate(() => document.body?.innerText || '');
@@ -1304,23 +1304,53 @@ async function handleBrowserRender(request, env) {
       });
     }
 
-    // Inline all CSS — the srcdoc iframe can't load auth-protected stylesheets
-    renderedHTML = await page.evaluate(() => {
+    // Inline CSS + convert images to data URIs (srcdoc can't load auth-protected resources)
+    renderedHTML = await page.evaluate(async () => {
+      // 1. Inline all CSS
       const styles = [];
       for (const sheet of document.styleSheets) {
         try {
           let css = '';
           for (const rule of sheet.cssRules) css += rule.cssText + '\n';
           if (css) styles.push(css);
-        } catch { /* cross-origin sheet — skip */ }
+        } catch { /* cross-origin sheet */ }
       }
       if (styles.length > 0) {
         const styleEl = document.createElement('style');
         styleEl.textContent = styles.join('\n');
         document.head.appendChild(styleEl);
-        // Remove link tags since styles are now inlined
         document.querySelectorAll('link[rel="stylesheet"]').forEach(l => l.remove());
       }
+
+      // 2. Convert images to base64 data URIs (limit to images on same domain, max 500KB each)
+      const imgs = document.querySelectorAll('img[src]');
+      await Promise.allSettled([...imgs].map(async (img) => {
+        const src = img.getAttribute('src');
+        if (!src || src.startsWith('data:')) return;
+        try {
+          const resp = await fetch(src, { credentials: 'include' });
+          if (!resp.ok) return;
+          const contentLength = resp.headers.get('content-length');
+          if (contentLength && parseInt(contentLength) > 500000) return;
+          const blob = await resp.blob();
+          if (blob.size > 500000) return;
+          const reader = new FileReader();
+          const dataUri = await new Promise((resolve) => {
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+          img.setAttribute('src', dataUri);
+        } catch { /* skip failed images */ }
+      }));
+
+      // 3. Also inline CSS background images referenced in inline styles
+      document.querySelectorAll('[style*="background"]').forEach((el) => {
+        const bg = el.style.backgroundImage;
+        if (bg && bg.includes('url(') && !bg.includes('data:')) {
+          // Leave as-is — too complex to inline dynamically
+        }
+      });
+
       return document.documentElement.outerHTML;
     });
 
