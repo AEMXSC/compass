@@ -174,9 +174,7 @@ export async function loadIms() {
       resolve({ anonymous: true, method: 'none' });
     }, IMSLIB_INIT_TIMEOUT_MS);
 
-    // Configure imslib — matches aemcoder.adobe.io pattern:
-    // NO modalMode (uses full-page redirect, not popup)
-    // autoValidateToken picks up token from IMS redirect on return
+    // Configure imslib — popup mode to avoid redirecting away from Compass
     window.adobeid = {
       client_id: IMS_CLIENT_ID,
       scope: IMS_SCOPE,
@@ -184,6 +182,7 @@ export async function loadIms() {
       autoValidateToken: true,
       environment: 'prod',
       useLocalStorage: true,
+      modalMode: true,
 
       onReady: () => {
         clearTimeout(initTimeout);
