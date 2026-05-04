@@ -358,16 +358,24 @@ export async function handlePkceCallback() { return false; }
 /* ─── Init ─── */
 
 export async function loadIms() {
-  // Clean up stale tokens from wrong clients (aem-extension-builder tokens don't work for AEM author)
-  const staleKeys = ['adobeid_ims_access_token/aem-extension-builder', 'nonce:adobeIMSClient:aem-extension-builder'];
-  staleKeys.forEach((k) => { try { localStorage.removeItem(k); } catch { /* */ } });
-  // Also remove the generic key if it holds a wrong-client token
+  // Clean up stale tokens from wrong clients — iterate all keys, remove any with aem-extension-builder
   try {
-    const generic = localStorage.getItem('adobeid_ims_access_token');
-    if (generic) {
-      const p = JSON.parse(generic);
-      if (p?.client_id && p.client_id !== IMS_CLIENT_ID) localStorage.removeItem('adobeid_ims_access_token');
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.includes('aem-extension-builder')) keysToRemove.push(key);
     }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+    if (keysToRemove.length > 0) console.log(`[IMS] Cleared ${keysToRemove.length} stale aem-extension-builder entries`);
+  } catch { /* */ }
+  // Also clear session storage
+  try {
+    const sessionKeysToRemove = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key && key.includes('aem-extension-builder')) sessionKeysToRemove.push(key);
+    }
+    sessionKeysToRemove.forEach((k) => sessionStorage.removeItem(k));
   } catch { /* */ }
 
   // Check for token in hash (imslib redirect or Worker callback)
