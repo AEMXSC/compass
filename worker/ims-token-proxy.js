@@ -1268,73 +1268,16 @@ async function handleBrowserRender(request, env) {
     await page.setViewport({ width: 1440, height: 900 });
 
     if (token) {
-      const authorOrigin = `https://${pageHost}`;
-
-      // Establish AEM session by navigating to the login endpoint with token
-      // AEM's /libs/granite/core/content/login accepts IMS tokens and sets login-token cookie
-      // Use request interception ONLY for the login request, then disable it for the page load
+      // Bearer header injection — S2S client_id is allowlisted in AEM Config Pipeline
       await page.setRequestInterception(true);
-
-      let loginDone = false;
       page.on('request', (req) => {
-        if (!loginDone) {
-          req.continue();
+        const reqUrl = req.url();
+        if (reqUrl.includes('.adobeaemcloud.com')) {
+          req.continue({ headers: { ...req.headers(), Authorization: `Bearer ${token}` } });
         } else {
           req.continue();
         }
       });
-
-      // Navigate to AEM login endpoint with token as POST body
-      try {
-        await page.goto(`${authorOrigin}/libs/granite/core/content/login`, {
-          waitUntil: 'networkidle0',
-          timeout: 10000,
-        });
-
-        // Now we're on the AEM domain — use fetch to POST the token login
-        const loginResult = await page.evaluate(async (tk) => {
-          try {
-            const resp = await fetch('/libs/granite/core/content/login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: 'j_username=token&j_password=' + encodeURIComponent(tk) + '&j_validate=true',
-              credentials: 'include',
-            });
-            return { status: resp.status, ok: resp.ok };
-          } catch (e) {
-            return { status: 0, ok: false, error: e.message };
-          }
-        }, token);
-
-        loginDone = true;
-
-        // If login failed, set cookie directly as fallback
-        if (!loginResult.ok) {
-          await page.setCookie({
-            name: 'login-token',
-            value: token,
-            domain: pageHost,
-            path: '/',
-            secure: true,
-            httpOnly: true,
-            sameSite: 'None',
-          });
-        }
-      } catch {
-        loginDone = true;
-        // Login navigation failed — set cookie directly
-        await page.setCookie({
-          name: 'login-token',
-          value: token,
-          domain: pageHost,
-          path: '/',
-          secure: true,
-          httpOnly: true,
-          sameSite: 'None',
-        });
-      }
-
-      await page.setRequestInterception(false);
     }
 
     await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: 20000 });
