@@ -3541,6 +3541,73 @@ function renderTreeNode(dirNode, depth, parentPath) {
   return fragment;
 }
 
+/** Render DA content tree with expandable folders */
+function renderDATree(items, parentPath) {
+  const fragment = document.createDocumentFragment();
+  const depth = parentPath === '/' ? 0 : parentPath.split('/').filter(Boolean).length;
+  const sorted = [...items].sort((a, b) => {
+    const aDir = !a.ext;
+    const bDir = !b.ext;
+    if (aDir !== bDir) return aDir ? -1 : 1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
+  for (const item of sorted) {
+    const isDir = !item.ext;
+    const name = item.name || '?';
+    const fullPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`;
+
+    const row = document.createElement('div');
+    row.className = 'ft-item';
+    row.style.paddingLeft = `${10 + depth * 16}px`;
+    row.innerHTML = `
+      <span class="ft-chevron${isDir ? '' : ' hidden'}">${FT_ICONS.chevron}</span>
+      <span class="ft-icon ${isDir ? 'folder' : 'file'}">${getFileIcon(name, isDir)}</span>
+      <span class="ft-name">${escapeHtml(name)}${item.ext && item.ext !== 'html' ? '.' + escapeHtml(item.ext) : ''}</span>
+    `;
+
+    if (isDir) {
+      let expanded = false;
+      let childContainer = null;
+      row.addEventListener('click', async () => {
+        if (expanded) {
+          expanded = false;
+          row.querySelector('.ft-chevron')?.classList.remove('open');
+          if (childContainer) childContainer.style.display = 'none';
+        } else {
+          expanded = true;
+          row.querySelector('.ft-chevron')?.classList.add('open');
+          if (childContainer) {
+            childContainer.style.display = '';
+          } else {
+            childContainer = document.createElement('div');
+            childContainer.className = 'ft-children';
+            row.after(childContainer);
+            try {
+              const children = await da.listPages(fullPath);
+              if (Array.isArray(children) && children.length > 0) {
+                childContainer.appendChild(renderDATree(children, fullPath));
+              } else {
+                childContainer.innerHTML = `<div class="ft-item" style="padding-left:${10 + (depth + 1) * 16}px;opacity:0.5">Empty</div>`;
+              }
+            } catch {
+              childContainer.innerHTML = `<div class="ft-item" style="padding-left:${10 + (depth + 1) * 16}px;opacity:0.5">Failed to load</div>`;
+            }
+          }
+        }
+      });
+    } else {
+      row.addEventListener('click', () => {
+        const pagePath = fullPath.replace(/\.html$/, '');
+        navigateToPage(pagePath);
+      });
+    }
+
+    fragment.appendChild(row);
+  }
+  return fragment;
+}
+
 /**
  * Fetch the full repository tree from GitHub API (no auth needed for public repos).
  * Falls back to DA listing if GitHub fails.
@@ -3549,7 +3616,22 @@ async function loadFileTree() {
   if (!fileTreeEl) return;
   fileTreeEl.innerHTML = '<div class="resources-loading">Loading files...</div>';
 
-  // Determine GitHub org/repo — prefer profile config, fall back to DA config
+  const isDA = window.__EW_SITE_TYPE !== 'aem-cs' && da.getOrg() && da.getRepo();
+
+  // DA sites: show content tree from DA Admin API (preferred — shows documents)
+  if (isDA) {
+    try {
+      const items = await da.listPages('/');
+      if (Array.isArray(items) && items.length > 0) {
+        fileTreeEl.innerHTML = '';
+        fileTreeEl.appendChild(renderDATree(items, '/'));
+        fileTreeLoaded = true;
+        return;
+      }
+    } catch { /* fall through to GitHub */ }
+  }
+
+  // GitHub tree (code files — for non-DA sites or DA fallback)
   const ghOrg = AEM_ORG.orgId || da.getOrg();
   const ghRepo = AEM_ORG.repo || da.getRepo();
 
@@ -3569,30 +3651,12 @@ async function loadFileTree() {
     console.warn('[FileTree] GitHub API failed:', err.message);
   }
 
-  // Fallback: try DA listing (needs auth)
+  // Final fallback: DA content tree (expandable folders)
   try {
     const items = await da.listPages('/');
     if (Array.isArray(items) && items.length > 0) {
       fileTreeEl.innerHTML = '';
-      const sorted = items.sort((a, b) => {
-        const aDir = !a.ext;
-        const bDir = !b.ext;
-        if (aDir !== bDir) return aDir ? -1 : 1;
-        return (a.name || '').localeCompare(b.name || '');
-      });
-      sorted.forEach((item) => {
-        const isDir = !item.ext;
-        const name = item.name || '?';
-        const row = document.createElement('div');
-        row.className = 'ft-item';
-        row.style.paddingLeft = '10px';
-        row.innerHTML = `
-          <span class="ft-chevron${isDir ? '' : ' hidden'}">${FT_ICONS.chevron}</span>
-          <span class="ft-icon ${isDir ? 'folder' : 'file'}">${getFileIcon(name, isDir)}</span>
-          <span class="ft-name">${escapeHtml(name)}${item.ext ? `.${escapeHtml(item.ext)}` : ''}</span>
-        `;
-        fileTreeEl.appendChild(row);
-      });
+      fileTreeEl.appendChild(renderDATree(items, '/'));
       fileTreeLoaded = true;
       return;
     }
