@@ -2531,7 +2531,7 @@ const MCP_SERVICES = [
   { name: 'AEM Content', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/content', purpose: 'Page CRUD, content fragments, asset import', category: 'AEM' },
   { name: 'AEM DA', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/da', purpose: 'Document Authoring for EDS sites', category: 'AEM' },
   { name: 'AEM Governance', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/experience-governance', purpose: 'Brand policy check, compliance', category: 'AEM' },
-  { name: 'Experience Production', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/experience-production', purpose: 'DA content authoring agent', category: 'AEM' },
+  { name: 'Experience Production', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/experience-production', purpose: 'Content creation, editing & publishing agent', category: 'AEM' },
   { name: 'AEM Discovery', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/discovery', purpose: 'Site/environment discovery', category: 'AEM' },
   { name: 'Cloud Manager (Odin)', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/odin/prod', purpose: 'Programs, environments, pipelines', category: 'AEM' },
   { name: 'Firefly', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/loki/firefly', purpose: 'AI image generation', category: 'Creative' },

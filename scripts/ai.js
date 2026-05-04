@@ -1897,7 +1897,7 @@ export async function executeTool(name, input) {
         { name: 'AEM Content', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/content', purpose: 'Page CRUD, content fragments, asset import' },
         { name: 'AEM DA', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/da', purpose: 'Document Authoring for EDS sites' },
         { name: 'AEM Governance', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/experience-governance', purpose: 'Brand policy check, compliance' },
-        { name: 'Experience Production', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/experience-production', purpose: 'DA content authoring agent' },
+        { name: 'Experience Production', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/experience-production', purpose: 'Content creation, editing & publishing agent' },
         { name: 'AEM Odin (Cloud Manager)', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/odin/prod', purpose: 'Programs, environments, pipelines' },
         { name: 'Firefly', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/loki/firefly', purpose: 'AI image generation' },
         { name: 'Content QA Agent', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/loki/content-qa', purpose: 'Content quality checks' },
