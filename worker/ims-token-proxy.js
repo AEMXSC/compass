@@ -1304,7 +1304,26 @@ async function handleBrowserRender(request, env) {
       });
     }
 
-    renderedHTML = await page.content();
+    // Inline all CSS — the srcdoc iframe can't load auth-protected stylesheets
+    renderedHTML = await page.evaluate(() => {
+      const styles = [];
+      for (const sheet of document.styleSheets) {
+        try {
+          let css = '';
+          for (const rule of sheet.cssRules) css += rule.cssText + '\n';
+          if (css) styles.push(css);
+        } catch { /* cross-origin sheet — skip */ }
+      }
+      if (styles.length > 0) {
+        const styleEl = document.createElement('style');
+        styleEl.textContent = styles.join('\n');
+        document.head.appendChild(styleEl);
+        // Remove link tags since styles are now inlined
+        document.querySelectorAll('link[rel="stylesheet"]').forEach(l => l.remove());
+      }
+      return document.documentElement.outerHTML;
+    });
+
     await page.close();
     browser.disconnect();
 

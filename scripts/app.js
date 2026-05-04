@@ -4040,7 +4040,12 @@ async function connectCustomSite(input) {
       const renderUrl = `${WORKER_BASE}/render?url=${encodeURIComponent(authorPageUrl)}&token=${encodeURIComponent(token || '')}`;
       fetch(renderUrl, { mode: 'cors' }).then(async (resp) => {
         if (resp.ok) {
-          const html = await resp.text();
+          let html = await resp.text();
+          // Inject base href so relative CSS/JS/images resolve from author domain
+          const authorOrigin = `https://${parsed.aemHost}`;
+          if (!html.includes('<base')) {
+            html = html.replace(/<head([^>]*)>/, `<head$1><base href="${authorOrigin}/">`);
+          }
           previewFrame.srcdoc = html;
           cachedPageHTML = html;
           cachedPageUrl = authorPageUrl;
