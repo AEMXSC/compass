@@ -1268,8 +1268,7 @@ async function handleBrowserRender(request, env) {
     await page.setViewport({ width: 1440, height: 900 });
 
     if (token) {
-      // Set login-token cookie — AEM uses the IMS access_token as its session cookie
-      // Do NOT use Bearer header — it triggers IMS client_id allowlist validation
+      // Cookie auth: set login-token (works if token format matches AEM's session cookie)
       await page.setCookie({
         name: 'login-token',
         value: token,
@@ -1278,6 +1277,20 @@ async function handleBrowserRender(request, env) {
         secure: true,
         httpOnly: true,
         sameSite: 'None',
+      });
+
+      // Bearer auth via request interception
+      // Requires client_id (aem-extension-builder) to be allowlisted in AEM Config Pipeline
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const reqUrl = req.url();
+        if (reqUrl.includes('.adobeaemcloud.com')) {
+          req.continue({
+            headers: { ...req.headers(), Authorization: `Bearer ${token}` },
+          });
+        } else {
+          req.continue();
+        }
       });
     }
 
