@@ -5350,35 +5350,24 @@ async function enableDesignMode() {
 
   const path = activeResourcePath || '/';
   const base = AEM_ORG.previewOrigin;
+  const isJcr = window.__EW_SITE_TYPE === 'aem-cs';
   showToast('Loading design mode...', 'info');
 
-  // Fetch page HTML — try multiple sources, first one wins
+  // DA sites: use da.live canvas (same pattern as Experience Workspace)
+  if (!isJcr && da.getOrg() && da.getRepo()) {
+    const pagePath = path === '/' ? '/index' : path;
+    const canvasUrl = `https://da.live/canvas#/${da.getOrg()}/${da.getRepo()}${pagePath}.html`;
+    if (!previewFrame.dataset.designSavedSrc) {
+      previewFrame.dataset.designSavedSrc = previewFrame.src;
+    }
+    previewFrame.removeAttribute('srcdoc');
+    previewFrame.src = canvasUrl;
+    return;
+  }
+
+  // JCR sites: use cached rendered HTML or fetch
   let html = cachedPageHTML;
 
-  // 1. DA/EDS: .plain.html (CORS-safe, returns raw block content)
-  if (!html && base) {
-    try {
-      const pagePath = path === '/' ? '/index' : path;
-      const plainUrl = base + pagePath + '.plain.html';
-      const resp = await fetch(plainUrl, { mode: 'cors', cache: 'no-store' });
-      if (resp.ok) html = await resp.text();
-    } catch { /* CORS or network failure */ }
-  }
-
-  // 2. Full page fetch (some EDS sites allow CORS on the main URL too)
-  if (!html && base) {
-    try {
-      const pagePath = path === '/' ? '/' : path;
-      const resp = await fetch(base + pagePath, { mode: 'cors', cache: 'no-store' });
-      if (resp.ok) {
-        const full = await resp.text();
-        const bodyMatch = full.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-        html = bodyMatch ? bodyMatch[1] : full;
-      }
-    } catch { /* */ }
-  }
-
-  // 3. Try iframe DOM (same-origin only)
   if (!html) {
     try {
       const doc = previewFrame.contentDocument || previewFrame.contentWindow?.document;
