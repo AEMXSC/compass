@@ -77,21 +77,10 @@ export function getUserOrgs() { return userOrgs; }
 
 export async function signIn() {
   if (imsReady && window.adobeIMS) {
+    // Redirect flow: page navigates to IMS, returns with token in hash
+    // imslib's onReady picks up the token on return
     window.adobeIMS.signIn();
-    // Wait for onAccessToken callback (popup mode) — max 3 minutes
-    return new Promise((resolve) => {
-      const onAuth = (e) => {
-        if (e.detail?.signedIn) {
-          window.removeEventListener('ew-auth-change', onAuth);
-          resolve(true);
-        }
-      };
-      window.addEventListener('ew-auth-change', onAuth);
-      setTimeout(() => {
-        window.removeEventListener('ew-auth-change', onAuth);
-        resolve(!!getToken());
-      }, 180000);
-    });
+    return true;
   }
   console.warn('[IMS] imslib not ready — cannot sign in');
   return false;
@@ -185,7 +174,8 @@ export async function loadIms() {
       resolve({ anonymous: true, method: 'none' });
     }, IMSLIB_INIT_TIMEOUT_MS);
 
-    // Configure imslib — popup mode to avoid redirecting away from Compass
+    // Configure imslib — redirect flow (same as AEMcoder)
+    // Full-page redirect to IMS, returns with token in URL hash
     window.adobeid = {
       client_id: IMS_CLIENT_ID,
       scope: IMS_SCOPE,
@@ -193,7 +183,6 @@ export async function loadIms() {
       autoValidateToken: true,
       environment: 'prod',
       useLocalStorage: true,
-      modalMode: true,
 
       onReady: () => {
         clearTimeout(initTimeout);
