@@ -491,8 +491,8 @@ async function handlePreview(request) {
     const pageUrl = `${publishUrl}${pagePath}`;
     const authorPageUrl = `${authorBase}${pagePath}`;
 
-    // Only attempt author fetch with a USER token (not S2S — S2S lacks AEM permissions)
-    if (authLevel === 'user' && authToken) {
+    // Always fetch from author — publish is useless for editing workflows
+    if (authToken) {
       try {
         const resp = await fetch(authorPageUrl, {
           headers: {
@@ -508,27 +508,16 @@ async function handlePreview(request) {
     }
 
     if (!html) {
-      const resp = await fetch(pageUrl);
-      if (resp.ok) {
-        html = await resp.text();
-        htmlSource = 'publish';
-      }
-    }
-
-    if (!html) {
-      const hint = authToken
-        ? 'Page not found on author or publish tier. Check the content path.'
-        : 'Page not found on publish tier. Sign in to access author content (unpublished pages).';
       return new Response(
-        `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center;max-width:500px"><h2 style="color:#e5e7eb">Page not found</h2><p>${hint}</p><p style="font-size:12px;color:#64748b">${pagePath}</p></div></body></html>`,
-        { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+        `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center;max-width:500px"><h2 style="color:#e5e7eb">Sign in required</h2><p>Author preview requires authentication. Sign in with your Adobe ID to see the latest content.</p><p style="font-size:12px;color:#64748b">${pagePath}</p></div></body></html>`,
+        { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
       );
     }
 
     // Raw mode: return HTML with minimal processing (for client-side EDS decoration)
     if (rawMode) {
       // Only add <base> for asset resolution and strip empty whitespace
-      html = html.replace(/<head>/, `<head><base href="${publishUrl}/">`);
+      html = html.replace(/<head>/, `<head><base href="${authorBase}/">`);
       html = html.replace(/\n{3,}/g, '\n\n');
 
       const cacheHeader = cacheBust ? 'no-store, no-cache' : 'public, max-age=60';
@@ -558,16 +547,10 @@ async function handlePreview(request) {
       const hrefVal = match[1] || match[2];
       if (!hrefVal) continue;
 
-      const publishCssUrl = hrefVal.startsWith('http') ? hrefVal : `${publishUrl}${hrefVal}`;
       const authorCssUrl = hrefVal.startsWith('http') ? hrefVal : `${authorBase}${hrefVal}`;
 
       let css = null;
-      try {
-        const resp = await fetch(publishCssUrl);
-        if (resp.ok) css = await resp.text();
-      } catch { /* publish failed */ }
-
-      if (!css && authToken) {
+      if (authToken) {
         try {
           const resp = await fetch(authorCssUrl, {
             headers: { Authorization: `Bearer ${authToken}` },
@@ -577,7 +560,7 @@ async function handlePreview(request) {
       }
 
       if (css) {
-        css = css.replace(/url\(\s*["']?\//g, `url("${publishUrl}/`);
+        css = css.replace(/url\(\s*["']?\//g, `url("${authorBase}/`);
         html = html.replace(match[0], `<style>/* ${hrefVal.split('/').pop()} */\n${css}</style>`);
       } else {
         html = html.replace(match[0], '');
@@ -640,11 +623,11 @@ async function handlePreview(request) {
 })();
 <\/script>`;
 
-      html = html.replace(/<head([^>]*)>/, `<head$1><base href="${publishUrl}/">${fetchInterceptor}`);
+      html = html.replace(/<head([^>]*)>/, `<head$1><base href="${authorBase}/">${fetchInterceptor}`);
     } else {
       // Standard: strip all scripts
       html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
-      html = html.replace(/<head>/, `<head><base href="${publishUrl}/">`);
+      html = html.replace(/<head>/, `<head><base href="${authorBase}/">`);
     }
 
     // Strip xwalk UE instrumentation (all modes)
