@@ -45,6 +45,23 @@ const ALLOWED_RETURN_URLS = [
 let cachedToken = null;
 let tokenExpiry = 0;
 
+async function getS2SToken(env) {
+  const now = Date.now();
+  if (cachedToken && tokenExpiry > now + 300000) return cachedToken;
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: env.IMS_CLIENT_ID,
+    client_secret: env.IMS_CLIENT_SECRET,
+    scope: 'openid,AdobeID,read_organizations,additional_info.projectedProductContext,aem.frontend.all,aem_mcp',
+  });
+  const resp = await fetch('https://ims-na1.adobelogin.com/ims/token/v3', { method: 'POST', body });
+  if (!resp.ok) throw new Error('S2S token fetch failed');
+  const data = await resp.json();
+  cachedToken = data.access_token;
+  tokenExpiry = now + (data.expires_in ? data.expires_in * 1000 : 86400000);
+  return cachedToken;
+}
+
 // CSRF state uses HMAC-signed tokens (stateless — works across all Worker isolates).
 // State format: base64url(JSON({ returnTo, exp, nonce })) + '.' + base64url(HMAC-SHA256)
 const STATE_TTL_MS = 600000; // 10 minutes
@@ -491,8 +508,20 @@ async function handlePreview(request) {
     const pageUrl = `${publishUrl}${pagePath}`;
     const authorPageUrl = `${authorBase}${pagePath}`;
 
-    // Always fetch from author — publish is useless for editing workflows
-    if (authToken) {
+    // Strategy: try .aem.page first (xwalk EDS delivery — public, styled, fast)
+    // Then author with Bearer, then publish as last resort
+    const aemPageUrl = url.searchParams.get('aemPage');
+    if (aemPageUrl) {
+      try {
+        const resp = await fetch(aemPageUrl, { headers: { 'Cache-Control': 'no-cache' } });
+        if (resp.ok) {
+          html = await resp.text();
+          htmlSource = 'aem.page';
+        }
+      } catch { /* .aem.page failed */ }
+    }
+
+    if (!html && authToken) {
       try {
         const resp = await fetch(authorPageUrl, {
           headers: {
@@ -508,9 +537,20 @@ async function handlePreview(request) {
     }
 
     if (!html) {
+      // Last resort: try publish (public, no auth needed)
+      try {
+        const resp = await fetch(pageUrl);
+        if (resp.ok) {
+          html = await resp.text();
+          htmlSource = 'publish';
+        }
+      } catch { /* publish failed */ }
+    }
+
+    if (!html) {
       return new Response(
-        `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center;max-width:500px"><h2 style="color:#e5e7eb">Sign in required</h2><p>Author preview requires authentication. Sign in with your Adobe ID to see the latest content.</p><p style="font-size:12px;color:#64748b">${pagePath}</p></div></body></html>`,
-        { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+        `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center;max-width:500px"><h2 style="color:#e5e7eb">Page not found</h2><p>Could not load from .aem.page, author, or publish tier.</p><p style="font-size:12px;color:#64748b">${pagePath}</p></div></body></html>`,
+        { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
       );
     }
 
@@ -1186,15 +1226,16 @@ async function handleBrowserRender(request, env) {
 
   const url = new URL(request.url);
   const pageUrl = url.searchParams.get('url');
-  const token = url.searchParams.get('token');
+  let token = url.searchParams.get('token');
 
   if (!pageUrl) {
     return new Response('Missing ?url= parameter', { status: 400 });
   }
 
+  let pageHost;
   try {
-    const host = new URL(pageUrl).hostname;
-    if (!host.endsWith('.adobeaemcloud.com')) {
+    pageHost = new URL(pageUrl).hostname;
+    if (!pageHost.endsWith('.adobeaemcloud.com')) {
       return new Response('Only adobeaemcloud.com URLs allowed', { status: 403 });
     }
   } catch {
@@ -1205,10 +1246,17 @@ async function handleBrowserRender(request, env) {
     return new Response('Browser Rendering not available — upgrade to Workers Paid plan', { status: 503 });
   }
 
+  // If no user token provided, get S2S token as fallback
+  if (!token) {
+    try {
+      const s2s = await getS2SToken(env);
+      token = s2s;
+    } catch { /* no token available */ }
+  }
+
   try {
     const now = Date.now();
 
-    // Try to reconnect to a kept-alive session, otherwise launch new
     let browser;
     try {
       browser = await puppeteer.connect(env.BROWSER);
@@ -1217,37 +1265,57 @@ async function handleBrowserRender(request, env) {
     }
 
     const page = await browser.newPage();
-
-    // Set viewport
     await page.setViewport({ width: 1440, height: 900 });
 
-    // Authenticate: set IMS token as cookie on the AEM domain
     if (token) {
-      const domain = new URL(pageUrl).hostname;
+      // Strategy 1: Set login-token cookie (AEM uses IMS access_token as cookie value)
       await page.setCookie({
         name: 'login-token',
         value: token,
-        domain,
+        domain: pageHost,
         path: '/',
         secure: true,
         httpOnly: true,
         sameSite: 'None',
       });
+
+      // Strategy 2: Request interception — inject Authorization header on all requests
+      // This handles cases where cookie auth alone doesn't work
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const reqUrl = req.url();
+        if (reqUrl.includes('.adobeaemcloud.com')) {
+          req.continue({
+            headers: { ...req.headers(), Authorization: `Bearer ${token}` },
+          });
+        } else {
+          req.continue();
+        }
+      });
     }
 
-    // Navigate and wait for full render (JS decoration)
-    await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: 15000 });
+    await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: 20000 });
 
-    // Wait a bit more for late-loading EDS blocks
-    await new Promise(r => setTimeout(r, 1000));
+    // Wait for EDS block decoration scripts
+    await new Promise(r => setTimeout(r, 1500));
 
-    // Extract the fully-rendered HTML
-    const renderedHTML = await page.content();
+    // Check if we got the login page instead of actual content
+    const title = await page.title();
+    const isLoginPage = title.toLowerCase().includes('sign in') || title.toLowerCase().includes('login');
 
-    // Close page (not browser) — browser stays alive via keep_alive
+    let renderedHTML;
+    if (isLoginPage) {
+      // Auth failed — return error so client can fall back
+      await page.close();
+      browser.disconnect();
+      return new Response('Authentication failed — page returned login screen', {
+        status: 401,
+        headers: { 'Access-Control-Allow-Origin': origin, 'Content-Type': 'text/plain' },
+      });
+    }
+
+    renderedHTML = await page.content();
     await page.close();
-
-    // Disconnect (don't close) — keeps browser session for reconnect
     browser.disconnect();
 
     return new Response(renderedHTML, {
@@ -1264,10 +1332,7 @@ async function handleBrowserRender(request, env) {
   } catch (err) {
     return new Response(`Render error: ${err.message}`, {
       status: 502,
-      headers: {
-        'Access-Control-Allow-Origin': origin,
-        'Content-Type': 'text/plain',
-      },
+      headers: { 'Access-Control-Allow-Origin': origin, 'Content-Type': 'text/plain' },
     });
   }
 }

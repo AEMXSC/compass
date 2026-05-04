@@ -1718,30 +1718,30 @@ async function handleRealChat(text, file) {
         const isJcr = window.__EW_SITE_TYPE === 'aem-cs' && AEM_ORG.previewOrigin?.includes('adobeaemcloud.com');
 
         if (isJcr && previewFrame) {
-          // JCR: reload the Worker-proxied iframe (add cache-bust to force fresh content)
-          const currentSrc = previewFrame.src || '';
-          if (currentSrc.includes('/preview?')) {
-            const refreshUrl = currentSrc.replace(/_t=\d+/, `_t=${Date.now()}`);
-            previewFrame.src = refreshUrl;
-          } else {
-            // Rebuild the Worker preview URL
-            const authorHost = (window.__EW_AEM_HOST || '').replace('https://', '');
-            const publishHost = authorHost.replace('author-', 'publish-');
-            const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
-            const org = AEM_ORG.orgId || '';
-            const repo = AEM_ORG.repo || '';
-            const branch = AEM_ORG.branch || 'main';
-            const edsOrigin = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
-            const params = new URLSearchParams({
-              publish: `https://${publishHost}`,
-              author: `https://${authorHost}`,
-              path: `${path}.html`,
-              mode: 'hybrid',
-              codeBase: edsOrigin,
-              _t: Date.now().toString(),
-            });
-            previewFrame.src = `${workerBase}/preview?${params}`;
-          }
+          // JCR: re-render via Browser Rendering for fresh author content
+          const authorHost = (window.__EW_AEM_HOST || '').replace('https://', '');
+          const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+          const authorPageUrl = `https://${authorHost}${path}.html`;
+          const tk = getToken();
+          const renderUrl = `${workerBase}/render?url=${encodeURIComponent(authorPageUrl)}&token=${encodeURIComponent(tk || '')}`;
+          fetch(renderUrl, { mode: 'cors' }).then(async (resp) => {
+            if (resp.ok) {
+              const html = await resp.text();
+              previewFrame.removeAttribute('srcdoc');
+              previewFrame.srcdoc = html;
+              cachedPageHTML = html;
+            } else {
+              // Fallback: reload .aem.page
+              const org = AEM_ORG.orgId || '';
+              const repo = AEM_ORG.repo || '';
+              const branch = AEM_ORG.branch || 'main';
+              const edsOrigin = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
+              const pagePath = path.replace('/content/', '').replace(/^[^/]+\/[^/]+\//, '');
+              previewFrame.src = `${edsOrigin}/${pagePath}?_t=${Date.now()}`;
+            }
+          }).catch(() => {
+            previewFrame.src = previewFrame.src; // simple reload
+          });
           showToast(`Page ${path} updated — preview refreshing`, 'success');
         } else {
           // DA: optimistic render — show new content instantly via DA Admin API
@@ -3556,41 +3556,46 @@ async function connectCustomSite(input) {
         <div style="text-align:center"><p>Loading JCR page preview...</p><p style="font-size:12px">${jcrPath}</p></div></body></html>`;
     }
 
-    // Use the CF Worker's preview proxy: fetches HTML with S2S auth, inlines CSS,
-    // strips scripts/UE instrumentation, and adds fallback block styles.
-    // Served from Worker origin so no X-Frame-Options issue.
+    // JCR preview strategy:
+    // 1. Try /render (Browser Rendering with auth — pixel-perfect author content)
+    // 2. Fallback to .aem.page (public EDS delivery — may be stale)
+    // 3. Fallback to Worker hybrid proxy (publish content with inlined CSS)
     (async () => {
       const authorHost = parsed.aemHost;
-      const publishHost = authorHost.replace('author-', 'publish-');
-      const publishBase = `https://${publishHost}`;
+      const pagePath = jcrPath.replace('/content/', '').replace(/^[^/]+\/[^/]+\//, '');
+      const authorPageUrl = `https://${authorHost}${jcrPath}.html`;
+      const aemPageUrl = `${edsPreviewOrigin}/${pagePath}`;
       const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+      const token = getToken();
 
-      const previewParams = new URLSearchParams({
-        publish: publishBase,
-        author: `https://${authorHost}`,
-        path: `${jcrPath}.html`,
-        mode: 'hybrid',
-        codeBase: edsPreviewOrigin,
-        _t: Date.now().toString(),
-      });
-
-      const workerPreviewUrl = `${workerBase}/preview?${previewParams}`;
-      console.log(`[EW] JCR preview: loading hybrid-mode via Worker: ${workerPreviewUrl}`);
+      console.log(`[EW] JCR preview: trying /render for author content: ${authorPageUrl}`);
 
       try {
         if (previewFrame) {
-          previewFrame.removeAttribute('srcdoc');
-          previewFrame.src = workerPreviewUrl;
+          // Try Browser Rendering first (pixel-perfect author page)
+          const renderUrl = `${workerBase}/render?url=${encodeURIComponent(authorPageUrl)}&token=${encodeURIComponent(token || '')}`;
+          const renderResp = await fetch(renderUrl, { mode: 'cors' });
 
-          // Cache page HTML for AI context — fetch raw content (no inlined CSS) for speed
-          cachedPageUrl = workerPreviewUrl;
-          const rawParams = new URLSearchParams(previewParams);
-          rawParams.set('mode', 'raw');
-          fetch(`${workerBase}/preview?${rawParams}`).then((r) => r.ok ? r.text() : null).then((html) => {
+          if (renderResp.ok) {
+            const html = await renderResp.text();
+            previewFrame.removeAttribute('srcdoc');
+            previewFrame.srcdoc = html;
+            cachedPageHTML = html;
+            cachedPageUrl = authorPageUrl;
+            console.log(`[EW] JCR preview: loaded via Browser Rendering (${renderResp.headers.get('X-Render-Time')})`);
+          } else {
+            // Fallback to .aem.page
+            console.log(`[EW] JCR preview: /render failed (${renderResp.status}), falling back to .aem.page`);
+            previewFrame.removeAttribute('srcdoc');
+            previewFrame.src = aemPageUrl;
+          }
+
+          // Cache page HTML for AI context
+          cachedPageUrl = aemPageUrl;
+          fetch(`${edsPreviewOrigin}/${pagePath}.plain.html`).then((r) => r.ok ? r.text() : null).then((html) => {
             if (html) {
-              const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-              cachedPageHTML = bodyMatch ? bodyMatch[1] : html;
-              cachedPageUrl = workerPreviewUrl;
+              cachedPageHTML = html;
+              cachedPageUrl = aemPageUrl;
             }
           }).catch(() => {});
 
