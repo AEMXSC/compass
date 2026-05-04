@@ -2062,12 +2062,18 @@ async function handleRealChat(text, file) {
           setTimeout(() => window.__refreshJcrPreview?.(), 2000);
           setTimeout(() => window.__refreshJcrPreview?.(), 6000);
         } else if (previewFrame && AEM_ORG.previewOrigin) {
-          setTimeout(() => {
+          // DA site: reload from .aem.page after CDN propagation
+          const refreshPreview = () => {
+            const url = AEM_ORG.previewOrigin + path + '?_t=' + Date.now();
             previewFrame.removeAttribute('srcdoc');
-            previewFrame.src = AEM_ORG.previewOrigin + path + '?_t=' + Date.now();
+            previewFrame.src = 'about:blank';
+            setTimeout(() => { previewFrame.src = url; }, 100);
             cachedPageHTML = null;
             cachedPageHTMLTimestamp = 0;
-          }, 3000);
+          };
+          // First attempt at 3s, retry at 6s in case CDN is slow
+          setTimeout(refreshPreview, 3000);
+          setTimeout(refreshPreview, 6000);
         }
       }
 
