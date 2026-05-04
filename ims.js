@@ -30,6 +30,10 @@ export function getToken() {
   if (imsLibLoaded && window.adobeIMS) {
     const t = window.adobeIMS.getAccessToken();
     if (t?.token) return t.token;
+    // Token expired but user was signed in — trigger silent refresh
+    if (window.adobeIMS.isSignedInUser?.()) {
+      window.adobeIMS.refreshToken?.();
+    }
   }
   // Fallback to localStorage (S2S or relay token)
   return localStorage.getItem(TOKEN_KEY) || null;
@@ -198,6 +202,7 @@ export async function signIn() {
 
     localStorage.setItem(TOKEN_KEY, data.access_token);
     localStorage.setItem('ew-ims', 'true');
+    localStorage.setItem('ew-ims-method', 's2s');
     if (data.expires_at) localStorage.setItem(EXPIRY_KEY, String(data.expires_at));
 
     authMethod = 's2s';
@@ -278,6 +283,7 @@ function handleRelayMessage(event) {
   if (!token) return;
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem('ew-ims', 'true');
+  localStorage.setItem('ew-ims-method', 'user');
   if (expiresIn) localStorage.setItem(EXPIRY_KEY, String(Date.now() + Number(expiresIn)));
   authMethod = 'relay';
   console.log('[IMS] Token received via postMessage relay');
@@ -319,6 +325,7 @@ export async function loadIms() {
     if (token) {
       localStorage.setItem(TOKEN_KEY, token);
       localStorage.setItem('ew-ims', 'true');
+      localStorage.setItem('ew-ims-method', 'user');
       if (expiresIn) localStorage.setItem(EXPIRY_KEY, String(Date.now() + Number(expiresIn)));
       authMethod = 'redirect';
       history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -333,14 +340,27 @@ export async function loadIms() {
   // Try imslib first (non-blocking — user-level auth)
   const imsOk = await tryImsLib();
 
-  // If imslib didn't yield a token, try S2S auto-refresh
+  // If imslib didn't yield a token, check localStorage token validity
   if (!imsOk) {
+    const storedMethod = localStorage.getItem('ew-ims-method') || 's2s';
     const expiry = Number(localStorage.getItem(EXPIRY_KEY) || 0);
-    if (isSignedIn() && expiry && Date.now() > expiry - 300000) {
+    const tokenExpired = expiry && Date.now() > expiry - 300000;
+
+    if (isSignedIn() && !tokenExpired) {
+      // Valid token exists — restore authMethod from storage
+      authMethod = storedMethod === 'user' ? 'redirect' : 's2s';
+      console.log(`[IMS] Restored token: method=${authMethod}`);
+    } else if (isSignedIn() && tokenExpired && storedMethod === 's2s') {
+      // S2S expired — safe to refresh
       console.log('[IMS] S2S token expired — refreshing...');
       await signIn();
+    } else if (isSignedIn() && tokenExpired && storedMethod === 'user') {
+      // User token expired — don't overwrite with S2S, prompt re-sign-in
+      console.log('[IMS] User token expired — sign in again for author access');
+      // Keep expired token for profile display, but flag it
+      authMethod = 'expired';
     } else if (!isSignedIn()) {
-      // Auto-sign-in with S2S for seamless demo experience
+      // No token at all — auto-sign-in with S2S for basic functionality
       console.log('[IMS] No token — auto-signing in via S2S...');
       await signIn();
     }
