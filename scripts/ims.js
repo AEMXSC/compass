@@ -77,52 +77,23 @@ export function getUserOrgs() { return userOrgs; }
 /* ─── Public API: Sign in (imslib redirect — no popup) ─── */
 
 export async function signIn() {
-  // Worker popup flow: opens IMS login via Worker callback (aem-extension-builder client)
-  // Worker exchanges code for token server-side, redirects popup back with token in hash
-  const returnTo = encodeURIComponent(window.location.origin + '/');
-  const loginUrl = `${IMS_WORKER}/ims/login?return_to=${returnTo}`;
-  const w = 500, h = 700;
-  const left = Math.round((screen.width - w) / 2);
-  const top = Math.round((screen.height - h) / 2);
-  const popup = window.open(loginUrl, 'adobeSignIn', `width=${w},height=${h},left=${left},top=${top}`);
-
-  if (!popup) {
-    console.warn('[IMS] Popup blocked');
+  // S2S token from Worker — used for AEM author preview and MCP calls
+  // No user OAuth needed since S2S client_id is allowlisted in AEM Config Pipeline
+  try {
+    const resp = await fetch(`${IMS_WORKER}/auth`, { credentials: 'omit' });
+    if (!resp.ok) throw new Error(`Auth failed: ${resp.status}`);
+    const data = await resp.json();
+    if (!data.access_token) throw new Error('No token received');
+    localStorage.setItem(STORAGE_KEYS.TOKEN, data.access_token);
+    localStorage.setItem(STORAGE_KEYS.METHOD, 's2s');
+    if (data.expires_at) localStorage.setItem(STORAGE_KEYS.EXPIRY, String(data.expires_at));
+    authMethod = 's2s';
+    dispatchAuthEvent(true);
+    return true;
+  } catch (e) {
+    console.warn('[IMS] S2S sign-in failed:', e.message);
     return false;
   }
-
-  return new Promise((resolve) => {
-    const checkClosed = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(checkClosed);
-        resolve(!!getToken());
-      }
-    }, 500);
-
-    // Listen for token via postMessage from popup
-    const onMessage = (event) => {
-      if (!event.data || event.data.type !== 'ew-ims-relay') return;
-      const { token, expires_in: expiresIn } = event.data;
-      if (!token) return;
-      window.removeEventListener('message', onMessage);
-      clearInterval(checkClosed);
-      localStorage.setItem(STORAGE_KEYS.TOKEN, token);
-      localStorage.setItem(STORAGE_KEYS.METHOD, 'user');
-      if (expiresIn) localStorage.setItem(STORAGE_KEYS.EXPIRY, String(Date.now() + Number(expiresIn) * 1000));
-      authMethod = 'user';
-      syncImsProfile();
-      dispatchAuthEvent(true);
-      resolve(true);
-    };
-    window.addEventListener('message', onMessage);
-
-    // Timeout after 3 minutes
-    setTimeout(() => {
-      window.removeEventListener('message', onMessage);
-      clearInterval(checkClosed);
-      resolve(!!getToken());
-    }, 180000);
-  });
 }
 
 /* ─── Public API: Sign out ─── */
