@@ -30,12 +30,21 @@ export function getToken() {
   if (imsLibLoaded && window.adobeIMS) {
     const t = window.adobeIMS.getAccessToken();
     if (t?.token) return t.token;
-    // Token expired but user was signed in — trigger silent refresh
     if (window.adobeIMS.isSignedInUser?.()) {
       window.adobeIMS.refreshToken?.();
     }
   }
-  // Fallback to localStorage (S2S or relay token)
+  // Check imslib's direct localStorage entry (works even if imsLibLoaded is false due to tracking prevention)
+  try {
+    const imsEntry = localStorage.getItem('adobeid_ims_access_token');
+    if (imsEntry) {
+      const parsed = JSON.parse(imsEntry);
+      if (parsed?.tokenValue && parsed?.expire && Date.now() < parsed.expire) {
+        return parsed.tokenValue;
+      }
+    }
+  } catch { /* malformed entry */ }
+  // Fallback to stored token (S2S or relay)
   return localStorage.getItem(TOKEN_KEY) || null;
 }
 
