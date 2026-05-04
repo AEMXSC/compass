@@ -1299,16 +1299,20 @@ async function handleBrowserRender(request, env) {
     // Wait for EDS block decoration scripts
     await new Promise(r => setTimeout(r, 1500));
 
-    // Check if we got the login page instead of actual content
+    // Check if we got an auth error or login page instead of actual content
+    const bodyText = await page.evaluate(() => document.body?.innerText || '');
+    const isAuthError = bodyText.includes('Client ID not allowlisted')
+      || bodyText.includes('unauthorized')
+      || bodyText.includes('Forbidden');
     const title = await page.title();
     const isLoginPage = title.toLowerCase().includes('sign in') || title.toLowerCase().includes('login');
 
     let renderedHTML;
-    if (isLoginPage) {
-      // Auth failed — return error so client can fall back
+    if (isAuthError || isLoginPage) {
       await page.close();
       browser.disconnect();
-      return new Response('Authentication failed — page returned login screen', {
+      const detail = isAuthError ? bodyText.slice(0, 200) : 'Login page returned';
+      return new Response(`Authentication failed: ${detail}`, {
         status: 401,
         headers: { 'Access-Control-Allow-Origin': origin, 'Content-Type': 'text/plain' },
       });
