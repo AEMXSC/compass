@@ -5286,20 +5286,21 @@ async function enableDesignMode() {
   // Fetch page HTML — try multiple sources, first one wins
   let html = cachedPageHTML;
 
-  // 1. DA/EDS: .plain.html (most reliable for DA sites)
+  // 1. DA/EDS: .plain.html (CORS-safe, returns raw block content)
   if (!html && base) {
     try {
-      const plainUrl = base + (path === '/' ? '/index' : path) + '.plain.html';
-      const resp = await fetch(plainUrl, { cache: 'no-store' });
+      const pagePath = path === '/' ? '/index' : path;
+      const plainUrl = base + pagePath + '.plain.html';
+      const resp = await fetch(plainUrl, { mode: 'cors', cache: 'no-store' });
       if (resp.ok) html = await resp.text();
-    } catch { /* */ }
+    } catch { /* CORS or network failure */ }
   }
 
-  // 2. JCR/Worker preview: fetch raw mode
-  if (!html && previewFrame.src?.includes('/preview?')) {
+  // 2. Full page fetch (some EDS sites allow CORS on the main URL too)
+  if (!html && base) {
     try {
-      const rawUrl = previewFrame.src.replace(/mode=hybrid/, 'mode=raw').replace(/_t=\d+/, `_t=${Date.now()}`);
-      const resp = await fetch(rawUrl);
+      const pagePath = path === '/' ? '/' : path;
+      const resp = await fetch(base + pagePath, { mode: 'cors', cache: 'no-store' });
       if (resp.ok) {
         const full = await resp.text();
         const bodyMatch = full.match(/<body[^>]*>([\s\S]*)<\/body>/i);
@@ -5308,7 +5309,7 @@ async function enableDesignMode() {
     } catch { /* */ }
   }
 
-  // 3. Try iframe DOM (same-origin check)
+  // 3. Try iframe DOM (same-origin only)
   if (!html) {
     try {
       const doc = previewFrame.contentDocument || previewFrame.contentWindow?.document;
