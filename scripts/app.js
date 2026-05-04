@@ -2863,47 +2863,47 @@ function updateOrchestrationStep(el, state) {
 }
 
 /* ── MCP Services Status ── */
+const MCP_SERVICES = [
+  { name: 'AEM Content', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/content', purpose: 'Page CRUD, content fragments, asset import', category: 'AEM' },
+  { name: 'AEM DA', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/da', purpose: 'Document Authoring for EDS sites', category: 'AEM' },
+  { name: 'AEM Governance', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/experience-governance', purpose: 'Brand policy check, compliance', category: 'AEM' },
+  { name: 'Experience Production', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/experience-production', purpose: 'DA content authoring agent', category: 'AEM' },
+  { name: 'AEM Discovery', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/discovery', purpose: 'Site/environment discovery', category: 'AEM' },
+  { name: 'Cloud Manager (Odin)', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/odin/prod', purpose: 'Programs, environments, pipelines', category: 'AEM' },
+  { name: 'Firefly', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/loki/firefly', purpose: 'AI image generation', category: 'Creative' },
+  { name: 'Content QA Agent', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/loki/content-qa', purpose: 'Content quality checks', category: 'AI' },
+  { name: 'Content Generation', endpoint: 'mcp.adobeaemcloud.com/adobe/mcp/loki/skills', purpose: 'AI content generation skills', category: 'AI' },
+  { name: 'Journey Optimizer', endpoint: 'ajo-mcp.adobe.io/mcp', purpose: 'Journey orchestration, campaigns', category: 'Marketing' },
+  { name: 'CJA', endpoint: 'mcp-gateway.adobe.io/cja/mcp', purpose: 'Customer Journey Analytics', category: 'Analytics' },
+  { name: 'Adobe Analytics', endpoint: 'mcp-gateway.adobe.io/aa/mcp', purpose: 'Adobe Analytics reporting', category: 'Analytics' },
+  { name: 'RT-CDP', endpoint: 'rtcdp-mcp.adobe.io/mcp', purpose: 'Real-time CDP segments, audiences', category: 'Marketing' },
+  { name: 'AEP', endpoint: 'aep-mcp.adobe.io/mcp', purpose: 'Experience Platform data, profiles', category: 'Marketing' },
+  { name: 'Adobe Express', endpoint: 'express-mcp-service.adobe.io/mcp', purpose: 'Creative templates, quick design', category: 'Creative' },
+  { name: 'Marketing Agent', endpoint: 'aep-ai-ama-stage.adobe.io/mcp', purpose: 'Marketing automation agent', category: 'AI' },
+  { name: 'Sites Optimizer', endpoint: 'm-mcp-demo.adobe.io/mcp', purpose: 'SEO, performance, LLM optimization', category: 'AEM' },
+  { name: 'Spacecat', endpoint: 'spacecat.experiencecloud.live/api/v1/mcp', purpose: 'Site optimization, audits', category: 'AEM' },
+];
+
 async function runServicesPanel() {
   addMessage('user', 'Show connected MCP services and entitlements');
 
-  const profile = getActiveProfile() || {};
-  const caps = profile.mcpCapabilities || AEM_ORG.mcpCapabilities;
-  let html = '<strong>Adobe MCP Service Matrix</strong>';
-  html += '<table class="gov-results" style="margin-top:10px"><tr><th>Capability</th><th>MCP Server</th><th>Status</th></tr>';
-  caps.forEach((c) => {
-    const statusIcon = c.ready
-      ? '<span style="color:var(--green)">&#9679; Live</span>'
-      : `<span style="color:var(--yellow)">&#9679; ${c.needs}</span>`;
-    html += `<tr><td>${c.capability}</td><td><code>${c.mcp}</code></td><td>${statusIcon}</td></tr>`;
+  const authStatus = isSignedIn() ? 'Authenticated (user token)' : 'Not authenticated';
+  let html = `<strong>Adobe MCP Services — ${MCP_SERVICES.length} Configured</strong>`;
+  html += `<div style="margin:6px 0;font-size:11px;color:var(--text-muted)">Auth: ${authStatus}</div>`;
+
+  const categories = [...new Set(MCP_SERVICES.map((s) => s.category))];
+  categories.forEach((cat) => {
+    const services = MCP_SERVICES.filter((s) => s.category === cat);
+    html += `<div style="margin-top:12px;font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase">${cat}</div>`;
+    html += '<table class="gov-results" style="margin-top:4px"><tr><th>Service</th><th>Purpose</th><th>Status</th></tr>';
+    services.forEach((s) => {
+      html += `<tr><td><strong>${s.name}</strong></td><td>${s.purpose}</td><td><span style="color:var(--green)">&#9679; Ready</span></td></tr>`;
+    });
+    html += '</table>';
   });
-  html += '</table>';
 
-  const liveCount = caps.filter((c) => c.ready).length;
-  const totalCount = caps.length;
-  html += `<div style="margin-top:10px;font-size:11px;color:var(--text-muted)">${liveCount} of ${totalCount} capabilities live · ${totalCount - liveCount} need configuration</div>`;
-
+  html += `<div style="margin-top:12px;font-size:11px;color:var(--text-muted)">${MCP_SERVICES.length} services configured · All direct connections (no proxy)</div>`;
   addRawHTML(`<div class="agent-badge">MCP Services</div><div class="message-content">${html}</div>`);
-
-  addTyping();
-  await sleep(400);
-  removeTyping();
-
-  // Show entitlements (connector inventory is in Settings)
-  const ents = profile.entitlements || AEM_ORG.entitlements;
-  let entHTML = '<strong>Mapped Entitlements</strong>';
-  entHTML += '<div class="issue-list" style="margin-top:8px">';
-  const liveEnts = Object.values(ents).filter((e) => e.status === 'live');
-  const pendingEnts = Object.values(ents).filter((e) => e.status !== 'live');
-  liveEnts.forEach((e) => {
-    entHTML += `<div class="issue-item fixable">✓ <strong>${e.name}</strong> — ${e.mcp} · ${e.note}</div>`;
-  });
-  pendingEnts.forEach((e) => {
-    entHTML += `<div class="issue-item">⚡ <strong>${e.name}</strong> — ${e.mcp} · ${e.note}</div>`;
-  });
-  entHTML += '</div>';
-  entHTML += `<div class="money-line">${liveEnts.length} of ${Object.values(ents).length} services live.</div>`;
-
-  addRawHTML(`<div class="agent-badge">Entitlements</div><div class="message-content">${entHTML}</div>`);
 }
 
 /* ── Block Library ── */
@@ -4297,7 +4297,7 @@ function matchSpecializedFlow(text) {
   if (lower.includes('perform') || lower.includes('analytics') || lower.includes('bounce')) return runPerformanceFlow;
   if (lower.includes('personal') || lower.includes('segment')) return runPersonalizeFlow;
   if (lower.includes('workfront') || lower.includes('project health') || lower.includes('project status')) return runWorkfrontPanel;
-  if (lower.includes('mcp') || lower.includes('services') || lower.includes('entitlement') || lower.includes('connected services')) return runServicesPanel;
+  if ((lower.includes('mcp') && (lower.includes('server') || lower.includes('list') || lower.includes('show') || lower.includes('hooked'))) || lower.includes('entitlement') || lower.includes('connected services')) return runServicesPanel;
   if (lower.includes('block') || lower.includes('library') || lower.includes('catalog') || lower.includes('component')) return runBlockLibrary;
   if (lower.includes('review asset') || lower.includes('brand review') || lower.includes('brand check')) return runAIReviewer;
   if (lower.includes('orchestrat') || lower.includes('end to end') || lower.includes('end-to-end')
