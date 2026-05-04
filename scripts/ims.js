@@ -16,8 +16,9 @@
 /* ─── Constants ─── */
 
 const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
-const IMS_CLIENT_ID = 'darkalley';
-const IMS_SCOPE = 'AdobeID,openid,gnav,read_organizations,additional_info.projectedProductContext,account_cluster.read';
+const IMS_CLIENT_ID = 'aem-extension-builder';
+const IMS_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext';
+const IMS_REDIRECT_URI = 'https://eds-migration--compass--aemxsc.aem.page/';
 const IMS_WORKER = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
 const IMSLIB_INIT_TIMEOUT_MS = 10000;
 
@@ -39,23 +40,10 @@ let userOrgs = [];       // [{ id, name, type }, ...]
 /* ─── Public API: Token access ─── */
 
 export function getToken() {
-  // Prefer imslib's managed token (auto-refreshed)
   if (imsReady && window.adobeIMS) {
     const t = window.adobeIMS.getAccessToken();
     if (t?.token) return t.token;
   }
-  // Check imslib's localStorage directly (works even if tracking prevention blocks imslib init)
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith('adobeid_ims_access_token') && key.includes(IMS_CLIENT_ID)) {
-        const parsed = JSON.parse(localStorage.getItem(key));
-        if (parsed?.tokenValue && parsed?.expire && Date.now() < parsed.expire) {
-          return parsed.tokenValue;
-        }
-      }
-    }
-  } catch { /* */ }
   return localStorage.getItem(STORAGE_KEYS.TOKEN) || null;
 }
 
@@ -77,23 +65,12 @@ export function getUserOrgs() { return userOrgs; }
 /* ─── Public API: Sign in (imslib redirect — no popup) ─── */
 
 export async function signIn() {
-  // S2S token from Worker — used for AEM author preview and MCP calls
-  // No user OAuth needed since S2S client_id is allowlisted in AEM Config Pipeline
-  try {
-    const resp = await fetch(`${IMS_WORKER}/auth`, { credentials: 'omit' });
-    if (!resp.ok) throw new Error(`Auth failed: ${resp.status}`);
-    const data = await resp.json();
-    if (!data.access_token) throw new Error('No token received');
-    localStorage.setItem(STORAGE_KEYS.TOKEN, data.access_token);
-    localStorage.setItem(STORAGE_KEYS.METHOD, 's2s');
-    if (data.expires_at) localStorage.setItem(STORAGE_KEYS.EXPIRY, String(data.expires_at));
-    authMethod = 's2s';
-    dispatchAuthEvent(true);
+  if (imsReady && window.adobeIMS) {
+    window.adobeIMS.signIn();
     return true;
-  } catch (e) {
-    console.warn('[IMS] S2S sign-in failed:', e.message);
-    return false;
   }
+  console.warn('[IMS] imslib not ready — cannot sign in');
+  return false;
 }
 
 /* ─── Public API: Sign out ─── */
@@ -186,19 +163,14 @@ export async function loadIms() {
     }
   }
 
-  // Clean up stale tokens from wrong clients (aem-extension-builder → darkalley migration)
+  // Clean up stale darkalley tokens (we now use aem-extension-builder)
   try {
     const keysToRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && key.includes('aem-extension-builder')) keysToRemove.push(key);
+      if (key && key.includes('darkalley')) keysToRemove.push(key);
     }
     keysToRemove.forEach((k) => localStorage.removeItem(k));
-    for (let i = 0; i < sessionStorage.length; i++) {
-      const key = sessionStorage.key(i);
-      if (key && key.includes('aem-extension-builder')) sessionStorage.removeItem(key);
-    }
-    if (keysToRemove.length > 0) console.log(`[IMS] Cleared ${keysToRemove.length} stale aem-extension-builder entries`);
   } catch { /* */ }
 
   return new Promise((resolve) => {
@@ -208,11 +180,11 @@ export async function loadIms() {
       resolve({ anonymous: true, method: 'none' });
     }, IMSLIB_INIT_TIMEOUT_MS);
 
-    // Configure imslib — used for token validation/refresh only (not for sign-in)
-    // Sign-in uses the Worker popup flow (aem-extension-builder client with registered callback)
+    // Configure imslib — redirect flow (same as AEMcoder)
     window.adobeid = {
       client_id: IMS_CLIENT_ID,
       scope: IMS_SCOPE,
+      redirect_uri: IMS_REDIRECT_URI,
       locale: document.documentElement.lang?.replace('-', '_') || 'en_US',
       autoValidateToken: true,
       environment: 'prod',
