@@ -16,8 +16,8 @@
 /* ─── Constants ─── */
 
 const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
-const IMS_CLIENT_ID = 'aem-extension-builder';
-const IMS_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext';
+const IMS_CLIENT_ID = 'darkalley';
+const IMS_SCOPE = 'AdobeID,openid,gnav,read_organizations,additional_info.projectedProductContext,account_cluster.read';
 const IMSLIB_INIT_TIMEOUT_MS = 10000;
 
 const STORAGE_KEYS = Object.freeze({
@@ -43,6 +43,18 @@ export function getToken() {
     const t = window.adobeIMS.getAccessToken();
     if (t?.token) return t.token;
   }
+  // Check imslib's localStorage directly (works even if tracking prevention blocks imslib init)
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('adobeid_ims_access_token') && key.includes(IMS_CLIENT_ID)) {
+        const parsed = JSON.parse(localStorage.getItem(key));
+        if (parsed?.tokenValue && parsed?.expire && Date.now() < parsed.expire) {
+          return parsed.tokenValue;
+        }
+      }
+    }
+  } catch { /* */ }
   return localStorage.getItem(STORAGE_KEYS.TOKEN) || null;
 }
 
@@ -140,10 +152,25 @@ export async function fetchWithToken(url, opts = {}) {
 /* ─── Public API: Init ─── */
 
 export async function loadIms() {
+  // Clean up stale tokens from wrong clients (aem-extension-builder → darkalley migration)
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.includes('aem-extension-builder')) keysToRemove.push(key);
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key && key.includes('aem-extension-builder')) sessionStorage.removeItem(key);
+    }
+    if (keysToRemove.length > 0) console.log(`[IMS] Cleared ${keysToRemove.length} stale aem-extension-builder entries`);
+  } catch { /* */ }
+
   return new Promise((resolve) => {
     const initTimeout = setTimeout(() => {
       console.warn('[IMS] imslib init timeout');
-      imsReady = true; // Mark ready even on timeout so signIn can be attempted
+      imsReady = true;
       resolve({ anonymous: true, method: 'none' });
     }, IMSLIB_INIT_TIMEOUT_MS);
 
