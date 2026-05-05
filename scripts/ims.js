@@ -44,6 +44,18 @@ export function getToken() {
     const t = window.adobeIMS.getAccessToken();
     if (t?.token) return t.token;
   }
+  // Fallback: read imslib's own storage directly (works even if imsReady timing issue)
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('adobeid_ims_access_token') && key.includes(IMS_CLIENT_ID)) {
+        const parsed = JSON.parse(localStorage.getItem(key));
+        if (parsed?.tokenValue && parsed?.expire && Date.now() < parsed.expire) {
+          return parsed.tokenValue;
+        }
+      }
+    }
+  } catch { /* */ }
   return localStorage.getItem(STORAGE_KEYS.TOKEN) || null;
 }
 
@@ -69,8 +81,15 @@ export async function signIn() {
     window.adobeIMS.signIn();
     return true;
   }
-  console.warn('[IMS] imslib not ready — cannot sign in');
-  return false;
+  // Fallback: manual redirect to IMS (when imslib blocked by tracking prevention)
+  const params = new URLSearchParams({
+    client_id: IMS_CLIENT_ID,
+    scope: IMS_SCOPE,
+    response_type: 'token',
+    redirect_uri: IMS_REDIRECT_URI,
+  });
+  window.location.href = `https://ims-na1.adobelogin.com/ims/authorize/v2?${params}`;
+  return true;
 }
 
 /* ─── Public API: Sign out ─── */
