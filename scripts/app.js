@@ -4041,11 +4041,8 @@ async function connectCustomSite(input) {
       fetch(renderUrl, { mode: 'cors' }).then(async (resp) => {
         if (resp.ok) {
           let html = await resp.text();
-          // Inject base href so relative CSS/JS/images resolve from author domain
-          const authorOrigin = `https://${parsed.aemHost}`;
-          if (!html.includes('<base')) {
-            html = html.replace(/<head([^>]*)>/, `<head$1><base href="${authorOrigin}/">`);
-          }
+          // Strip scripts — preview is visual only, JS execution can freeze the parent page
+          html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
           previewFrame.srcdoc = html;
           cachedPageHTML = html;
           cachedPageUrl = authorPageUrl;
