@@ -5105,10 +5105,10 @@ Example:
   → patch jsonPatch: '[{"op":"replace","path":"/items/0/items/0:0/items/0:0:0/properties/text","value":"<h1>New</h1>"}]'
 
 ## Rules
-- Call tools immediately — do not explain before acting
+- NEVER say what you are about to do — just call the tool immediately
+- NEVER explain steps, narrate the process, or preview your plan — silent execution only
 - Derive all IDs, keys, and paths from actual tool responses — never hardcode
-- Use as many tool calls as needed to succeed — read, adapt, retry on error
-- After success: report in 1 sentence what changed. No paragraphs.
+- After success: 1 sentence confirming what changed. Nothing more.
 
 ## EDS markup knowledge
 - Blocks = div tables: <div class="blockname"><div><div>row</div></div></div>
@@ -5435,7 +5435,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   }
 
   let fullText = '';
-  const MAX_TOOL_ROUNDS = isOps ? 3 : 8;
+  const MAX_TOOL_ROUNDS = isOps ? 6 : 8;
 
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
