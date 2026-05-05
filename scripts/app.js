@@ -4041,9 +4041,13 @@ async function connectCustomSite(input) {
       fetch(renderUrl, { mode: 'cors' }).then(async (resp) => {
         if (resp.ok) {
           let html = await resp.text();
-          // Strip scripts — preview is visual only, JS execution can freeze the parent page
+          // Strip scripts — preview is visual only
           html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-          previewFrame.srcdoc = html;
+          // Use blob URL instead of srcdoc to avoid freezing main thread on large HTML
+          const blob = new Blob([html], { type: 'text/html' });
+          const blobUrl = URL.createObjectURL(blob);
+          previewFrame.removeAttribute('srcdoc');
+          previewFrame.src = blobUrl;
           cachedPageHTML = html;
           cachedPageUrl = authorPageUrl;
           console.log(`[Preview] Author page loaded (${resp.headers.get('X-Render-Time') || '?'})`);
