@@ -979,6 +979,7 @@ function getPageContext() {
     org: AEM_ORG,
     siteType: window.__EW_SITE_TYPE || 'unknown',
     aemHost: window.__EW_AEM_HOST || null,
+    authorUrl: window.__EW_AEM_HOST || null,
     view: currentPreviewView || 'preview',
     authState: {
       ims: typeof isSignedIn === 'function' ? isSignedIn() : false,

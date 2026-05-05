@@ -177,6 +177,15 @@ export function createMcpClient(endpointPath, label = 'MCP') {
 
   function getToolSchemasFn() { return toolSchemas; }
 
+  function getClaudeTools() {
+    if (!toolSchemas) return [];
+    return Object.values(toolSchemas).map((t) => ({
+      name: t.name,
+      description: t.description || '',
+      input_schema: t.inputSchema || { type: 'object', properties: {} },
+    }));
+  }
+
   function resetSession() {
     sessionId = null;
     toolSchemas = null;
@@ -192,6 +201,7 @@ export function createMcpClient(endpointPath, label = 'MCP') {
     initSession,
     callTool,
     getToolSchemas: getToolSchemasFn,
+    getClaudeTools,
     resetSession,
     isAvailable,
     get endpoint() { return endpoint; },

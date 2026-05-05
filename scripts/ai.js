@@ -14,6 +14,7 @@ import * as da from './da-client.js';
 import { isSignedIn, getToken, signIn } from './ims.js';
 import { hasGitHubToken, readContent as ghReadContent, writeContent as ghWriteContent, triggerPreview as ghTriggerPreview, getRepoInfo, listBranches as ghListBranches } from './github-content.js';
 import * as aemContent from './aem-content-mcp-client.js';
+import { contentMcp } from './mcp-client.js';
 import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
@@ -5087,12 +5088,11 @@ const OPS_BRAIN = `You are Compass in operations mode. You execute content opera
 - Use edit_page_content with {html} for page creation/full rewrites
 
 ### JCR/AEM CS sites (Type: aem-cs):
-- EXACTLY 2 tool calls. No more. No discovery. No lookup.
-- Call 1: get_page_content → returns JSON structure with ETag
-- Call 2: patch_aem_page_content with {page_path, etag, updates} using exact paths from Call 1
-- NEVER use edit_page_content for JCR — it uses DA APIs
-- NEVER call aem_lookup_api, aem_read, aem_write — use ONLY get_page_content and patch_aem_page_content
-- Do NOT output long explanations. Just call the tools and report the result in 1 sentence.
+- EXACTLY 2 tool calls. No more.
+- Call 1: get-aem-page-content with {authorUrl, pageId} → returns page structure + etag
+- Call 2: patch-aem-page-content with {authorUrl, pageId, etag, jsonPatch} → applies the edit
+- The jsonPatch is a JSON array of RFC 6902 operations, e.g.: [{"op":"replace","path":"/items/0/items/0/properties/text","value":"<h1>New headline</h1>"}]
+- Do NOT output explanations. Call tools immediately, report result in 1 sentence.
 
 ### Both:
 - After ANY write: preview refreshes automatically
@@ -5121,6 +5121,7 @@ function buildSystemParts(context = {}, { fast = false } = {}) {
     if (context.customerName) siteContext += `Customer: ${context.customerName}. `;
     if (context.pagePath) siteContext += `Page: ${context.pagePath}. `;
     if (context.siteType) siteContext += `Type: ${context.siteType}. `;
+    if (context.authorUrl) siteContext += `authorUrl: ${context.authorUrl}. `;
     if (siteContext) blocks.push({ type: 'text', text: siteContext.trim() });
     if (context.pageHTML) {
       blocks.push({ type: 'text', text: `Current page HTML:\n${context.pageHTML.slice(0, 8000)}` });
@@ -5309,7 +5310,13 @@ export async function chat(userMessage, context = {}, _depth = 0) {
     const toolResults = [];
     for (const block of data.content) {
       if (block.type === 'tool_use') {
-        const result = await executeTool(block.name, block.input);
+        let result;
+        if (block.name.includes('-') && contentMcp.getToolSchemas()?.[block.name]) {
+          const mcpResult = await contentMcp.callTool(block.name, block.input);
+          result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
+        } else {
+          result = await executeTool(block.name, block.input);
+        }
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
       }
     }
@@ -5414,12 +5421,22 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     messages = messages.slice(-7);
   }
 
-  // Operations brain: only content editing tools (fast tool parsing)
-  // Thinking brain: full tool set
-  const OPS_TOOLS = ['edit_page_content', 'preview_page', 'patch_aem_page_content', 'get_page_content', 'publish_page'];
-  const tools = isOps
-    ? getToolsForPrompt(promptText).filter(t => OPS_TOOLS.includes(t.name))
-    : getToolsForPrompt(promptText);
+  // Operations brain: use MCP-discovered tools for JCR (same as Claude.ai)
+  // For DA: use Compass's hardcoded edit_page_content tool
+  const siteType = window.__EW_SITE_TYPE || 'unknown';
+  let tools;
+  if (isOps && siteType === 'aem-cs') {
+    // JCR OPS: use native MCP tools (get-aem-page-content, patch-aem-page-content)
+    const mcpTools = contentMcp.getClaudeTools();
+    const JCR_OPS_MCP = ['get-aem-page-content', 'patch-aem-page-content'];
+    tools = mcpTools.filter(t => JCR_OPS_MCP.includes(t.name));
+  } else if (isOps) {
+    // DA OPS: use Compass's tools
+    const OPS_TOOLS = ['edit_page_content', 'preview_page', 'publish_page'];
+    tools = getToolsForPrompt(promptText).filter(t => OPS_TOOLS.includes(t.name));
+  } else {
+    tools = getToolsForPrompt(promptText);
+  }
 
   let fullText = '';
   const MAX_TOOL_ROUNDS = isOps ? 3 : 8;
@@ -5477,11 +5494,19 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     messages.push({ role: 'assistant', content: contentBlocks });
 
     // Execute all tools in parallel (saves 500-3000ms on multi-tool turns)
-    // Use allSettled so one failing tool doesn't kill the others
+    // MCP tools (hyphenated names like get-aem-page-content) route to MCP session
+    // Compass tools (underscored names like edit_page_content) route to executeTool
     const settled = await Promise.allSettled(toolUseBlocks.map(async (toolBlock) => {
       if (abortCtrl.signal.aborted) throw new Error('Aborted');
       if (onToolCall) onToolCall(toolBlock.name, toolBlock.input);
-      const result = await executeTool(toolBlock.name, toolBlock.input);
+      let result;
+      if (toolBlock.name.includes('-') && contentMcp.getToolSchemas()?.[toolBlock.name]) {
+        // MCP tool — route directly to Content MCP session
+        const mcpResult = await contentMcp.callTool(toolBlock.name, toolBlock.input);
+        result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
+      } else {
+        result = await executeTool(toolBlock.name, toolBlock.input);
+      }
       if (onToolResult) onToolResult(toolBlock.name, result);
       return { type: 'tool_result', tool_use_id: toolBlock.id, content: result };
     }));
