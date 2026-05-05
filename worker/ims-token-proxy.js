@@ -114,7 +114,7 @@ async function route(request, env) {
     return handleBrowserRender(request, env);
   }
   if (url.pathname === '/mcp' && request.method === 'POST') {
-    return handleMcpProxy(request);
+    return handleMcpProxy(request, env);
   }
   if (url.pathname === '/asset' && request.method === 'GET') {
     return handleAssetProxy(request);
@@ -336,7 +336,7 @@ async function handleTokenProxy(request) {
 /* CORS on mcp.adobeaemcloud.com doesn't expose mcp-session-id to browsers. */
 /* This proxy forwards MCP requests and returns the session ID in an exposed header. */
 
-async function handleMcpProxy(request) {
+async function handleMcpProxy(request, env) {
   const origin = request.headers.get('Origin') || '';
   // Only allow explicitly listed origins (no wildcards — prevents abuse from arbitrary *.aem.page subdomains)
   if (!ALLOWED_ORIGINS.includes(origin)) {
