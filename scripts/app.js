@@ -22,7 +22,7 @@ import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCust
 import { detectSiteMention, resolveSite } from './known-sites.js';
 import { getGitHubToken, setGitHubToken, hasGitHubToken, getRepoInfo, listBranches, getRepoTree } from './github-content.js';
 import { detectAndCacheSiteType, getSiteType } from './site-detect.js';
-import { aemUnifiedMcp, prewarmSessions } from './mcp-client.js';
+import { aemUnifiedMcp, contentMcp, prewarmSessions } from './mcp-client.js';
 
 /* ── Dynamic Org Configuration (from customer profile) ── */
 let AEM_ORG = getOrgConfig();
@@ -172,6 +172,10 @@ function showMcpOAuthPrompt() {
     toast.querySelector('#mcpOAuthBtn').disabled = true;
     const token = await signInMcpOAuth();
     if (token) {
+      // Reset content MCP session so it reinitializes with the OAuth token
+      // and picks up write tools (patch_aem_page_content etc.)
+      contentMcp.resetSession();
+      await contentMcp.initSession();
       showToast('AEM Content connected — write access enabled', 'success');
     } else {
       showToast('MCP OAuth cancelled or failed', 'warn');
@@ -6605,8 +6609,9 @@ async function init() {
       localStorage.setItem('ew-mcp-token', mcpToken);
       if (mcpRefresh) localStorage.setItem('ew-mcp-refresh', mcpRefresh);
       console.log('[MCP-OAuth] Write token received via URL relay');
-      // Clean up hash without triggering a reload
       history.replaceState(null, '', window.location.pathname + window.location.search);
+      // Reset so content MCP reinitializes with OAuth token on next call
+      contentMcp.resetSession();
       showToast('AEM Content connected — write access enabled', 'success');
     }
   }
