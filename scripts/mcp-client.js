@@ -273,14 +273,64 @@ export const sitesOptimizerMcp = createMcpClient('https://m-mcp-demo.adobe.io/mc
 export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
 
 /**
- * Pre-warm critical MCP sessions in parallel on site connect.
- * Each session takes ~350ms for handshake. Running 4 in parallel = ~400ms total.
- * Subsequent tool calls skip the handshake entirely.
+ * MCP Tool Registry — maps tool names to their client instance.
+ * Populated lazily when sessions initialize. Used by ai.js to route tool calls.
+ */
+const mcpToolRegistry = {};
+
+export function registerMcpTools(client) {
+  const schemas = client.getToolSchemas();
+  if (schemas) {
+    for (const name of Object.keys(schemas)) {
+      mcpToolRegistry[name] = client;
+    }
+  }
+}
+
+export function getMcpRegistry() { return mcpToolRegistry; }
+
+export function getAllMcpClaudeTools() {
+  const tools = [];
+  for (const [name, client] of Object.entries(mcpToolRegistry)) {
+    const schemas = client.getToolSchemas();
+    if (schemas?.[name]) {
+      tools.push({
+        name,
+        description: schemas[name].description || '',
+        input_schema: schemas[name].inputSchema || { type: 'object', properties: {} },
+      });
+    }
+  }
+  return tools;
+}
+
+// All MCP clients available for session init
+export const ALL_MCP_CLIENTS = [
+  contentMcp, daMcp, governanceMcp, discoveryMcp, odinMcp,
+  experienceProductionMcp, fireflyMcp, contentQaMcp, contentGenMcp,
+  ajoMcp, cjaMcp, aaMcp, expressMcp, rtcdpMcp, aepMcp,
+  sitesOptimizerMcp, spacecatMcp,
+];
+
+/**
+ * Initialize MCP sessions and register their tools in the registry.
+ * Critical sessions (content, governance) init first; others lazy.
  */
 export async function prewarmSessions() {
-  const critical = [aemUnifiedMcp, discoveryMcp, governanceMcp, contentMcp];
-  const results = await Promise.allSettled(critical.map((c) => c.initSession()));
+  const critical = [contentMcp, governanceMcp, discoveryMcp];
+  const results = await Promise.allSettled(critical.map(async (c) => {
+    await c.initSession();
+    registerMcpTools(c);
+  }));
   const ok = results.filter((r) => r.status === 'fulfilled').length;
-  console.debug(`[MCP] Pre-warmed ${ok}/${critical.length} sessions`);
+  console.log(`[MCP] Pre-warmed ${ok}/${critical.length} sessions, ${Object.keys(mcpToolRegistry).length} tools registered`);
   return ok;
+}
+
+/**
+ * Init a specific MCP client and register its tools (lazy init for non-critical servers).
+ */
+export async function initAndRegister(client) {
+  await client.initSession();
+  registerMcpTools(client);
 }

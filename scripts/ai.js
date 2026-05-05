@@ -14,7 +14,7 @@ import * as da from './da-client.js';
 import { isSignedIn, getToken, signIn } from './ims.js';
 import { hasGitHubToken, readContent as ghReadContent, writeContent as ghWriteContent, triggerPreview as ghTriggerPreview, getRepoInfo, listBranches as ghListBranches } from './github-content.js';
 import * as aemContent from './aem-content-mcp-client.js';
-import { contentMcp, experienceProductionMcp } from './mcp-client.js';
+import { contentMcp, experienceProductionMcp, getMcpRegistry, getAllMcpClaudeTools, initAndRegister, governanceMcp, fireflyMcp } from './mcp-client.js';
 import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
@@ -5313,11 +5313,9 @@ export async function chat(userMessage, context = {}, _depth = 0) {
     for (const block of data.content) {
       if (block.type === 'tool_use') {
         let result;
-        if (contentMcp.getToolSchemas()?.[block.name]) {
-          const mcpResult = await contentMcp.callTool(block.name, block.input);
-          result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
-        } else if (experienceProductionMcp.getToolSchemas()?.[block.name]) {
-          const mcpResult = await experienceProductionMcp.callTool(block.name, block.input);
+        const mcpClient = getMcpRegistry()[block.name];
+        if (mcpClient) {
+          const mcpResult = await mcpClient.callTool(block.name, block.input);
           result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         } else {
           result = await executeTool(block.name, block.input);
@@ -5443,7 +5441,10 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     const OPS_TOOLS = ['edit_page_content', 'preview_page', 'publish_page'];
     tools = getToolsForPrompt(promptText).filter(t => OPS_TOOLS.includes(t.name));
   } else {
-    tools = getToolsForPrompt(promptText);
+    // Thinking Brain: Compass tools + ALL registered MCP tools
+    const compassTools = getToolsForPrompt(promptText);
+    const mcpTools = getAllMcpClaudeTools();
+    tools = [...compassTools, ...mcpTools];
   }
 
   let fullText = '';
@@ -5508,11 +5509,9 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
       if (abortCtrl.signal.aborted) throw new Error('Aborted');
       if (onToolCall) onToolCall(toolBlock.name, toolBlock.input);
       let result;
-      if (contentMcp.getToolSchemas()?.[toolBlock.name]) {
-        const mcpResult = await contentMcp.callTool(toolBlock.name, toolBlock.input);
-        result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
-      } else if (experienceProductionMcp.getToolSchemas()?.[toolBlock.name]) {
-        const mcpResult = await experienceProductionMcp.callTool(toolBlock.name, toolBlock.input);
+      const mcpClient = getMcpRegistry()[toolBlock.name];
+      if (mcpClient) {
+        const mcpResult = await mcpClient.callTool(toolBlock.name, toolBlock.input);
         result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
       } else {
         result = await executeTool(toolBlock.name, toolBlock.input);
