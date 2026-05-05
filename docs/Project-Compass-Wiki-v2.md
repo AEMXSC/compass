@@ -49,21 +49,17 @@ Compass works across all three AEM deployment architectures:
 
 ---
 
+## Problem Statement
+
+Pre-sales demos for AEM's AI story are fragmented. AEM's native AI Assistant is product-scoped — it doesn't cross into DA, Firefly, Analytics, or Journey Optimizer, and it has no awareness of the customer's vertical, deal stage, or demo environment. XSCs stitching multi-product stories together are doing it manually, with browser tabs and rehearsed click paths.
+
+At the same time, enterprise customers — particularly technical teams — are no longer asking "does AEM have AI?" They're asking **"can AEM plug into *our* AI?"** They have existing AI platforms, internal copilots, or multi-vendor AI strategies, and they want AEM's capabilities as a composable layer inside their own orchestration, not another product UI to log into.
+
+Neither need is served by what exists today. Compass addresses both.
+
+---
+
 ## Why It Matters
-
-### The Gap in Adobe's AI Story
-
-Adobe's native AEM AI Assistant is product-scoped. It helps with AEM tasks but doesn't know your demo environment, your customer's vertical, or how to chain actions across the Adobe stack.
-
-XSCs need an AI that understands the full picture — page context + customer vertical + deal stage + the full product portfolio available to solve the problem. Compass is that AI.
-
-More importantly: **enterprise customers are asking for the BYO Orchestration pattern**. They want to surface AEM's capabilities inside their own AI platforms — whether that's an internal enterprise copilot, an industry-specific model, or a multi-cloud AI stack. The question is no longer "does AEM have AI?" It's "can AEM plug into *our* AI?"
-
-Compass proves that answer is yes — and shows how.
-
-### The CMS Value Underneath
-
-The agentic layer only matters because of what's underneath it. AEM's CMS capabilities — versioning & history, omnichannel content delivery, localization & translation, structured authoring, developer efficiency — are what make the MCP integration worth building. Compass demonstrates AI unlocking those capabilities, not replacing them.
 
 ### Validated Differentiators
 
@@ -158,7 +154,30 @@ JCR edits complete in **~10–18 seconds** (vs. 45–60s without optimization). 
 
 ---
 
-## Gotchas & Known Limitations
+## Known Limitations
+
+### Not Supported
+
+| Limitation | Notes |
+|---|---|
+| Multi-user / concurrent sessions | Single-user demo tool — no session isolation |
+| Persistent conversation history | Resets on page reload |
+| Governance checks without extra step | Experience Governance MCP requires a separate OAuth consent — see Gotchas |
+| Universal Editor side-panel | Requires App Builder extension framework — not built |
+| AEM 6.x / on-premise | JCR path targets AEM Cloud Service only |
+
+### Requires Manual Steps
+
+| Task | Why |
+|---|---|
+| JCR write auth | Local server must be running before connecting a JCR site — see Gotchas |
+| Token renewal | MCP OAuth tokens expire every ~23 hours and must be refreshed manually |
+| New JCR environment | S2S Bearer token must be added to Config Pipeline for each new AEM environment |
+| Customer profiles | Per-account system prompts are hand-authored — no automated ingestion |
+
+---
+
+## Gotchas
 
 ### JCR Writes: Local Auth Server Required
 
@@ -276,18 +295,27 @@ AI is the layer everyone sells. Governance is the layer nobody wants to rebuild.
 
 ---
 
-## Resources
+## About
 
-| Resource | Location |
-|---|---|
-| Source Code | `github.com/AEMXSC/compass` (branch: `eds-migration`) |
-| Live App | `eds-migration--compass--aemxsc.aem.page` |
-| Worker | `compass-ims-proxy.compass-xsc.workers.dev` |
-| AEM MCP Docs | `github.com/easingthemes/aem-mcp-server` |
-| DA MCP Docs | `docs.da.live/about/early-access/da-mcp` |
-| Config Pipeline | Cloud Manager: `aem-xsc-showcase-program-prod` |
-| Stakeholder Sponsor | Jeff Figueiredo (Sr. Director, Americas XSC) |
-| Owner | Courtney Remekie (Senior Manager, AEM XSC) |
+**Owner:** Courtney Remekie, Senior Manager AEM XSC
+**Stakeholder Sponsor:** Jeff Figueiredo, Sr. Director Americas XSC
+
+### Slack
+- `#aem-xsc-compass` (primary)
+
+### Live App
+- `eds-migration--compass--aemxsc.aem.page`
+- Worker: `compass-ims-proxy.compass-xsc.workers.dev`
+
+### GitHub
+- Main repo: `github.com/AEMXSC/compass` (branch: `eds-migration`)
+- Worker config: `wrangler.toml` in `worker/`
+- Auth server: `scripts/aem-connect-server.mjs`
+
+### Reference Docs
+- AEM MCP Server: `github.com/easingthemes/aem-mcp-server`
+- DA MCP: `docs.da.live/about/early-access/da-mcp`
+- Config Pipeline (S2S auth): Cloud Manager → `aem-xsc-showcase-program-prod`
 
 ---
 
