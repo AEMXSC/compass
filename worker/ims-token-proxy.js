@@ -125,6 +125,9 @@ async function route(request, env) {
   if (url.pathname === '/mcp-oauth/token' && request.method === 'POST') {
     return handleMcpOAuthToken(request);
   }
+  if (url.pathname === '/mcp-oauth/register' && request.method === 'POST') {
+    return handleMcpOAuthRegister(request);
+  }
   if (url.pathname === '/asset' && request.method === 'GET') {
     return handleAssetProxy(request);
   }
@@ -1444,6 +1447,44 @@ function escapeHtmlInline(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','
 
 function escapeHtmlInline(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/**
+ * POST /mcp-oauth/register — attempt dynamic client registration on oauth.adobeaemcloud.com.
+ * One-time operation. If it succeeds, update MCP_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI constants.
+ */
+async function handleMcpOAuthRegister(request) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const callbackUrl = 'https://compass-ims-proxy.compass-xsc.workers.dev/mcp-oauth/callback';
+
+  // Try OIDC dynamic client registration (RFC 7591)
+  const regResp = await fetch('https://oauth.adobeaemcloud.com/oauth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      redirect_uris: [callbackUrl],
+      client_name: 'Compass Web App',
+      grant_types: ['authorization_code'],
+      response_types: ['code'],
+      token_endpoint_auth_method: 'client_secret_post',
+      scope: 'openid AdobeID',
+    }),
+  });
+
+  const regText = await regResp.text();
+  let regData;
+  try { regData = JSON.parse(regText); } catch { regData = { raw: regText }; }
+
+  return new Response(JSON.stringify({ status: regResp.status, data: regData }, null, 2), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': origin,
+    },
+  });
 }
 
 async function handleMcpOAuthToken(request) {

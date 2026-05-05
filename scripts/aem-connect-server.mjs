@@ -74,7 +74,7 @@ async function refreshToken() {
   return false;
 }
 
-function startAuthFlow(res) {
+function startAuthFlow(res, origin = '') {
   const codeVerifier = randomBytes(32).toString('base64url');
   const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
   const state = randomBytes(16).toString('base64url');
@@ -93,7 +93,7 @@ function startAuthFlow(res) {
   try { execSync(`start "" "${authUrl}"`, { stdio: 'ignore' }); } catch { /* */ }
 
   console.log('[AEM Connect] Auth flow started — waiting for callback...');
-  res.writeHead(202, corsHeaders(''));
+  res.writeHead(202, corsHeaders(origin));
   res.end(JSON.stringify({ status: 'auth_required', message: 'Browser opened for authentication' }));
 }
 
@@ -125,7 +125,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // No valid token — kick off auth flow
-    startAuthFlow(res);
+    startAuthFlow(res, origin);
     return;
   }
 
