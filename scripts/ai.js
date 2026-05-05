@@ -5413,9 +5413,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     const mcpTools = contentMcp.getClaudeTools();
     tools = mcpTools.filter(t => ['search_aem_pages', 'get_aem_page_content', 'patch_aem_page_content'].includes(t.name));
     if (tools.length === 0) {
-      // OAuth token not yet acquired — show prompt and bail
-      showMcpOAuthPrompt?.();
-      return '';
+      return 'Connect AEM Content first — click the Connect button to get write access.';
     }
   } else if (isOps) {
     // DA OPS: use Compass's tools
