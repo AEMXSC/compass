@@ -5449,7 +5449,6 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
       messages,
     };
     if (tools.length > 0) body.tools = tools;
-    if (tools.length > 0 && round > 0) body.tools = getToolsForSiteType();
 
     const resp = await fetch(CLAUDE_API, {
       method: 'POST',
