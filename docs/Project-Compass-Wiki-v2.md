@@ -145,31 +145,54 @@ JCR edits complete in **~10–18 seconds** (vs. 45–60s without optimization). 
 
 ## What Works Today (Demo-Ready)
 
-### DA Site Editing
-- Connect any DA-backed EDS site
-- Edit content via natural language ("Change the hero headline to...")
-- Preview refreshes automatically after edits (~2s)
-- Design mode loads DA canvas (same renderer as da.live)
-- File browser shows DA content tree with expandable folders
+| Capability | Status | Notes |
+|---|---|---|
+| DA content editing | **Working** | Edit + preview refresh (~2s) via natural language |
+| DA design view / file browser | **Working** | Same renderer as da.live, full content tree |
+| JCR content editing | **Working** | ~10–18s end-to-end with pre-fetch optimization |
+| AEM author page preview | **Working** | Headless Chrome, full CSS + images inlined |
+| Content governance checks | **Working*** | *Requires one-time OAuth per session — see Gotchas |
+| Generative page creation | **Working** | Experience Production Agent, ~30s async |
+| Cross-product tool execution | **Working** | 27 MCP servers, CORS verified from `.aem.page` |
+| Customer-specific context | **Working** | Per-account system prompt + vertical demo flows |
 
-### JCR Author Page Editing (Now Fully Working)
-- Connect any AEM Cloud Service site
-- Headless Chrome renders the authenticated author page
-- Edit JCR content via natural language — reads, patches, and re-renders in ~10–18s
-- Full CSS + images inlined (self-contained preview)
-- S2S Bearer token allowlisted via AEM Config Pipeline
+---
 
-### MCP Tool Discovery
-- All Adobe MCP servers accept CORS from `.aem.page` origins
-- Native MCP tool schemas discovered dynamically (not hardcoded)
-- Unified registry routes tool calls to correct MCP session
-- Same tools Claude.ai uses — identical schemas and parameters
+## Gotchas & Known Limitations
 
-### Intelligence Stack
-- 4-layer system prompt: AEM architecture + distilled skills + XSC playbook + customer context
-- Operations Brain for fast edits (pre-fetch + 1-round synthetic injection)
-- Thinking Brain for complex multi-step reasoning
-- Customer profiles for per-account demo customization
+### JCR Writes: Local Auth Server Required
+
+AEM's MCP OAuth server (`oauth.adobeaemcloud.com`) only accepts `http://localhost` as a redirect URI — it does not accept production URLs like `eds-migration--compass--aemxsc.aem.page`. This means the write token can't be obtained from the browser app directly.
+
+**Workaround:** Run a local Node.js server that captures the OAuth callback:
+
+```bash
+node scripts/aem-connect-server.mjs
+# [AEM Connect] Listening on http://localhost:80
+# [AEM Connect] Compass can now connect AEM Content automatically.
+```
+
+When you click "Connect AEM Content" in Compass, it opens the MCP OAuth flow in the browser. The callback redirects to `http://localhost`, the local server captures the authorization code, exchanges it for a token, and stores it. Compass then uses that token for all JCR write operations.
+
+**What to know:**
+- Token lasts ~23 hours — re-run the script after it expires
+- Must be running **before** you connect a JCR site in Compass
+- Requires binding to port 80 — run as Administrator on Windows or use `sudo` on macOS
+- Script is at `scripts/aem-connect-server.mjs` in the repo root
+
+**Long-term fix:** Register `https://eds-migration--compass--aemxsc.aem.page/` as an allowed redirect URI in the AEM MCP OAuth registration (requires IMS admin or MCP team). One config change eliminates the local server entirely.
+
+---
+
+### Switching Between JCR and DA Sites
+
+When you disconnect a JCR site and connect a DA site in the same session, stale JCR session state can cause DA edits to route incorrectly. Always hard-reload (`Ctrl+Shift+R`) when switching between site types. This is a known issue — the fix (clearing globals on connect) is in the codebase but browser state can still persist across hot reloads.
+
+---
+
+### Pre-Fetch TTL
+
+Compass pre-fetches JCR page components on connect (enables 1-round edits). The cache is valid for 5 minutes. If you leave a JCR site connected for longer without interacting, the first edit after the cache expires will fall back to a 2-round trip (~20–30s instead of ~10–18s). Reconnecting refreshes the cache immediately.
 
 ---
 
