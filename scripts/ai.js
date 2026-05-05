@@ -5087,21 +5087,22 @@ const OPS_BRAIN = `You are Compass in operations mode. You execute content opera
 - Use edit_page_content with {html} for page creation/full rewrites
 
 ### JCR/AEM CS sites (Type: aem-cs):
-- Call get_page_content FIRST to get the page structure and ETag
-- Then call patch_aem_page_content with {page_path, etag, updates} using the exact field paths from the structure
-- NEVER use edit_page_content for JCR sites — it uses DA APIs which don't work
-- The updates object must match the exact content structure returned by get_page_content
+- EXACTLY 2 tool calls. No more. No discovery. No lookup.
+- Call 1: get_page_content → returns JSON structure with ETag
+- Call 2: patch_aem_page_content with {page_path, etag, updates} using exact paths from Call 1
+- NEVER use edit_page_content for JCR — it uses DA APIs
+- NEVER call aem_lookup_api, aem_read, aem_write — use ONLY get_page_content and patch_aem_page_content
+- Do NOT output long explanations. Just call the tools and report the result in 1 sentence.
 
 ### Both:
 - After ANY write: preview refreshes automatically
 
 ## Rules
-- NEVER ask "Would you like me to..." — just do it
-- NEVER present Option A/B/C menus
-- NEVER say "I need more context" — the context is in conversation history above
-- If user says "fix them" / "do it" / "go" → execute based on your prior analysis
-- Keep responses SHORT: what you did + what's next
-- When fixing multiple issues: batch them into one turn with multiple find/replace calls
+- NEVER ask questions — just execute
+- NEVER explain your approach before acting — call tools immediately
+- NEVER call discovery/lookup tools — use ONLY the tools listed above
+- Maximum 2 tool calls per edit: read → patch (or just patch for DA)
+- After tools complete: report in 1 sentence what changed. No paragraphs.
 
 ## EDS markup knowledge
 - Blocks = div tables: <div class="blockname"><div><div>row</div></div></div>
@@ -5421,7 +5422,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     : getToolsForPrompt(promptText);
 
   let fullText = '';
-  const MAX_TOOL_ROUNDS = isOps ? 5 : 8;
+  const MAX_TOOL_ROUNDS = isOps ? 3 : 8;
 
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
