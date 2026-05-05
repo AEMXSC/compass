@@ -5501,6 +5501,10 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
         const mcpResult = await mcpClient.callTool(toolBlock.name, toolBlock.input);
         console.log(`[MCP result] ${toolBlock.name}:`, typeof mcpResult === 'string' ? mcpResult.slice(0, 400) : JSON.stringify(mcpResult, null, 2).slice(0, 400));
         result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
+        // Auto-refresh JCR preview after a successful patch
+        if (toolBlock.name === 'patch_aem_page_content' && mcpResult?.status === 'page_patched') {
+          setTimeout(() => window.__refreshJcrPreview?.(), 1500);
+        }
       } else {
         result = await executeTool(toolBlock.name, toolBlock.input);
       }
