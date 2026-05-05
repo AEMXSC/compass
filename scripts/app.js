@@ -4143,16 +4143,21 @@ async function connectCustomSite(input) {
     import('./mcp-client.js').then(async ({ contentMcp }) => {
       try {
         await contentMcp.initSession();
-        const result = await contentMcp.callTool('search-aem-pages', { authorUrl, q: 'index' });
-        if (Array.isArray(result)) {
-          const page = result.find(p =>
-            p.authorPath === jcrPath || p.authorPath === `${jcrPath}/index`
-            || (p.authorPath?.includes('securbank/en') && !p.authorPath?.includes('launches'))
-          );
-          if (page?.id) {
-            window.__AEM_PAGE_ID = page.id;
-            console.log(`[EW] Pre-fetched pageId: ${page.id.slice(0, 30)}...`);
-          }
+        const result = await contentMcp.callTool('search-aem-pages', { authorUrl, q: jcrPath.split('/').pop() || 'index' });
+        // search-aem-pages returns a formatted string — extract the JSON array
+        let pages = Array.isArray(result) ? result : [];
+        if (!pages.length && typeof result === 'string') {
+          const m = result.match(/\[[\s\S]*\]/);
+          if (m) { try { pages = JSON.parse(m[0]); } catch { /* */ } }
+        }
+        const page = pages.find((p) =>
+          p.authorPath === jcrPath
+          || p.authorPath === `${jcrPath}/index`
+          || p.authorPath?.startsWith(jcrPath + '/')
+        ) || pages.find((p) => !p.authorPath?.includes('/launches/'));
+        if (page?.id) {
+          window.__AEM_PAGE_ID = page.id;
+          console.log(`[EW] Pre-fetched pageId for ${page.authorPath}: ${page.id.slice(0, 30)}...`);
         }
       } catch (e) { console.warn('[EW] pageId prefetch failed:', e.message); }
     });
