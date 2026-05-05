@@ -167,9 +167,22 @@ export function createMcpClient(endpointPath, label = 'MCP') {
       ? toolName
       : (toolSchemas?.[toolName.replace(/_/g, '-')] ? toolName.replace(/_/g, '-') : toolName);
 
+    // Normalize patch-aem-page-content args — Claude naturally sends the wrong types
+    const normalizedArgs = { ...args };
+    if (serverName === 'patch-aem-page-content' || toolName === 'patch_aem_page_content') {
+      // eTag must be a quoted HTTP ETag string e.g. '"abc123"' — Claude strips the quotes
+      if (normalizedArgs.eTag && !String(normalizedArgs.eTag).startsWith('"')) {
+        normalizedArgs.eTag = `"${normalizedArgs.eTag}"`;
+      }
+      // jsonPatch must be a JSON string — Claude passes it as an array/object
+      if (normalizedArgs.jsonPatch && typeof normalizedArgs.jsonPatch !== 'string') {
+        normalizedArgs.jsonPatch = JSON.stringify(normalizedArgs.jsonPatch);
+      }
+    }
+
     const result = await mcpRequest('tools/call', {
       name: serverName,
-      arguments: args,
+      arguments: normalizedArgs,
     });
 
     if (result?.content) {
