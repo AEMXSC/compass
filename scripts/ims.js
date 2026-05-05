@@ -40,23 +40,44 @@ let userOrgs = [];       // [{ id, name, type }, ...]
 /* ─── Public API: Token access ─── */
 
 export function getToken() {
+  // 1. imslib managed token (best — auto-refreshed)
   if (imsReady && window.adobeIMS) {
     const t = window.adobeIMS.getAccessToken();
     if (t?.token) return t.token;
   }
-  // Fallback: read imslib's own storage directly (works even if imsReady timing issue)
+  // 2. imslib localStorage directly (timing/tracking prevention fallback)
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key?.startsWith('adobeid_ims_access_token') && key.includes(IMS_CLIENT_ID)) {
         const parsed = JSON.parse(localStorage.getItem(key));
-        if (parsed?.tokenValue && parsed?.expire && Date.now() < parsed.expire) {
-          return parsed.tokenValue;
+        const token = parsed?.tokenValue || parsed?.token || parsed?.access_token;
+        const expiry = parsed?.expire ? new Date(parsed.expire).getTime() : (parsed?.expiry || 0);
+        if (token && (!expiry || Date.now() < expiry)) {
+          return token;
         }
       }
     }
   } catch { /* */ }
+  // 3. Stored token (from S2S or prior sign-in)
   return localStorage.getItem(STORAGE_KEYS.TOKEN) || null;
+}
+
+// Ensure a token is available — fetches S2S if nothing else works
+export async function ensureToken() {
+  if (getToken()) return getToken();
+  // Auto-fetch S2S as last resort
+  try {
+    const resp = await fetch(`${IMS_WORKER}/auth`, { credentials: 'omit' });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.access_token) {
+        localStorage.setItem(STORAGE_KEYS.TOKEN, data.access_token);
+        return data.access_token;
+      }
+    }
+  } catch { /* */ }
+  return null;
 }
 
 export function isSignedIn() { return !!getToken(); }

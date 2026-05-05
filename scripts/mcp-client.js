@@ -17,7 +17,7 @@
  *   /adobe/mcp/development     — Pipeline troubleshooting (uses credits)
  */
 
-import { getToken } from './ims.js';
+import { getToken, ensureToken } from './ims.js';
 
 const MCP_BASE = 'https://mcp.adobeaemcloud.com';
 const MCP_PROTOCOL_VERSION = '2025-03-26';
@@ -123,6 +123,9 @@ export function createMcpClient(endpointPath, label = 'MCP') {
 
     initPromise = (async () => {
       try {
+        // Ensure we have a valid token before MCP init
+        await ensureToken();
+
         const initResult = await mcpRequest('initialize', {
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: {},
