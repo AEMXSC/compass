@@ -5408,12 +5408,14 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const siteType = window.__EW_SITE_TYPE || 'unknown';
   let tools;
   if (isOps && siteType === 'aem-cs') {
-    // JCR OPS: Content MCP only — get + patch (same as Claude.ai, 2 synchronous calls)
+    // JCR OPS: Content MCP tools only (getClaudeTools returns underscore names)
     await contentMcp.initSession();
     const mcpTools = contentMcp.getClaudeTools();
-    tools = mcpTools.filter(t => ['get-aem-page-content', 'patch-aem-page-content'].includes(t.name));
+    tools = mcpTools.filter(t => ['search_aem_pages', 'get_aem_page_content', 'patch_aem_page_content'].includes(t.name));
     if (tools.length === 0) {
-      tools = getToolsForPrompt(promptText).filter(t => ['get_page_content', 'patch_aem_page_content'].includes(t.name));
+      // OAuth token not yet acquired — show prompt and bail
+      showMcpOAuthPrompt?.();
+      return '';
     }
   } else if (isOps) {
     // DA OPS: use Compass's tools
