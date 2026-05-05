@@ -4145,12 +4145,8 @@ async function connectCustomSite(input) {
       try {
         await contentMcp.initSession();
         const result = await contentMcp.callTool('search-aem-pages', { authorUrl, q: jcrPath.split('/').pop() || 'index' });
-        // search-aem-pages returns a formatted string — extract the JSON array
+        // callTool already parses the search response into an array
         let pages = Array.isArray(result) ? result : [];
-        if (!pages.length && typeof result === 'string') {
-          const m = result.match(/\[[\s\S]*\]/);
-          if (m) { try { pages = JSON.parse(m[0]); } catch { /* */ } }
-        }
         const page = pages.find((p) =>
           p.authorPath === jcrPath
           || p.authorPath === `${jcrPath}/index`

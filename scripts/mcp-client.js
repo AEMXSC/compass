@@ -175,7 +175,29 @@ export function createMcpClient(endpointPath, label = 'MCP') {
     if (result?.content) {
       const textItems = result.content.filter((c) => c.type === 'text');
       if (textItems.length === 1) {
-        try { return JSON.parse(textItems[0].text); } catch { return textItems[0].text; }
+        const text = textItems[0].text;
+        // Try pure JSON first
+        try { return JSON.parse(text); } catch { /* fall through */ }
+        // get-aem-page-content returns a text block with ETag header + JSON body:
+        //   "Page Content (map-based):\nETag: "abc"\n{...}"
+        // Parse this into a clean object so Claude always sees { eTag, id, properties, items }
+        // search-aem-pages returns "Showing N items:\n\n[{...}]" — extract array
+        const arrMatch = text.match(/(\[[\s\S]*\])/);
+        if (arrMatch && !text.startsWith('{')) {
+          try { return JSON.parse(arrMatch[1]); } catch { /* fall through */ }
+        }
+        // get-aem-page-content returns a text block with ETag header + JSON body:
+        //   "Page Content (map-based):\nETag: "abc"\n{...}"
+        // Parse this into a clean object so Claude always sees { eTag, id, properties, items }
+        const eTagMatch = text.match(/ETag:\s*("?[^"\n]+"?)/);
+        const jsonMatch = text.match(/(\{[\s\S]*\})/);
+        if (eTagMatch && jsonMatch) {
+          try {
+            const content = JSON.parse(jsonMatch[1]);
+            return { eTag: eTagMatch[1], ...content };
+          } catch { /* fall through */ }
+        }
+        return text;
       }
       return result.content;
     }

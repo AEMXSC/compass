@@ -5089,14 +5089,23 @@ Every MCP tool returns live data. Always base your next call on what the previou
 - After any write: preview refreshes automatically
 
 ## JCR/AEM CS sites (Type: aem-cs)
-The content model is map-based: every node has {id, properties: {…}, items: {…}}.
+The content model is map-based. get-aem-page-content returns:
+{ eTag: '"abc123"', id, properties: {…}, items: { "0": { items: { "0:0": { items: { "0:0:0": { properties: { text: "…" } } } } } } } }
+
 Workflow:
-1. If pageId is not in context: call search-aem-pages with the page name to get the UUID id
-2. Call get-aem-page-content with {authorUrl, pageId: <UUID>} — read the response to find the eTag and the exact property/item keys you need to change
-3. Call patch-aem-page-content with the eTag from step 2 and a jsonPatch array where paths are derived from the get response:
-   - Page-level properties live at /properties/<key> (e.g. /properties/jcr:title)
-   - Component properties live at /items/<key>/items/<key>/properties/<key> — use the actual key strings from the response (like "0:0:1"), not guesses
-4. If patch returns a 409 or eTag mismatch: call get again for a fresh eTag, then retry
+1. If pageId is not in context: call search-aem-pages with the page name to get the UUID id field
+2. Call get-aem-page-content — response has eTag at root (already quoted, pass it as-is)
+3. Navigate items to find the property to change. Map keys like "0", "0:0", "0:0:0" are the actual key strings.
+4. Call patch-aem-page-content with:
+   - eTag: exactly as returned (e.g. '"abc123"' — includes the quotes)
+   - jsonPatch: JSON string of an array, e.g. '[{"op":"replace","path":"/properties/jcr:title","value":"New Title"}]'
+   - Paths: /properties/<key> for page props, /items/0/items/0:0/items/0:0:0/properties/text for component text
+5. If 409 or eTag error: call get again for a fresh eTag, then retry
+
+Example — change hero text on SecurBank Home:
+  search → id = gnev4tt6Ll...
+  get → eTag: '"abc"', items["0"]["0:0"]["0:0:0"].properties.text = "<h1>Sail Into...</h1>"
+  patch → path "/items/0/items/0:0/items/0:0:0/properties/text", value "<h1>New Headline</h1>"
 
 ## Rules
 - Call tools immediately — do not explain before acting
@@ -5198,8 +5207,8 @@ ${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
       toolRouting = `### Site tools — AEM CS (JCR)
 **Page reads/writes** use the Content MCP (map-based model):
 - Find page UUID: \`search-aem-pages\` — use the \`id\` field, not the JCR path
-- Read page + eTag: \`get-aem-page-content\` with {authorUrl, pageId: <UUID>}
-- Write page: \`patch-aem-page-content\` — derive jsonPatch paths from what get returned (page props → /properties/<key>, component props → /items/<key>/…/properties/<key>)
+- Read page + eTag: \`get-aem-page-content\` with {authorUrl, pageId: <UUID>} — returns {eTag, id, properties, items}; eTag is already quoted (pass it as-is to patch)
+- Write page: \`patch-aem-page-content\` — jsonPatch is a JSON string: '[{"op":"replace","path":"/properties/jcr:title","value":"…"}]'; paths: /properties/<key> for page props, /items/0/items/0:0/items/0:0:0/properties/text for component text
 - Create from template: \`create_aem_page\` (call \`list_aem_templates\` first to find the template path)
 - Copy: \`copy_aem_page\` · Delete: \`delete_aem_page\` · List: \`list_aem_pages\`
 
@@ -5294,7 +5303,9 @@ export async function chat(userMessage, context = {}, _depth = 0) {
         let result;
         const mcpClient = getMcpRegistry()[block.name];
         if (mcpClient) {
+          console.log(`[MCP call] ${block.name}`, JSON.stringify(block.input, null, 2));
           const mcpResult = await mcpClient.callTool(block.name, block.input);
+          console.log(`[MCP result] ${block.name}:`, typeof mcpResult === 'string' ? mcpResult.slice(0, 400) : JSON.stringify(mcpResult, null, 2).slice(0, 400));
           result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         } else {
           result = await executeTool(block.name, block.input);
@@ -5490,7 +5501,9 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
       let result;
       const mcpClient = getMcpRegistry()[toolBlock.name];
       if (mcpClient) {
+        console.log(`[MCP call] ${toolBlock.name}`, JSON.stringify(toolBlock.input, null, 2));
         const mcpResult = await mcpClient.callTool(toolBlock.name, toolBlock.input);
+        console.log(`[MCP result] ${toolBlock.name}:`, typeof mcpResult === 'string' ? mcpResult.slice(0, 400) : JSON.stringify(mcpResult, null, 2).slice(0, 400));
         result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
       } else {
         result = await executeTool(toolBlock.name, toolBlock.input);
