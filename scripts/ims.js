@@ -115,11 +115,24 @@ export async function signIn() {
 /**
  * MCP OAuth — get a write-capable token for Content MCP.
  * Uses oauth.adobeaemcloud.com with PKCE + http://localhost redirect.
+ * Browser generates PKCE (stateless Worker — no shared in-memory state across CF instances).
  * Opens popup → user authenticates → captures code from failed localhost redirect → exchanges for token.
  */
 export async function signInMcpOAuth() {
   const workerBase = IMS_WORKER;
-  const popup = window.open(`${workerBase}/mcp-oauth/start`, 'mcpOAuth', 'width=500,height=700');
+
+  // Generate PKCE in browser so the Worker stays stateless
+  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+  const codeVerifier = btoa(String.fromCharCode(...verifierBytes))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const challengeBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
+  const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(challengeBuffer)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const state = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+  const startParams = new URLSearchParams({ code_challenge: codeChallenge, state });
+  const popup = window.open(`${workerBase}/mcp-oauth/start?${startParams}`, 'mcpOAuth', 'width=500,height=700');
   if (!popup) { console.warn('[MCP-OAuth] Popup blocked'); return null; }
 
   // Poll popup URL for the auth code (appears after localhost redirect fails)
@@ -132,13 +145,12 @@ export async function signInMcpOAuth() {
           popup.close();
           const params = new URL(popupUrl).searchParams;
           const code = params.get('code');
-          const state = params.get('state');
-          if (code && state) {
-            // Exchange code for token via Worker
+          if (code) {
+            // Exchange code + codeVerifier (no server-side state lookup needed)
             fetch(`${workerBase}/mcp-oauth/token`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ code, state }),
+              body: JSON.stringify({ code, codeVerifier }),
             })
               .then(r => r.json())
               .then(data => {

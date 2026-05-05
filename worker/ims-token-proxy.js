@@ -1378,26 +1378,17 @@ const MCP_OAUTH_CLIENT_ID = 'MTAwNy1VOUJTNS15QUdRUnhTTVlZZzFUcDV3LmhWLUlvNVNPZEl
 const MCP_OAUTH_CLIENT_SECRET = '1007-U9BS5-yAGQRxSMYYg1Tp5whV-Io5SOdIwuDZi3DWDq0vxYMnJkzJv2Bd2jjwP9J362Ev_aFF0MKbeaN7cyRivr_-Xb7Fk2mUY';
 const MCP_OAUTH_REDIRECT_URI = 'http://localhost';
 
-// In-memory PKCE store (per-worker, ephemeral)
-const pkceStore = new Map();
+// PKCE is generated in the browser — Worker is fully stateless for OAuth
 
 async function handleMcpOAuthStart(request) {
   const url = new URL(request.url);
-  const origin = request.headers.get('Origin') || '';
 
-  // Generate PKCE code_verifier + code_challenge
-  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
-  const codeVerifier = btoa(String.fromCharCode(...verifierBytes)).replace(/[+/=]/g, c => ({ '+': '-', '/': '_', '=': '' }[c]));
-  const challengeBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
-  const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(challengeBuffer))).replace(/[+/=]/g, c => ({ '+': '-', '/': '_', '=': '' }[c]));
+  // Browser sends code_challenge + state; Worker just builds the redirect
+  const codeChallenge = url.searchParams.get('code_challenge');
+  const state = url.searchParams.get('state');
 
-  // Store verifier with a state key
-  const state = crypto.randomUUID();
-  pkceStore.set(state, { codeVerifier, created: Date.now() });
-
-  // Clean old entries
-  for (const [k, v] of pkceStore) {
-    if (Date.now() - v.created > 600000) pkceStore.delete(k);
+  if (!codeChallenge || !state) {
+    return new Response('Missing code_challenge or state', { status: 400 });
   }
 
   const params = new URLSearchParams({
@@ -1419,30 +1410,22 @@ async function handleMcpOAuthToken(request) {
   }
 
   const body = await request.json();
-  const { code, state } = body;
+  const { code, codeVerifier } = body;
 
-  if (!code || !state) {
-    return new Response(JSON.stringify({ error: 'Missing code or state' }), {
+  if (!code || !codeVerifier) {
+    return new Response(JSON.stringify({ error: 'Missing code or codeVerifier' }), {
       status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': origin },
     });
   }
 
-  const pkce = pkceStore.get(state);
-  if (!pkce) {
-    return new Response(JSON.stringify({ error: 'Invalid or expired state' }), {
-      status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': origin },
-    });
-  }
-  pkceStore.delete(state);
-
-  // Exchange code for token
+  // Exchange code for token — codeVerifier comes from the browser (stateless)
   const tokenBody = new URLSearchParams({
     grant_type: 'authorization_code',
     client_id: MCP_OAUTH_CLIENT_ID,
     client_secret: MCP_OAUTH_CLIENT_SECRET,
     code,
     redirect_uri: MCP_OAUTH_REDIRECT_URI,
-    code_verifier: pkce.codeVerifier,
+    code_verifier: codeVerifier,
   });
 
   const tokenResp = await fetch('https://oauth.adobeaemcloud.com/oauth/token', {

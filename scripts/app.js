@@ -13,7 +13,7 @@
 // Different query strings (e.g., './da-client.js' vs './da-client.js?v=57') create
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs } from './ims.js';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken } from './ims.js';
 import * as ai from './ai.js';
 import { TOOL_AGENT_MAP } from './ai.js';
 import * as da from './da-client.js';
@@ -144,6 +144,46 @@ function showToast(message, type = 'info', duration = TOAST_DURATION_MS) {
     toast.classList.remove('visible');
     toast.addEventListener('transitionend', () => toast.remove());
   }, duration);
+}
+
+function showMcpOAuthPrompt() {
+  let container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = 'toast toast-info';
+  toast.style.cssText = 'max-width:360px;cursor:default';
+  toast.innerHTML = `
+    <span class="toast-icon">🔑</span>
+    <span class="toast-message" style="flex:1">Connect AEM Content for write access</span>
+    <button id="mcpOAuthBtn" style="margin-left:8px;padding:4px 10px;border-radius:4px;border:1px solid #4f80ff;background:#1e3a8a;color:#fff;font-size:12px;cursor:pointer;white-space:nowrap">Connect</button>
+    <button id="mcpOAuthDismiss" style="margin-left:6px;background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer;line-height:1">×</button>
+  `;
+
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('visible'));
+
+  toast.querySelector('#mcpOAuthBtn').addEventListener('click', async () => {
+    toast.querySelector('#mcpOAuthBtn').textContent = 'Connecting…';
+    toast.querySelector('#mcpOAuthBtn').disabled = true;
+    const token = await signInMcpOAuth();
+    if (token) {
+      showToast('AEM Content connected — write access enabled', 'success');
+    } else {
+      showToast('MCP OAuth cancelled or failed', 'warn');
+    }
+    toast.classList.remove('visible');
+    toast.addEventListener('transitionend', () => toast.remove());
+  });
+
+  toast.querySelector('#mcpOAuthDismiss').addEventListener('click', () => {
+    toast.classList.remove('visible');
+    toast.addEventListener('transitionend', () => toast.remove());
+  });
 }
 
 function md(text) {
@@ -3976,7 +4016,11 @@ async function connectCustomSite(input) {
   if (!parsed.jcr) {
     da.configure({ org, repo, branch });
     console.log(`[EW] DA site: ${org}/${repo} (${branch})`);
-  } else {
+  }
+
+  // JCR sites need MCP OAuth token for write operations (S2S tokens are read-only)
+  if (parsed.jcr && !getMcpToken()) {
+    showMcpOAuthPrompt();
   }
 
   // Detect site type (DA vs AEM CS) via fstab.yaml — AWAIT so AI knows the type before first prompt
