@@ -46,7 +46,9 @@ export function createMcpClient(endpointPath, label = 'MCP') {
    * Handles both direct JSON and SSE response formats.
    */
   async function mcpRequest(method, params = {}, { isNotification = false } = {}) {
-    const token = getToken();
+    // Prefer MCP OAuth token (has write permissions) over imslib token
+    const mcpToken = localStorage.getItem('ew-mcp-token');
+    const token = mcpToken || getToken();
     const headers = {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',

@@ -102,7 +102,6 @@ export async function signIn() {
     window.adobeIMS.signIn();
     return true;
   }
-  // Fallback: manual redirect to IMS (when imslib blocked by tracking prevention)
   const params = new URLSearchParams({
     client_id: IMS_CLIENT_ID,
     scope: IMS_SCOPE,
@@ -111,6 +110,68 @@ export async function signIn() {
   });
   window.location.href = `https://ims-na1.adobelogin.com/ims/authorize/v2?${params}`;
   return true;
+}
+
+/**
+ * MCP OAuth — get a write-capable token for Content MCP.
+ * Uses oauth.adobeaemcloud.com with PKCE + http://localhost redirect.
+ * Opens popup → user authenticates → captures code from failed localhost redirect → exchanges for token.
+ */
+export async function signInMcpOAuth() {
+  const workerBase = IMS_WORKER;
+  const popup = window.open(`${workerBase}/mcp-oauth/start`, 'mcpOAuth', 'width=500,height=700');
+  if (!popup) { console.warn('[MCP-OAuth] Popup blocked'); return null; }
+
+  // Poll popup URL for the auth code (appears after localhost redirect fails)
+  return new Promise((resolve) => {
+    const interval = setInterval(() => {
+      try {
+        const popupUrl = popup.location.href;
+        if (popupUrl?.startsWith('http://localhost')) {
+          clearInterval(interval);
+          popup.close();
+          const params = new URL(popupUrl).searchParams;
+          const code = params.get('code');
+          const state = params.get('state');
+          if (code && state) {
+            // Exchange code for token via Worker
+            fetch(`${workerBase}/mcp-oauth/token`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code, state }),
+            })
+              .then(r => r.json())
+              .then(data => {
+                if (data.access_token) {
+                  localStorage.setItem('ew-mcp-token', data.access_token);
+                  if (data.refresh_token) localStorage.setItem('ew-mcp-refresh', data.refresh_token);
+                  console.log('[MCP-OAuth] Write token acquired');
+                  resolve(data.access_token);
+                } else {
+                  console.warn('[MCP-OAuth] Token exchange failed:', data);
+                  resolve(null);
+                }
+              })
+              .catch(() => resolve(null));
+          } else {
+            resolve(null);
+          }
+        }
+      } catch {
+        // Cross-origin — popup hasn't redirected to localhost yet
+      }
+      if (popup.closed) {
+        clearInterval(interval);
+        resolve(null);
+      }
+    }, 500);
+
+    setTimeout(() => { clearInterval(interval); popup.close(); resolve(null); }, 180000);
+  });
+}
+
+export function getMcpToken() {
+  return localStorage.getItem('ew-mcp-token') || null;
 }
 
 /* ─── Public API: Sign out ─── */
