@@ -22,7 +22,7 @@ import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCust
 import { detectSiteMention, resolveSite } from './known-sites.js';
 import { getGitHubToken, setGitHubToken, hasGitHubToken, getRepoInfo, listBranches, getRepoTree } from './github-content.js';
 import { detectAndCacheSiteType, getSiteType } from './site-detect.js';
-import { aemUnifiedMcp, contentMcp, prewarmSessions } from './mcp-client.js';
+import { aemUnifiedMcp, contentMcp, prewarmSessions, registerMcpTools } from './mcp-client.js';
 
 /* ── Dynamic Org Configuration (from customer profile) ── */
 let AEM_ORG = getOrgConfig();
@@ -176,6 +176,7 @@ function showMcpOAuthPrompt() {
       // and picks up write tools (patch_aem_page_content etc.)
       contentMcp.resetSession();
       await contentMcp.initSession();
+      registerMcpTools(contentMcp);
       showToast('AEM Content connected — write access enabled', 'success');
     } else {
       showToast('MCP OAuth cancelled or failed', 'warn');
@@ -6617,6 +6618,8 @@ async function init() {
       history.replaceState(null, '', window.location.pathname + window.location.search);
       // Reset so content MCP reinitializes with OAuth token on next call
       contentMcp.resetSession();
+      await contentMcp.initSession();
+      registerMcpTools(contentMcp);
       showToast('AEM Content connected — write access enabled', 'success');
     }
   }
