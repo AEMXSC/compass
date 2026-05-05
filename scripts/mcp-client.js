@@ -25,8 +25,9 @@ const WORKER_MCP_BASE = (localStorage.getItem('ew-ims-proxy') || 'https://compas
 
 /**
  * Flatten a nested AEM page items tree into a compact summary for Claude.
- * Instead of returning 50KB of nested JSON, returns { eTag, properties, components[] }
- * where components is a flat list of { path, text, title } entries Claude can act on directly.
+ * Returns { eTag, properties, components[] } where each component entry has
+ * the FULL patch-ready path so Claude can use it directly in jsonPatch without guessing.
+ * e.g. { patchPath: "/items/0/items/0:0/items/0:0:0/properties/text", value: "<h1>..." }
  */
 function summarizePageContent(eTag, content) {
   const components = [];
@@ -35,16 +36,22 @@ function summarizePageContent(eTag, content) {
     if (!items || typeof items !== 'object') return;
     for (const [key, val] of Object.entries(items)) {
       if (!val || typeof val !== 'object') continue;
-      const path = `${prefix}/${key}`;
+      const itemPath = `${prefix}/${key}`;
       if (val.properties) {
         const p = val.properties;
-        const entry = { path: `${path}/properties` };
-        if (p.text) entry.text = p.text;
-        if (p['jcr:title']) entry.title = p['jcr:title'];
-        if (p.title) entry.title = p.title;
-        if (Object.keys(entry).length > 1) components.push(entry);
+        const id = val.id || key;
+        const name = p.name || p['jcr:title'] || p.title || id;
+        // Emit one entry per editable text/title property with its full patch path
+        if (p.text !== undefined) {
+          components.push({ name, patchPath: `${itemPath}/properties/text`, value: p.text });
+        }
+        if (p['jcr:title'] !== undefined) {
+          components.push({ name, patchPath: `${itemPath}/properties/jcr:title`, value: p['jcr:title'] });
+        } else if (p.title !== undefined) {
+          components.push({ name, patchPath: `${itemPath}/properties/title`, value: p.title });
+        }
       }
-      if (val.items) walk(val.items, `${path}/items`);
+      if (val.items) walk(val.items, `${itemPath}/items`);
     }
   }
 
@@ -52,9 +59,10 @@ function summarizePageContent(eTag, content) {
 
   return {
     eTag,
-    id: content.id,
-    componentType: content.componentType,
-    properties: content.properties,
+    pageProperties: {
+      'jcr:title': content.properties?.['jcr:title'],
+      pageTitle: content.properties?.pageTitle,
+    },
     components,
   };
 }

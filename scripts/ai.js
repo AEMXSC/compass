@@ -5090,20 +5090,19 @@ Every MCP tool returns live data. Always base your next call on what the previou
 
 ## JCR/AEM CS sites (Type: aem-cs)
 get-aem-page-content returns a compact summary:
-{ eTag: '"abc123"', id, properties: {jcr:title, …}, components: [{path: "/items/0/items/0:0/items/0:0:0/properties", text: "<h1>…</h1>", title: "…"}, …] }
+{ eTag: '"abc123"', pageProperties: {jcr:title}, components: [{name: "Hero", patchPath: "/items/0/items/0:0/items/0:0:0/properties/text", value: "<h1>Old</h1>"}, …] }
 
 Workflow:
 1. If pageId is not in context: call search-aem-pages with {authorUrl, q: "<page name>"} to get the UUID id field
-2. Call get-aem-page-content — read components[] to find the entry whose text/title matches what to change
-3. Call patch-aem-page-content with:
-   - eTag: exactly as returned from get (includes surrounding quotes — pass as-is)
-   - jsonPatch: JSON string, e.g. '[{"op":"replace","path":"/items/0/items/0:0/items/0:0:0/properties/text","value":"<h1>New</h1>"}]'
-   - Path: take the component path from components[] and append /text or /title
+2. Call get-aem-page-content — read components[] to find the entry whose name/value matches what to change
+3. Call patch-aem-page-content immediately using:
+   - eTag: exactly as returned (pass as-is — includes surrounding quotes)
+   - jsonPatch: JSON string with the patchPath from components[], e.g. '[{"op":"replace","path":"/items/0/items/0:0/items/0:0:0/properties/text","value":"<h1>New</h1>"}]'
 4. If 409 or eTag error: call get again for fresh eTag, then retry
 
-Example — change hero text:
-  components[0] = { path: "/items/0/items/0:0/items/0:0:0/properties", text: "<h1>Old</h1>" }
-  patch path → "/items/0/items/0:0/items/0:0:0/properties/text", value → "<h1>New</h1>"
+Example:
+  components[0] = { name: "Hero", patchPath: "/items/0/items/0:0/items/0:0:0/properties/text", value: "<h1>Old</h1>" }
+  → patch jsonPatch: '[{"op":"replace","path":"/items/0/items/0:0/items/0:0:0/properties/text","value":"<h1>New</h1>"}]'
 
 ## Rules
 - Call tools immediately — do not explain before acting
