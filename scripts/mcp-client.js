@@ -162,8 +162,13 @@ export function createMcpClient(endpointPath, label = 'MCP') {
   async function callTool(toolName, args = {}) {
     await initSession();
 
+    // Resolve underscore variant back to the server's hyphenated name if needed
+    const serverName = toolSchemas?.[toolName]
+      ? toolName
+      : (toolSchemas?.[toolName.replace(/_/g, '-')] ? toolName.replace(/_/g, '-') : toolName);
+
     const result = await mcpRequest('tools/call', {
-      name: toolName,
+      name: serverName,
       arguments: args,
     });
 
@@ -182,7 +187,8 @@ export function createMcpClient(endpointPath, label = 'MCP') {
   function getClaudeTools() {
     if (!toolSchemas) return [];
     return Object.values(toolSchemas).map((t) => ({
-      name: t.name,
+      // Claude tool names must be [a-zA-Z0-9_] — convert hyphens to underscores
+      name: t.name.replace(/-/g, '_'),
       description: t.description || '',
       input_schema: t.inputSchema || { type: 'object', properties: {} },
     }));
@@ -284,7 +290,9 @@ export function registerMcpTools(client) {
   const schemas = client.getToolSchemas();
   if (schemas) {
     for (const name of Object.keys(schemas)) {
+      // Register under both hyphenated (server name) and underscored (Claude name)
       mcpToolRegistry[name] = client;
+      mcpToolRegistry[name.replace(/-/g, '_')] = client;
     }
   }
 }
@@ -293,13 +301,18 @@ export function getMcpRegistry() { return mcpToolRegistry; }
 
 export function getAllMcpClaudeTools() {
   const tools = [];
-  for (const [name, client] of Object.entries(mcpToolRegistry)) {
+  const seen = new Set();
+  for (const [, client] of Object.entries(mcpToolRegistry)) {
     const schemas = client.getToolSchemas();
-    if (schemas?.[name]) {
+    if (!schemas) continue;
+    for (const [name, schema] of Object.entries(schemas)) {
+      const claudeName = name.replace(/-/g, '_');
+      if (seen.has(claudeName)) continue;
+      seen.add(claudeName);
       tools.push({
-        name,
-        description: schemas[name].description || '',
-        input_schema: schemas[name].inputSchema || { type: 'object', properties: {} },
+        name: claudeName,
+        description: schema.description || '',
+        input_schema: schema.inputSchema || { type: 'object', properties: {} },
       });
     }
   }
