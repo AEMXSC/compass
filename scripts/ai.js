@@ -5087,10 +5087,10 @@ const OPS_BRAIN = `You are Compass in operations mode. You execute content opera
 - Use edit_page_content with {html} for page creation/full rewrites
 
 ### JCR/AEM CS sites (Type: aem-cs):
-- The current page HTML is provided below — you already have the content, DO NOT call get_page_content
-- Call patch_aem_page_content with {page_path, updates} to modify specific fields
+- Call get_page_content FIRST to get the page structure and ETag
+- Then call patch_aem_page_content with {page_path, etag, updates} using the exact field paths from the structure
 - NEVER use edit_page_content for JCR sites — it uses DA APIs which don't work
-- NEVER call get_page_content — you already have the page content in this prompt
+- The updates object must match the exact content structure returned by get_page_content
 
 ### Both:
 - After ANY write: preview refreshes automatically
@@ -5415,7 +5415,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
 
   // Operations brain: only content editing tools (fast tool parsing)
   // Thinking brain: full tool set
-  const OPS_TOOLS = ['edit_page_content', 'preview_page', 'patch_aem_page_content', 'publish_page'];
+  const OPS_TOOLS = ['edit_page_content', 'preview_page', 'patch_aem_page_content', 'get_page_content', 'publish_page'];
   const tools = isOps
     ? getToolsForPrompt(promptText).filter(t => OPS_TOOLS.includes(t.name))
     : getToolsForPrompt(promptText);
