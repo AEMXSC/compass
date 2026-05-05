@@ -5089,11 +5089,10 @@ const OPS_BRAIN = `You are Compass in operations mode. You execute content opera
 
 ### JCR/AEM CS sites (Type: aem-cs):
 - EXACTLY 2 tool calls: get-aem-page-content → patch-aem-page-content
-- Call 1: get-aem-page-content with {authorUrl} — returns page structure JSON + etag in response
-- Call 2: patch-aem-page-content with {authorUrl, pageId (from call 1), etag (from call 1), jsonPatch}
+- Call 1: get-aem-page-content with {authorUrl, pageId} — returns page structure JSON + etag
+- Call 2: patch-aem-page-content with {authorUrl, pageId, etag (from call 1 response), jsonPatch}
 - jsonPatch format: [{"op":"replace","path":"/items/0/items/0/properties/text","value":"<h1>New text</h1>"}]
-- Find the hero text in the structure from call 1, note its path, then replace it
-- authorUrl is provided in the context below
+- authorUrl and pageId are provided in the context below — use them directly
 - Do NOT explain. Call tools immediately. Report result in 1 sentence.
 
 ### Both:
@@ -5124,6 +5123,7 @@ function buildSystemParts(context = {}, { fast = false } = {}) {
     if (context.pagePath) siteContext += `Page: ${context.pagePath}. `;
     if (context.siteType) siteContext += `Type: ${context.siteType}. `;
     if (context.authorUrl) siteContext += `authorUrl: ${context.authorUrl}. `;
+    if (context.pageId) siteContext += `pageId: ${context.pageId}. `;
     if (siteContext) blocks.push({ type: 'text', text: siteContext.trim() });
     if (context.pageHTML) {
       blocks.push({ type: 'text', text: `Current page HTML:\n${context.pageHTML.slice(0, 8000)}` });

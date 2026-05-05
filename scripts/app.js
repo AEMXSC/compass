@@ -980,6 +980,7 @@ function getPageContext() {
     siteType: window.__EW_SITE_TYPE || 'unknown',
     aemHost: window.__EW_AEM_HOST || null,
     authorUrl: window.__EW_AEM_HOST || null,
+    pageId: window.__AEM_PAGE_ID || null,
     view: currentPreviewView || 'preview',
     authState: {
       ims: typeof isSignedIn === 'function' ? isSignedIn() : false,
@@ -4084,6 +4085,21 @@ async function connectCustomSite(input) {
       workerBase: WORKER_BASE, authorUrl, jcrPath, org, repo, branch,
       authorPageUrl,
     };
+
+    // Pre-fetch pageId for the current page (needed by MCP tools)
+    import('./mcp-client.js').then(async ({ contentMcp }) => {
+      try {
+        await contentMcp.initSession();
+        const result = await contentMcp.callTool('get-aem-pages', { authorUrl, siteName: repo });
+        if (Array.isArray(result)) {
+          const page = result.find(p => p.authorPath?.endsWith(jcrPath) || p.name === 'index');
+          if (page?.id) {
+            window.__AEM_PAGE_ID = page.id;
+            console.log(`[EW] Pre-fetched pageId: ${page.id.slice(0, 20)}...`);
+          }
+        }
+      } catch (e) { console.warn('[EW] pageId prefetch failed:', e.message); }
+    });
   } else {
     navigateToPage(parsed.path || '/');
   }
