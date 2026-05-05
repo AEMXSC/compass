@@ -5088,12 +5088,13 @@ const OPS_BRAIN = `You are Compass in operations mode. You execute content opera
 - Use edit_page_content with {html} for page creation/full rewrites
 
 ### JCR/AEM CS sites (Type: aem-cs):
-- Use process_page_tool to make edits — it handles everything (reads, edits, creates preview)
-- Pass the author URL + natural language instructions describing the edit
-- Then call get_status_tool to poll until complete (returns preview URL)
-- Call accept_changes_tool to push the changes live
-- You can also call get-aem-page-content to read the current page structure if needed
-- Do NOT output long explanations. Call tools immediately, report result in 1 sentence.
+- EXACTLY 2 tool calls: get-aem-page-content → patch-aem-page-content
+- Call 1: get-aem-page-content with {authorUrl} — returns page structure JSON + etag in response
+- Call 2: patch-aem-page-content with {authorUrl, pageId (from call 1), etag (from call 1), jsonPatch}
+- jsonPatch format: [{"op":"replace","path":"/items/0/items/0/properties/text","value":"<h1>New text</h1>"}]
+- Find the hero text in the structure from call 1, note its path, then replace it
+- authorUrl is provided in the context below
+- Do NOT explain. Call tools immediately. Report result in 1 sentence.
 
 ### Both:
 - After ANY write: preview refreshes automatically
@@ -5430,13 +5431,10 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const siteType = window.__EW_SITE_TYPE || 'unknown';
   let tools;
   if (isOps && siteType === 'aem-cs') {
-    // JCR OPS: Content MCP for reads + Experience Production Agent for writes
-    await Promise.allSettled([contentMcp.initSession(), experienceProductionMcp.initSession()]);
-    const contentTools = contentMcp.getClaudeTools().filter(t => t.name === 'get-aem-page-content');
-    const prodTools = experienceProductionMcp.getClaudeTools().filter(t =>
-      ['process_page_tool', 'get_status_tool', 'accept_changes_tool'].includes(t.name)
-    );
-    tools = [...contentTools, ...prodTools];
+    // JCR OPS: Content MCP only — get + patch (same as Claude.ai, 2 synchronous calls)
+    await contentMcp.initSession();
+    const mcpTools = contentMcp.getClaudeTools();
+    tools = mcpTools.filter(t => ['get-aem-page-content', 'patch-aem-page-content'].includes(t.name));
     if (tools.length === 0) {
       tools = getToolsForPrompt(promptText).filter(t => ['get_page_content', 'patch_aem_page_content'].includes(t.name));
     }
@@ -5449,7 +5447,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   }
 
   let fullText = '';
-  const MAX_TOOL_ROUNDS = isOps ? 5 : 8;
+  const MAX_TOOL_ROUNDS = isOps ? 3 : 8;
 
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
