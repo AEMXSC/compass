@@ -4709,10 +4709,10 @@ You have 50 tools spanning 22 Adobe AI Agents. USE THEM when relevant — the AI
 - **get_aem_sites** — Discover all AEM Edge Delivery sites. Call first when users mention any site.
 - **get_aem_site_pages** — Get pages for a site (paths, titles, descriptions).
 - **get_page_content** — Fetch HTML content from a DA/EDS page via .plain.html. Returns content with an ETag.
-- **search-aem-pages** — Search JCR/AEM CS pages by keyword. Returns page objects with UUID `id` fields — use these as `pageId` for get/patch calls, not the `/content/...` JCR path.
-- **get-aem-page-content** — Fetch JCR page content as a structured map `{id, properties:{…}, items:{…}}` plus ETag. Read the response to discover the exact property keys and item paths before patching.
+- **search-aem-pages** — Search JCR/AEM CS pages by keyword. Returns page objects with UUID id fields — use the id value as pageId for get/patch calls, not the /content/... JCR path.
+- **get-aem-page-content** — Fetch JCR page content as a structured map {id, properties:{}, items:{}} plus ETag. Read the response to discover the exact property keys and item paths before patching.
 - **copy_aem_page** — Copy a page as a template to create a new page. Returns ETag and edit URLs.
-- **patch_aem_page_content** / **patch-aem-page-content** — Apply a JSON Patch array to a JCR page. Requires the UUID pageId and eTag from a prior get call. Paths must match the actual structure returned by get-aem-page-content: page properties are at `/properties/<key>`, component properties are at `/items/<key>/items/<key>/properties/<key>`.
+- **patch_aem_page_content** / **patch-aem-page-content** — Apply a JSON Patch array to a JCR page. Requires the UUID pageId and eTag from a prior get call. Paths must match the actual structure returned by get-aem-page-content: page properties at /properties/key, component properties at /items/key/items/key/properties/key.
 - **create_aem_launch** — Create a Launch (review branch) as a governance gate before publishing.
 - **promote_aem_launch** — Promote a Launch to publish live (only after governance approval).
 
