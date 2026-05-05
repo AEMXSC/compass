@@ -6537,12 +6537,13 @@ async function init() {
   // Load user profile (from cache or IMS API) — needed for auth UI
   if (isSignedIn()) {
     await fetchUserProfile();
+  } else if (typeof window.adobeIMS !== 'undefined') {
+    // imslib loaded but no token — auto-sign-in (redirect to IMS)
+    signIn();
+    return; // Page will redirect and return with token
   }
 
   updateAuthUI();
-
-  // NO auto sign-in. User clicks "Sign In" button when ready.
-  // This prevents any redirect to da.live.
 
   // Auto-connect site if a profile/site is already set (DA sites only — JCR render is slow)
   if (AEM_ORG.orgId && AEM_ORG.repo && !AEM_ORG.previewOrigin?.includes('adobeaemcloud.com')) {

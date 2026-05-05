@@ -239,6 +239,8 @@ export async function loadIms() {
           syncImsProfile();
           resolve({ anonymous: false, method: 'user' });
         } else {
+          // imslib loaded but no valid token — user needs to sign in
+          console.log('[IMS] imslib ready but no token — sign in required');
           resolve({ anonymous: true, method: 'none' });
         }
       },
