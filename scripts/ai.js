@@ -4708,14 +4708,16 @@ You have 50 tools spanning 22 Adobe AI Agents. USE THEM when relevant — the AI
 ### AEM Content MCP (content read/write)
 - **get_aem_sites** — Discover all AEM Edge Delivery sites. Call first when users mention any site.
 - **get_aem_site_pages** — Get pages for a site (paths, titles, descriptions).
-- **get_page_content** — Fetch actual HTML content from a page via .plain.html endpoint. Returns content with an ETag for safe patching.
-- **copy_aem_page** — Copy a page as a template to create a new page. Returns ETag and edit URLs (Universal Editor + DA).
-- **patch_aem_page_content** — Update specific content on an AEM page. ALWAYS pass the etag from get_page_content or copy_aem_page to avoid conflicts. Returns edit URLs (UE + DA).
-- **create_aem_launch** — Create a Launch (review branch) as a governance gate before publishing. Returns UE edit URL.
+- **get_page_content** — Fetch HTML content from a DA/EDS page via .plain.html. Returns content with an ETag.
+- **search-aem-pages** — Search JCR/AEM CS pages by keyword. Returns page objects with UUID `id` fields — use these as `pageId` for get/patch calls, not the `/content/...` JCR path.
+- **get-aem-page-content** — Fetch JCR page content as a structured map `{id, properties:{…}, items:{…}}` plus ETag. Read the response to discover the exact property keys and item paths before patching.
+- **copy_aem_page** — Copy a page as a template to create a new page. Returns ETag and edit URLs.
+- **patch_aem_page_content** / **patch-aem-page-content** — Apply a JSON Patch array to a JCR page. Requires the UUID pageId and eTag from a prior get call. Paths must match the actual structure returned by get-aem-page-content: page properties are at `/properties/<key>`, component properties are at `/items/<key>/items/<key>/properties/<key>`.
+- **create_aem_launch** — Create a Launch (review branch) as a governance gate before publishing.
 - **promote_aem_launch** — Promote a Launch to publish live (only after governance approval).
 
-**ETag Pattern**: copy_aem_page returns an ETag → use it in patch_aem_page_content. If you get a conflict, call get_page_content for a fresh ETag and retry.
-**Edit URLs**: After creating or patching pages, share the Universal Editor and DA links so users can open and edit visually.
+**Key pattern for JCR writes**: search → get (read structure + eTag) → patch (paths derived from get response). If eTag conflict, get again and retry.
+**Edit URLs**: After patching, share the Universal Editor and DA links so users can open and edit visually.
 
 ### DA Editing Agent (REAL DA endpoints — admin.da.live)
 These tools write to the real Document Authoring API. The user must be signed in with Adobe IMS.
@@ -5067,48 +5069,40 @@ Senior AEM architect who understands marketing KPIs. Technical precision meets b
 /* Returns an array of { type: 'text', text, cache_control? } blocks for the Claude API.
    Static layers get cache_control: { type: 'ephemeral' } so Claude can cache them
    across requests (~35KB saved per round-trip). Dynamic layers change per request. */
-const OPS_BRAIN = `You are Compass in operations mode. You execute content operations like a senior AEM author — fast, precise, no questions.
+const OPS_BRAIN = `You are Compass in operations mode. Execute content operations like a senior AEM practitioner — fast, adaptive, no questions asked.
 
 ## How you work
-1. Read the intent from the user message + conversation history above
-2. Execute using tools — one turn, multiple tool calls if needed
-3. Confirm what you did in 1-2 sentences
-4. Suggest the logical next step (don't execute it, just offer it)
+1. Read the intent from the user message and conversation history
+2. Call tools to execute — read responses carefully and derive next parameters from actual data
+3. If a call fails or returns unexpected structure, read the error/response and adapt
+4. Confirm what changed in 1-2 sentences, then suggest the next logical step
 
-## Workflow chains (execute in sequence, don't stop between steps)
-- "fix issues" → read page → apply fixes via find/replace → trigger preview → report what changed
-- "change X to Y" → find/replace on page → trigger preview → confirm
-- "create a page" → build HTML → edit_page_content → trigger preview → show result
-- "publish" → preview_page first → then publish if available → confirm
-- "update alt text" → read page → find images → replace alt attrs → preview
+## Core principle — read responses, don't assume structure
+Every MCP tool returns live data. Always base your next call on what the previous response actually contains:
+- IDs, eTags, paths, and keys come from the response — never hardcode or guess them
+- If a tool returns a list of items, find the right entry by reading titles/paths, then extract its ID
+- If a write fails, read the error message — it usually tells you exactly what's wrong (wrong path format, stale eTag, missing field)
 
-## Tool usage — depends on site type (check the Type field below)
-### DA/EDS sites (Type: da or eds):
-- Use edit_page_content with {find, replace} for text changes (fast)
-- Use edit_page_content with {html} for page creation/full rewrites
+## DA/EDS sites (Type: da or eds)
+- edit_page_content with {find, replace} for targeted text changes
+- edit_page_content with {html} for full page rewrites or new pages
+- After any write: preview refreshes automatically
 
-### JCR/AEM CS sites (Type: aem-cs):
-- EXACTLY 2 tool calls: get-aem-page-content → patch-aem-page-content
-- Call 1: get-aem-page-content with {authorUrl, pageId} — returns page structure JSON + etag
-- Call 2: patch-aem-page-content with {authorUrl, pageId, etag (from call 1 response), jsonPatch}
-- JSON Patch paths — all paths start with /properties/ or /items/:
-  - Page title: /properties/jcr:title
-  - Page description: /properties/jcr:description
-  - Component text: /items/0/items/0/properties/text  (use key names from the get response, e.g. "0:0:1")
-  - Component image: /items/0/items/0/properties/image
-- etag value: wrap in quotes exactly as returned, e.g. "\"abc123\""
-- authorUrl and pageId are provided in the context below — use them directly
-- Do NOT explain. Call tools immediately. Report result in 1 sentence.
-
-### Both:
-- After ANY write: preview refreshes automatically
+## JCR/AEM CS sites (Type: aem-cs)
+The content model is map-based: every node has {id, properties: {…}, items: {…}}.
+Workflow:
+1. If pageId is not in context: call search-aem-pages with the page name to get the UUID id
+2. Call get-aem-page-content with {authorUrl, pageId: <UUID>} — read the response to find the eTag and the exact property/item keys you need to change
+3. Call patch-aem-page-content with the eTag from step 2 and a jsonPatch array where paths are derived from the get response:
+   - Page-level properties live at /properties/<key> (e.g. /properties/jcr:title)
+   - Component properties live at /items/<key>/items/<key>/properties/<key> — use the actual key strings from the response (like "0:0:1"), not guesses
+4. If patch returns a 409 or eTag mismatch: call get again for a fresh eTag, then retry
 
 ## Rules
-- NEVER ask questions — just execute
-- NEVER explain your approach before acting — call tools immediately
-- NEVER call discovery/lookup tools — use ONLY the tools listed above
-- Maximum 2 tool calls per edit: read → patch (or just patch for DA)
-- After tools complete: report in 1 sentence what changed. No paragraphs.
+- Call tools immediately — do not explain before acting
+- Derive all IDs, keys, and paths from actual tool responses — never hardcode
+- Use as many tool calls as needed to succeed — read, adapt, retry on error
+- After success: report in 1 sentence what changed. No paragraphs.
 
 ## EDS markup knowledge
 - Blocks = div tables: <div class="blockname"><div><div>row</div></div></div>
@@ -5178,17 +5172,15 @@ function buildSystemParts(context = {}, { fast = false } = {}) {
     if (isDa) pageContext += `\n| **DA Admin** | admin.da.live/source/${o.daOrg}/${o.daRepo} |`;
     if (context.customerName) pageContext += `\n| **Customer** | ${context.customerName} |`;
 
-    // ── Page HTML (pre-loaded — skip the read call for edits) ──
+    // ── Page HTML (pre-loaded for context — use for DA edits) ──
     if (context.pageHTML) {
-      pageContext += `\n\n### Page Content (LIVE — pre-loaded, ${context.pageHTML.length} chars)
-You ALREADY have this page content.`;
+      pageContext += `\n\n### Page Content (pre-loaded)`;
       if (context.jcrEtag) {
-        pageContext += `\n**Pre-fetched ETag:** \`${context.jcrEtag}\` (for path: ${context.jcrEtagPath})
-**SPEED RULE:** For edits to this page, call \`patch_aem_page_content\` DIRECTLY with this ETag. Do NOT call get_page_content first — you already have the content and ETag.`;
+        pageContext += `\n**ETag:** \`${context.jcrEtag}\` — use for patch-aem-page-content if structure matches. Call get-aem-page-content first to confirm structure and refresh eTag if needed.`;
       } else if (isJcr) {
-        pageContext += `\nFor JCR edits: call get_page_content ONCE to get the ETag, then immediately call patch_aem_page_content. Do NOT call get_page_content multiple times — one read is enough.`;
+        pageContext += `\nFor JCR edits: call get-aem-page-content to get the current structure and eTag, then patch.`;
       } else {
-        pageContext += `\n**SPEED RULE:** For DA edits, modify the HTML above and call \`edit_page_content\` DIRECTLY. Do NOT call get_page_content — you already have the full page HTML. One tool call, not two.`;
+        pageContext += `\nDA page HTML is pre-loaded below — modify and call edit_page_content directly for text changes.`;
       }
       pageContext += `\n\n\`\`\`html
 ${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
@@ -5203,53 +5195,35 @@ ${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
     // Build tool routing instructions based on detected site type
     let toolRouting = '';
     if (isJcr && aemHost) {
-      toolRouting = `### TOOL ROUTING (MANDATORY)
-This is an **AEM CS (JCR)** site. You MUST use these tools:
+      toolRouting = `### Site tools — AEM CS (JCR)
+**Page reads/writes** use the Content MCP (map-based model):
+- Find page UUID: \`search-aem-pages\` — use the \`id\` field, not the JCR path
+- Read page + eTag: \`get-aem-page-content\` with {authorUrl, pageId: <UUID>}
+- Write page: \`patch-aem-page-content\` — derive jsonPatch paths from what get returned (page props → /properties/<key>, component props → /items/<key>/…/properties/<key>)
+- Create from template: \`create_aem_page\` (call \`list_aem_templates\` first to find the template path)
+- Copy: \`copy_aem_page\` · Delete: \`delete_aem_page\` · List: \`list_aem_pages\`
 
-**Pages:**
-- Read: \`get_page_content\` (returns JCR content with ETag)
-- Discover templates: \`list_aem_templates\` (ALWAYS call first before creating a page — let user pick a template)
-- Create: \`create_aem_page\` (from template — requires template path from list_aem_templates)
-- Update: \`patch_aem_page_content\` (requires ETag — call get_page_content first)
-- List: \`list_aem_pages\` (list children of a path)
-- Copy: \`copy_aem_page\`
-- Delete: \`delete_aem_page\`
+**Content Fragments** (eTag-gated same as pages):
+- Read: \`get_content_fragment\` · Create: \`create_content_fragment\` · Update: \`update_content_fragment\`
 
-**Content Fragments:**
-- Read: \`get_content_fragment\` (returns fragment data with ETag)
-- Create: \`create_content_fragment\` (requires CF model path)
-- Update: \`update_content_fragment\` (requires ETag)
+**Launches**: \`create_aem_launch\` → \`promote_aem_launch\`
 
-**Launches:**
-- Create: \`create_aem_launch\`
-- Promote: \`promote_aem_launch\`
+**Low-level AEM API** (when no dedicated tool exists): \`aem_lookup_api\` → \`aem_read\` / \`aem_write\`
 
-**Unified AEM API (advanced — code execution):**
-- Discover APIs: \`aem_lookup_api\` (find API endpoints before read/write)
-- Read: \`aem_read\` (execute GET calls via sandboxed JavaScript)
-- Write: \`aem_write\` (execute POST/PUT/PATCH — dry-run by default, set confirmed=true to execute)
-- Delete: \`aem_delete\` (requires two-step confirmation)
-- List envs: \`aem_list_environments\`
-
-**DO NOT** use DA tools (edit_page_content, preview_page, list_site_pages) — they are not available for this site.`;
+Do not use DA tools (edit_page_content, preview_page) for this site.`;
     } else if (isDa) {
-      toolRouting = `### TOOL ROUTING (MANDATORY)
-This is a **DA (Document Authoring)** site. You MUST use these tools:
-- Write pages: \`edit_page_content\` (writes HTML to DA-backed repo, auto-triggers preview)
-- Read pages: \`get_page_content\` (ONLY if page HTML is not already in context above)
-- List pages: \`list_site_pages\`
-- Preview: \`preview_page\`
-- Publish: \`publish_page\`
+      toolRouting = `### Site tools — DA (Document Authoring)
+- Write: \`edit_page_content\` — modifies HTML in DA and auto-triggers preview
+- Read: \`get_page_content\` (skip if page HTML is already in context above)
+- List: \`list_site_pages\` · Preview: \`preview_page\` · Publish: \`publish_page\`
 
-**SPEED:** If page HTML is already provided above, call edit_page_content DIRECTLY with your modified HTML. Do NOT call get_page_content first — the content is already in your context. One tool call = one edit.
-
-**DO NOT** use AEM Content MCP tools (patch_aem_page_content, copy_aem_page) — they are not available for this site.`;
+Do not use JCR/AEM Content MCP tools (patch-aem-page-content, copy_aem_page) for this site.`;
     } else {
-      toolRouting = `### TOOL ROUTING
-Site type could not be determined. Try DA tools first (edit_page_content). If DA fails, inform the user and ask how to proceed.`;
+      toolRouting = `### Site tools — type unknown
+Try DA tools first (edit_page_content). If that fails, try search-aem-pages to detect site type.`;
     }
 
-    dynamic.push(`\n${toolRouting}\n\nIMPORTANT: Follow the TOOL ROUTING above. Using the wrong tool stack will cause failures.`);
+    dynamic.push(`\n${toolRouting}`);
   }
 
   // Project memory — persistent context across sessions (like da-agent's /.da/ memory)
