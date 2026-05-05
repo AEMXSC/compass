@@ -6590,6 +6590,22 @@ async function init() {
 
   console.log('[Compass] init v25');
 
+  // Detect MCP token delivered via URL hash by the connect-aem helper script
+  // Hash format: #mcp_token=TOKEN&mcp_refresh=REFRESH
+  if (window.location.hash.includes('mcp_token=')) {
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
+    const mcpToken = hashParams.get('mcp_token');
+    const mcpRefresh = hashParams.get('mcp_refresh');
+    if (mcpToken) {
+      localStorage.setItem('ew-mcp-token', mcpToken);
+      if (mcpRefresh) localStorage.setItem('ew-mcp-refresh', mcpRefresh);
+      console.log('[MCP-OAuth] Write token received via URL relay');
+      // Clean up hash without triggering a reload
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      showToast('AEM Content connected — write access enabled', 'success');
+    }
+  }
+
   // Render recent repos on home view
   renderRecentRepos();
 
