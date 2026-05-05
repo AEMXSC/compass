@@ -116,6 +116,12 @@ async function route(request, env) {
   if (url.pathname === '/mcp' && request.method === 'POST') {
     return handleMcpProxy(request, env);
   }
+  if (url.pathname === '/mcp-oauth/start' && request.method === 'GET') {
+    return handleMcpOAuthStart(request);
+  }
+  if (url.pathname === '/mcp-oauth/token' && request.method === 'POST') {
+    return handleMcpOAuthToken(request);
+  }
   if (url.pathname === '/asset' && request.method === 'GET') {
     return handleAssetProxy(request);
   }
@@ -1363,4 +1369,96 @@ async function handleBrowserRender(request, env) {
       headers: { 'Access-Control-Allow-Origin': origin, 'Content-Type': 'text/plain' },
     });
   }
+}
+
+/* ─── MCP OAuth Flow (for Content MCP write access) ─── */
+/* Uses oauth.adobeaemcloud.com with http://localhost redirect + PKCE */
+
+const MCP_OAUTH_CLIENT_ID = 'MTAwNy1VOUJTNS15QUdRUnhTTVlZZzFUcDV3LmhWLUlvNVNPZEl3dURaaTNEV0RxMHZ4WU1uSmt6SnYy';
+const MCP_OAUTH_CLIENT_SECRET = '1007-U9BS5-yAGQRxSMYYg1Tp5whV-Io5SOdIwuDZi3DWDq0vxYMnJkzJv2Bd2jjwP9J362Ev_aFF0MKbeaN7cyRivr_-Xb7Fk2mUY';
+const MCP_OAUTH_REDIRECT_URI = 'http://localhost';
+
+// In-memory PKCE store (per-worker, ephemeral)
+const pkceStore = new Map();
+
+async function handleMcpOAuthStart(request) {
+  const url = new URL(request.url);
+  const origin = request.headers.get('Origin') || '';
+
+  // Generate PKCE code_verifier + code_challenge
+  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+  const codeVerifier = btoa(String.fromCharCode(...verifierBytes)).replace(/[+/=]/g, c => ({ '+': '-', '/': '_', '=': '' }[c]));
+  const challengeBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
+  const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(challengeBuffer))).replace(/[+/=]/g, c => ({ '+': '-', '/': '_', '=': '' }[c]));
+
+  // Store verifier with a state key
+  const state = crypto.randomUUID();
+  pkceStore.set(state, { codeVerifier, created: Date.now() });
+
+  // Clean old entries
+  for (const [k, v] of pkceStore) {
+    if (Date.now() - v.created > 600000) pkceStore.delete(k);
+  }
+
+  const params = new URLSearchParams({
+    client_id: MCP_OAUTH_CLIENT_ID,
+    redirect_uri: MCP_OAUTH_REDIRECT_URI,
+    response_type: 'code',
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    state,
+  });
+
+  return Response.redirect(`https://oauth.adobeaemcloud.com/oauth/authorize?${params}`, 302);
+}
+
+async function handleMcpOAuthToken(request) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const body = await request.json();
+  const { code, state } = body;
+
+  if (!code || !state) {
+    return new Response(JSON.stringify({ error: 'Missing code or state' }), {
+      status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': origin },
+    });
+  }
+
+  const pkce = pkceStore.get(state);
+  if (!pkce) {
+    return new Response(JSON.stringify({ error: 'Invalid or expired state' }), {
+      status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': origin },
+    });
+  }
+  pkceStore.delete(state);
+
+  // Exchange code for token
+  const tokenBody = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: MCP_OAUTH_CLIENT_ID,
+    client_secret: MCP_OAUTH_CLIENT_SECRET,
+    code,
+    redirect_uri: MCP_OAUTH_REDIRECT_URI,
+    code_verifier: pkce.codeVerifier,
+  });
+
+  const tokenResp = await fetch('https://oauth.adobeaemcloud.com/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: tokenBody,
+  });
+
+  const tokenData = await tokenResp.json();
+
+  return new Response(JSON.stringify(tokenData), {
+    status: tokenResp.ok ? 200 : 502,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
 }
