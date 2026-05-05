@@ -1565,7 +1565,7 @@ export const TOOL_AGENT_MAP = {
   translate_page: 'Experience Production Agent',
   modernize_content: 'Experience Production Agent',
   copy_aem_page: 'Experience Production Agent',
-  patch_aem_page_content: 'Experience Production Agent',
+  patch_aem_page_content: 'AEM Cloud Service',
   create_aem_page: 'Experience Production Agent',
   list_aem_pages: 'Experience Production Agent',
   // ── Unified AEM MCP (code-execution model) ──
@@ -2059,6 +2059,10 @@ export async function executeTool(name, input) {
     }
 
     case 'patch_aem_page_content': {
+      // If Content MCP is registered (OAuth token present), it owns this tool — don't double-write via EPA
+      if (getMcpRegistry()['patch_aem_page_content']) {
+        return JSON.stringify({ error: 'patch_aem_page_content must be called via Content MCP — connect AEM Content first' });
+      }
       if (!(await ensureAuth())) return authRequiredError('patch_aem_page_content');
       const fields = Object.keys(input.updates || {});
       const host = window.__EW_AEM_HOST || null;
