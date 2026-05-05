@@ -5235,12 +5235,31 @@ Use when the user wants: full page rewrites, new pages from templates, content g
 | Create a new page from template | EPA: process_page_tool with template instructions |
 | Translate or modernize a page | EPA: process_page_tool |
 
+**Experience Governance MCP** — Brand compliance validation (the gate before publish):
+Use after any content change when the user asks to check brand alignment, run governance, or before accepting EPA output to production.
+- \`bga_list_brands\` — List all configured brands in the org
+- \`bga_get_checks_by_url\` — Resolve a page URL to its brand and return that brand's guidelines (fastest way to discover rules)
+- \`bga_get_checks_by_brand\` — Get guidelines for a specific brand by ID
+- \`bga_evaluate_text\` — Check a text string against brand rules. Pass text + brand_id or URL. Returns pass/fail per check with reasoning.
+- \`bga_evaluate_image\` — Check an image (URL or base64) against brand rules. Returns pass/fail per visual check.
+- \`bga_evaluate_page\` — Crawl a full page URL, extract text + up to 5 images, evaluate everything in one call. Best for a complete pre-publish check.
+
+**AI content supply chain** (full pipeline):
+\`process_page_tool\` (generate) → \`accept changes\` (place in AEM/DA) → \`bga_evaluate_page\` (validate) → publish
+Run governance BEFORE calling \`accept_changes_tool\` so brand failures are caught before they go live.
+
 Do not use DA tools (edit_page_content, preview_page) for this site.`;
     } else if (isDa) {
       toolRouting = `### Site tools — DA (Document Authoring)
 - Write: \`edit_page_content\` — modifies HTML in DA and auto-triggers preview
 - Read: \`get_page_content\` (skip if page HTML is already in context above)
 - List: \`list_site_pages\` · Preview: \`preview_page\` · Publish: \`publish_page\`
+
+**Experience Governance MCP** — Run before publishing to catch brand alignment issues:
+- \`bga_evaluate_page\` — Full page check: crawls URL, evaluates text + images against brand rules in one call
+- \`bga_evaluate_text\` — Check a specific text string against brand guidelines
+- \`bga_get_checks_by_url\` — Discover which brand governs a URL and get its guidelines
+Run \`bga_evaluate_page\` after \`edit_page_content\` + \`preview_page\` when user asks for governance/brand check.
 
 Do not use JCR/AEM Content MCP tools (patch-aem-page-content, copy_aem_page) for this site.`;
     } else {
