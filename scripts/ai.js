@@ -5426,10 +5426,15 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const siteType = window.__EW_SITE_TYPE || 'unknown';
   let tools;
   if (isOps && siteType === 'aem-cs') {
-    // JCR OPS: use native MCP tools (get-aem-page-content, patch-aem-page-content)
+    // JCR OPS: ensure MCP session is ready, then use native tools
+    await contentMcp.initSession();
     const mcpTools = contentMcp.getClaudeTools();
     const JCR_OPS_MCP = ['get-aem-page-content', 'patch-aem-page-content'];
     tools = mcpTools.filter(t => JCR_OPS_MCP.includes(t.name));
+    if (tools.length === 0) {
+      // Fallback: MCP didn't return expected tools — use hardcoded
+      tools = getToolsForPrompt(promptText).filter(t => ['get_page_content', 'patch_aem_page_content'].includes(t.name));
+    }
   } else if (isOps) {
     // DA OPS: use Compass's tools
     const OPS_TOOLS = ['edit_page_content', 'preview_page', 'publish_page'];
