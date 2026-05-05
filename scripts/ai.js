@@ -14,7 +14,7 @@ import * as da from './da-client.js';
 import { isSignedIn, getToken, signIn } from './ims.js';
 import { hasGitHubToken, readContent as ghReadContent, writeContent as ghWriteContent, triggerPreview as ghTriggerPreview, getRepoInfo, listBranches as ghListBranches } from './github-content.js';
 import * as aemContent from './aem-content-mcp-client.js';
-import { contentMcp } from './mcp-client.js';
+import { contentMcp, experienceProductionMcp } from './mcp-client.js';
 import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
@@ -5088,11 +5088,12 @@ const OPS_BRAIN = `You are Compass in operations mode. You execute content opera
 - Use edit_page_content with {html} for page creation/full rewrites
 
 ### JCR/AEM CS sites (Type: aem-cs):
-- EXACTLY 2 tool calls. No more.
-- Call 1: get-aem-page-content with {authorUrl, pageId} → returns page structure + etag
-- Call 2: patch-aem-page-content with {authorUrl, pageId, etag, jsonPatch} → applies the edit
-- The jsonPatch is a JSON array of RFC 6902 operations, e.g.: [{"op":"replace","path":"/items/0/items/0/properties/text","value":"<h1>New headline</h1>"}]
-- Do NOT output explanations. Call tools immediately, report result in 1 sentence.
+- Use process_page_tool to make edits — it handles everything (reads, edits, creates preview)
+- Pass the author URL + natural language instructions describing the edit
+- Then call get_status_tool to poll until complete (returns preview URL)
+- Call accept_changes_tool to push the changes live
+- You can also call get-aem-page-content to read the current page structure if needed
+- Do NOT output long explanations. Call tools immediately, report result in 1 sentence.
 
 ### Both:
 - After ANY write: preview refreshes automatically
@@ -5311,8 +5312,11 @@ export async function chat(userMessage, context = {}, _depth = 0) {
     for (const block of data.content) {
       if (block.type === 'tool_use') {
         let result;
-        if (block.name.includes('-') && contentMcp.getToolSchemas()?.[block.name]) {
+        if (contentMcp.getToolSchemas()?.[block.name]) {
           const mcpResult = await contentMcp.callTool(block.name, block.input);
+          result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
+        } else if (experienceProductionMcp.getToolSchemas()?.[block.name]) {
+          const mcpResult = await experienceProductionMcp.callTool(block.name, block.input);
           result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         } else {
           result = await executeTool(block.name, block.input);
@@ -5426,13 +5430,14 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const siteType = window.__EW_SITE_TYPE || 'unknown';
   let tools;
   if (isOps && siteType === 'aem-cs') {
-    // JCR OPS: ensure MCP session is ready, then use native tools
-    await contentMcp.initSession();
-    const mcpTools = contentMcp.getClaudeTools();
-    const JCR_OPS_MCP = ['get-aem-page-content', 'patch-aem-page-content'];
-    tools = mcpTools.filter(t => JCR_OPS_MCP.includes(t.name));
+    // JCR OPS: Content MCP for reads + Experience Production Agent for writes
+    await Promise.allSettled([contentMcp.initSession(), experienceProductionMcp.initSession()]);
+    const contentTools = contentMcp.getClaudeTools().filter(t => t.name === 'get-aem-page-content');
+    const prodTools = experienceProductionMcp.getClaudeTools().filter(t =>
+      ['process_page_tool', 'get_status_tool', 'accept_changes_tool'].includes(t.name)
+    );
+    tools = [...contentTools, ...prodTools];
     if (tools.length === 0) {
-      // Fallback: MCP didn't return expected tools — use hardcoded
       tools = getToolsForPrompt(promptText).filter(t => ['get_page_content', 'patch_aem_page_content'].includes(t.name));
     }
   } else if (isOps) {
@@ -5444,7 +5449,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   }
 
   let fullText = '';
-  const MAX_TOOL_ROUNDS = isOps ? 3 : 8;
+  const MAX_TOOL_ROUNDS = isOps ? 5 : 8;
 
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -5505,9 +5510,11 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
       if (abortCtrl.signal.aborted) throw new Error('Aborted');
       if (onToolCall) onToolCall(toolBlock.name, toolBlock.input);
       let result;
-      if (toolBlock.name.includes('-') && contentMcp.getToolSchemas()?.[toolBlock.name]) {
-        // MCP tool — route directly to Content MCP session
+      if (contentMcp.getToolSchemas()?.[toolBlock.name]) {
         const mcpResult = await contentMcp.callTool(toolBlock.name, toolBlock.input);
+        result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
+      } else if (experienceProductionMcp.getToolSchemas()?.[toolBlock.name]) {
+        const mcpResult = await experienceProductionMcp.callTool(toolBlock.name, toolBlock.input);
         result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
       } else {
         result = await executeTool(toolBlock.name, toolBlock.input);
