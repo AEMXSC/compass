@@ -20,7 +20,7 @@ const IMS_CLIENT_ID = 'aem-extension-builder';
 const IMS_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext';
 const IMS_REDIRECT_URI = 'https://eds-migration--compass--aemxsc.aem.page/';
 const IMS_WORKER = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
-const IMSLIB_INIT_TIMEOUT_MS = 10000;
+const IMSLIB_INIT_TIMEOUT_MS = 3000;
 
 const STORAGE_KEYS = Object.freeze({
   TOKEN: 'ew-ims-token',

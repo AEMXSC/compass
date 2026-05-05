@@ -4042,7 +4042,7 @@ async function connectCustomSite(input) {
         if (resp.ok) {
           let html = await resp.text();
           // Strip scripts — preview is visual only
-          html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+          html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
           // Use blob URL instead of srcdoc to avoid freezing main thread on large HTML
           const blob = new Blob([html], { type: 'text/html' });
           const blobUrl = URL.createObjectURL(blob);
@@ -6545,8 +6545,8 @@ async function init() {
   // NO auto sign-in. User clicks "Sign In" button when ready.
   // This prevents any redirect to da.live.
 
-  // Auto-connect site if a profile/site is already set
-  if (AEM_ORG.orgId && AEM_ORG.repo) {
+  // Auto-connect site if a profile/site is already set (DA sites only — JCR render is slow)
+  if (AEM_ORG.orgId && AEM_ORG.repo && !AEM_ORG.previewOrigin?.includes('adobeaemcloud.com')) {
     connectSite();
     addMessage('assistant', md(`**Connected to ${AEM_ORG.name}** (${AEM_ORG.orgId}/${AEM_ORG.repo})\nSite loaded. You can:\n- **Prompt to edit**: "Change the hero headline"\n- **Set up experiments**: "A/B test the hero on the homepage"\n- **Generate variations**: "Create 3 hero variations targeting millennials"\n- **Add forms**: "Add a contact form to /contact"\n- **Switch site**: Click the site URL in the toolbar to connect a different repo`));
     previewFrame.addEventListener('load', () => ensurePageContext(), { once: true });
