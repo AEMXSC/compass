@@ -4146,12 +4146,13 @@ async function connectCustomSite(input) {
         await contentMcp.initSession();
         const result = await contentMcp.callTool('search-aem-pages', { authorUrl, q: jcrPath.split('/').pop() || 'index' });
         // callTool already parses the search response into an array
-        let pages = Array.isArray(result) ? result : [];
+        const pages = Array.isArray(result) ? result : [];
+        // Only use an exact or prefix match — never fall back to an unrelated page
         const page = pages.find((p) =>
           p.authorPath === jcrPath
           || p.authorPath === `${jcrPath}/index`
           || p.authorPath?.startsWith(jcrPath + '/')
-        ) || pages.find((p) => !p.authorPath?.includes('/launches/'));
+        );
         if (page?.id) {
           window.__AEM_PAGE_ID = page.id;
           console.log(`[EW] Pre-fetched pageId for ${page.authorPath}: ${page.id.slice(0, 30)}...`);

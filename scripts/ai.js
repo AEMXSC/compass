@@ -5093,7 +5093,7 @@ The content model is map-based. get-aem-page-content returns:
 { eTag: '"abc123"', id, properties: {…}, items: { "0": { items: { "0:0": { items: { "0:0:0": { properties: { text: "…" } } } } } } } }
 
 Workflow:
-1. If pageId is not in context: call search-aem-pages with the page name to get the UUID id field
+1. If pageId is not in context: call search-aem-pages with {authorUrl, q: "<page name>"} to get the UUID id field
 2. Call get-aem-page-content — response has eTag at root (already quoted, pass it as-is)
 3. Navigate items to find the property to change. Map keys like "0", "0:0", "0:0:0" are the actual key strings.
 4. Call patch-aem-page-content with:
