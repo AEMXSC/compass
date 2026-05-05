@@ -2058,9 +2058,8 @@ async function handleRealChat(text, file) {
         showToast('Preview refreshing...', 'info');
 
         if (window.__JCR_PREVIEW_CONFIG) {
-          // JCR edits take time to propagate — refresh twice
-          setTimeout(() => window.__refreshJcrPreview?.(), 2000);
-          setTimeout(() => window.__refreshJcrPreview?.(), 6000);
+          // JCR: single background re-render after edit propagates
+          setTimeout(() => window.__refreshJcrPreview?.(), 3000);
         } else if (previewFrame && AEM_ORG.previewOrigin) {
           // DA site: reload from .aem.page after CDN propagation
           const refreshPreview = () => {
@@ -4092,13 +4091,16 @@ async function connectCustomSite(input) {
   window.__refreshJcrPreview = () => {
     const cfg = window.__JCR_PREVIEW_CONFIG;
     if (!cfg || !previewFrame) return;
-    showToast('Refreshing author preview...', 'info');
+    showToast('Refreshing preview...', 'info');
     const tk = getToken();
     const renderUrl = `${cfg.workerBase}/render?url=${encodeURIComponent(cfg.authorPageUrl)}&token=${encodeURIComponent(tk || '')}`;
     fetch(renderUrl, { mode: 'cors' }).then(async (resp) => {
       if (resp.ok) {
-        const html = await resp.text();
-        previewFrame.srcdoc = html;
+        let html = await resp.text();
+        html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+        const blob = new Blob([html], { type: 'text/html' });
+        previewFrame.removeAttribute('srcdoc');
+        previewFrame.src = URL.createObjectURL(blob);
         cachedPageHTML = html;
         showToast('Preview updated', 'success');
       } else {
