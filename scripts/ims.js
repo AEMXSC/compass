@@ -112,70 +112,80 @@ export async function signIn() {
   return true;
 }
 
+const MCP_LOCAL_SERVER = 'http://localhost';
+
 /**
  * MCP OAuth — get a write-capable token for Content MCP.
- * Uses oauth.adobeaemcloud.com with PKCE + http://localhost redirect.
- * Browser generates PKCE (stateless Worker — no shared in-memory state across CF instances).
- * Opens popup → user authenticates → captures code from failed localhost redirect → exchanges for token.
+ *
+ * Delegates to the local aem-connect-server (same pattern Claude Code uses):
+ *   1. Compass fetches http://localhost/token
+ *   2. If server has a valid token → returns it immediately
+ *   3. If not → server opens the OAuth browser flow, Compass polls until token arrives
+ *
+ * Chrome allows HTTPS pages to fetch http://localhost (localhost is a trusted origin,
+ * exempt from mixed-content blocking per the W3C spec).
+ *
+ * Requires aem-connect-server.mjs running on the user's machine.
+ * Setup: run scripts/start-aem-connect.bat once (handles netsh permissions).
  */
 export async function signInMcpOAuth() {
-  const workerBase = IMS_WORKER;
+  // 1. Check if local server is up
+  let serverStatus;
+  try {
+    const resp = await fetch(`${MCP_LOCAL_SERVER}/status`, { signal: AbortSignal.timeout(2000) });
+    serverStatus = await resp.json();
+  } catch {
+    console.warn('[MCP-OAuth] Local server not running — falling back to manual flow');
+    return signInMcpOAuthManual();
+  }
 
-  // Generate PKCE in browser so the Worker stays stateless
-  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
-  const codeVerifier = btoa(String.fromCharCode(...verifierBytes))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-  const challengeBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
-  const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(challengeBuffer)))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-  const state = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  // 2. Server is up — request token (triggers OAuth if expired)
+  try {
+    const resp = await fetch(`${MCP_LOCAL_SERVER}/token`, { signal: AbortSignal.timeout(5000) });
+    const data = await resp.json();
 
-  const startParams = new URLSearchParams({ code_challenge: codeChallenge, state });
-  const popup = window.open(`${workerBase}/mcp-oauth/start?${startParams}`, 'mcpOAuth', 'width=500,height=700');
-  if (!popup) { console.warn('[MCP-OAuth] Popup blocked'); return null; }
-
-  // Callback page at the Worker sends code via postMessage — no cross-origin polling needed
-  return new Promise((resolve) => {
-    const cleanup = (token) => {
-      window.removeEventListener('message', onMessage);
-      clearInterval(closedPoll);
-      clearTimeout(authTimeout);
-      resolve(token);
-    };
-
-    function onMessage(event) {
-      if (event.data?.type !== 'mcp-oauth-callback') return;
-      const { code, error } = event.data;
-      if (error || !code) {
-        console.warn('[MCP-OAuth] OAuth error:', error);
-        cleanup(null);
-        return;
-      }
-      fetch(`${workerBase}/mcp-oauth/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, codeVerifier }),
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.access_token) {
-            localStorage.setItem('ew-mcp-token', data.access_token);
-            if (data.refresh_token) localStorage.setItem('ew-mcp-refresh', data.refresh_token);
-            console.log('[MCP-OAuth] Write token acquired');
-            cleanup(data.access_token);
-          } else {
-            console.warn('[MCP-OAuth] Token exchange failed:', data);
-            cleanup(null);
-          }
-        })
-        .catch(() => cleanup(null));
+    if (data.access_token) {
+      // Server already had a valid token
+      localStorage.setItem('ew-mcp-token', data.access_token);
+      console.log('[MCP-OAuth] Token from local server');
+      return data.access_token;
     }
 
-    const closedPoll = setInterval(() => { if (popup.closed) cleanup(null); }, 500);
-    const authTimeout = setTimeout(() => { popup.close(); cleanup(null); }, 180000);
-    window.addEventListener('message', onMessage);
-  });
+    if (data.status === 'auth_required') {
+      // Server opened the browser — poll until the user completes auth
+      console.log('[MCP-OAuth] Auth flow started, polling...');
+      return pollLocalServerForToken();
+    }
+  } catch {
+    return signInMcpOAuthManual();
+  }
+  return null;
+}
+
+async function pollLocalServerForToken(maxWaitMs = 180_000) {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const resp = await fetch(`${MCP_LOCAL_SERVER}/token`, { signal: AbortSignal.timeout(3000) });
+      const data = await resp.json();
+      if (data.access_token) {
+        localStorage.setItem('ew-mcp-token', data.access_token);
+        console.log('[MCP-OAuth] Token acquired via local server');
+        return data.access_token;
+      }
+    } catch { /* keep polling */ }
+  }
+  return null;
+}
+
+/**
+ * Fallback: instruct user to start the local server.
+ * Opens instructions in a toast rather than silently failing.
+ */
+async function signInMcpOAuthManual() {
+  window.dispatchEvent(new CustomEvent('ew-mcp-server-missing'));
+  return null;
 }
 
 export function getMcpToken() {

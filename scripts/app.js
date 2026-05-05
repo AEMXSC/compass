@@ -186,6 +186,11 @@ function showMcpOAuthPrompt() {
   });
 }
 
+// Server not running — show setup instructions
+window.addEventListener('ew-mcp-server-missing', () => {
+  showToast('Start scripts/start-aem-connect.bat to enable AEM write access', 'warn', 8000);
+});
+
 function md(text) {
   let html = escapeHtml(text);
 
