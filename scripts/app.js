@@ -5388,8 +5388,7 @@ async function enableDesignMode() {
   }
 
   // JCR sites: use the styled preview (Worker inlines CSS) as the base
-  // DA/EDS sites: use srcdoc with EDS CDN styles
-  const isJcr = window.__EW_SITE_TYPE === 'aem-cs' || base?.includes('adobeaemcloud.com');
+  // DA/EDS sites: handled above (da.live canvas)
 
   if (isJcr && previewFrame.src?.includes('/preview')) {
     // JCR: inject design mode script into the existing Worker preview via srcdoc
