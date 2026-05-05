@@ -135,50 +135,46 @@ export async function signInMcpOAuth() {
   const popup = window.open(`${workerBase}/mcp-oauth/start?${startParams}`, 'mcpOAuth', 'width=500,height=700');
   if (!popup) { console.warn('[MCP-OAuth] Popup blocked'); return null; }
 
-  // Poll popup URL for the auth code (appears after localhost redirect fails)
+  // Callback page at the Worker sends code via postMessage — no cross-origin polling needed
   return new Promise((resolve) => {
-    const interval = setInterval(() => {
-      try {
-        const popupUrl = popup.location.href;
-        if (popupUrl?.startsWith('http://localhost')) {
-          clearInterval(interval);
-          popup.close();
-          const params = new URL(popupUrl).searchParams;
-          const code = params.get('code');
-          if (code) {
-            // Exchange code + codeVerifier (no server-side state lookup needed)
-            fetch(`${workerBase}/mcp-oauth/token`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ code, codeVerifier }),
-            })
-              .then(r => r.json())
-              .then(data => {
-                if (data.access_token) {
-                  localStorage.setItem('ew-mcp-token', data.access_token);
-                  if (data.refresh_token) localStorage.setItem('ew-mcp-refresh', data.refresh_token);
-                  console.log('[MCP-OAuth] Write token acquired');
-                  resolve(data.access_token);
-                } else {
-                  console.warn('[MCP-OAuth] Token exchange failed:', data);
-                  resolve(null);
-                }
-              })
-              .catch(() => resolve(null));
-          } else {
-            resolve(null);
-          }
-        }
-      } catch {
-        // Cross-origin — popup hasn't redirected to localhost yet
-      }
-      if (popup.closed) {
-        clearInterval(interval);
-        resolve(null);
-      }
-    }, 500);
+    const cleanup = (token) => {
+      window.removeEventListener('message', onMessage);
+      clearInterval(closedPoll);
+      clearTimeout(authTimeout);
+      resolve(token);
+    };
 
-    setTimeout(() => { clearInterval(interval); popup.close(); resolve(null); }, 180000);
+    function onMessage(event) {
+      if (event.data?.type !== 'mcp-oauth-callback') return;
+      const { code, error } = event.data;
+      if (error || !code) {
+        console.warn('[MCP-OAuth] OAuth error:', error);
+        cleanup(null);
+        return;
+      }
+      fetch(`${workerBase}/mcp-oauth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, codeVerifier }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.access_token) {
+            localStorage.setItem('ew-mcp-token', data.access_token);
+            if (data.refresh_token) localStorage.setItem('ew-mcp-refresh', data.refresh_token);
+            console.log('[MCP-OAuth] Write token acquired');
+            cleanup(data.access_token);
+          } else {
+            console.warn('[MCP-OAuth] Token exchange failed:', data);
+            cleanup(null);
+          }
+        })
+        .catch(() => cleanup(null));
+    }
+
+    const closedPoll = setInterval(() => { if (popup.closed) cleanup(null); }, 500);
+    const authTimeout = setTimeout(() => { popup.close(); cleanup(null); }, 180000);
+    window.addEventListener('message', onMessage);
   });
 }
 

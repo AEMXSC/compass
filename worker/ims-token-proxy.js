@@ -119,6 +119,9 @@ async function route(request, env) {
   if (url.pathname === '/mcp-oauth/start' && request.method === 'GET') {
     return handleMcpOAuthStart(request);
   }
+  if (url.pathname === '/mcp-oauth/callback' && request.method === 'GET') {
+    return handleMcpOAuthCallback(request);
+  }
   if (url.pathname === '/mcp-oauth/token' && request.method === 'POST') {
     return handleMcpOAuthToken(request);
   }
@@ -1376,7 +1379,8 @@ async function handleBrowserRender(request, env) {
 
 const MCP_OAUTH_CLIENT_ID = 'MTAwNy1VOUJTNS15QUdRUnhTTVlZZzFUcDV3LmhWLUlvNVNPZEl3dURaaTNEV0RxMHZ4WU1uSmt6SnYy';
 const MCP_OAUTH_CLIENT_SECRET = '1007-U9BS5-yAGQRxSMYYg1Tp5whV-Io5SOdIwuDZi3DWDq0vxYMnJkzJv2Bd2jjwP9J362Ev_aFF0MKbeaN7cyRivr_-Xb7Fk2mUY';
-const MCP_OAUTH_REDIRECT_URI = 'http://localhost';
+// Callback served by this Worker — popup relays code via postMessage, no cross-origin polling needed
+const MCP_OAUTH_REDIRECT_URI = 'https://compass-ims-proxy.compass-xsc.workers.dev/mcp-oauth/callback';
 
 // PKCE is generated in the browser — Worker is fully stateless for OAuth
 
@@ -1401,6 +1405,45 @@ async function handleMcpOAuthStart(request) {
   });
 
   return Response.redirect(`https://oauth.adobeaemcloud.com/oauth/authorize?${params}`, 302);
+}
+
+/**
+ * GET /mcp-oauth/callback — OAuth redirect landing page served by this Worker.
+ * Receives the auth code from oauth.adobeaemcloud.com, relays it to the opener
+ * via postMessage, then closes itself. Avoids cross-origin popup.location.href polling.
+ */
+async function handleMcpOAuthCallback(request) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code') || '';
+  const error = url.searchParams.get('error') || '';
+  const errorDesc = url.searchParams.get('error_description') || '';
+
+  const html = `<!DOCTYPE html>
+<html><head><title>Connecting to AEM Content…</title>
+<style>body{font:14px/1.5 system-ui;background:#0f172a;color:#94a3b8;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}</style>
+</head><body>
+<p>${error ? `Auth error: ${escapeHtmlInline(errorDesc || error)}` : 'Connecting… this window will close automatically.'}</p>
+<script>
+(function () {
+  const code = ${JSON.stringify(code)};
+  const error = ${JSON.stringify(error)};
+  if (window.opener) {
+    window.opener.postMessage({ type: 'mcp-oauth-callback', code, error }, '*');
+  }
+  // Give postMessage time to deliver before closing
+  setTimeout(() => window.close(), 300);
+})();
+function escapeHtmlInline(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body></html>`;
+
+  return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}
+
+function escapeHtmlInline(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 async function handleMcpOAuthToken(request) {
