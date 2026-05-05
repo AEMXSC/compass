@@ -24,6 +24,42 @@ const MCP_PROTOCOL_VERSION = '2025-03-26';
 const WORKER_MCP_BASE = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev') + '/mcp?endpoint=';
 
 /**
+ * Flatten a nested AEM page items tree into a compact summary for Claude.
+ * Instead of returning 50KB of nested JSON, returns { eTag, properties, components[] }
+ * where components is a flat list of { path, text, title } entries Claude can act on directly.
+ */
+function summarizePageContent(eTag, content) {
+  const components = [];
+
+  function walk(items, prefix) {
+    if (!items || typeof items !== 'object') return;
+    for (const [key, val] of Object.entries(items)) {
+      if (!val || typeof val !== 'object') continue;
+      const path = `${prefix}/${key}`;
+      if (val.properties) {
+        const p = val.properties;
+        const entry = { path: `${path}/properties` };
+        if (p.text) entry.text = p.text;
+        if (p['jcr:title']) entry.title = p['jcr:title'];
+        if (p.title) entry.title = p.title;
+        if (Object.keys(entry).length > 1) components.push(entry);
+      }
+      if (val.items) walk(val.items, `${path}/items`);
+    }
+  }
+
+  walk(content.items, '/items');
+
+  return {
+    eTag,
+    id: content.id,
+    componentType: content.componentType,
+    properties: content.properties,
+    components,
+  };
+}
+
+/**
  * Create an MCP client for a specific endpoint path.
  * @param {string} endpointPath — e.g. '/adobe/mcp/content' or full URL 'https://...'
  * @param {string} label — human-readable name for console logs
@@ -199,7 +235,9 @@ export function createMcpClient(endpointPath, label = 'MCP') {
           if (jsonMatch) {
             try {
               const content = JSON.parse(jsonMatch[1]);
-              return { eTag: eTagMatch[1], ...content };
+              // Summarize the items tree into a flat list so Claude gets compact, actionable data
+              // instead of a 50KB nested JSON that causes slow reasoning
+              return summarizePageContent(eTagMatch[1], content);
             } catch { /* fall through */ }
           }
         }

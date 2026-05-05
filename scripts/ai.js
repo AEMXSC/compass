@@ -5089,23 +5089,21 @@ Every MCP tool returns live data. Always base your next call on what the previou
 - After any write: preview refreshes automatically
 
 ## JCR/AEM CS sites (Type: aem-cs)
-The content model is map-based. get-aem-page-content returns:
-{ eTag: '"abc123"', id, properties: {…}, items: { "0": { items: { "0:0": { items: { "0:0:0": { properties: { text: "…" } } } } } } } }
+get-aem-page-content returns a compact summary:
+{ eTag: '"abc123"', id, properties: {jcr:title, …}, components: [{path: "/items/0/items/0:0/items/0:0:0/properties", text: "<h1>…</h1>", title: "…"}, …] }
 
 Workflow:
 1. If pageId is not in context: call search-aem-pages with {authorUrl, q: "<page name>"} to get the UUID id field
-2. Call get-aem-page-content — response has eTag at root (already quoted, pass it as-is)
-3. Navigate items to find the property to change. Map keys like "0", "0:0", "0:0:0" are the actual key strings.
-4. Call patch-aem-page-content with:
-   - eTag: exactly as returned (e.g. '"abc123"' — includes the quotes)
-   - jsonPatch: JSON string of an array, e.g. '[{"op":"replace","path":"/properties/jcr:title","value":"New Title"}]'
-   - Paths: /properties/<key> for page props, /items/0/items/0:0/items/0:0:0/properties/text for component text
-5. If 409 or eTag error: call get again for a fresh eTag, then retry
+2. Call get-aem-page-content — read components[] to find the entry whose text/title matches what to change
+3. Call patch-aem-page-content with:
+   - eTag: exactly as returned from get (includes surrounding quotes — pass as-is)
+   - jsonPatch: JSON string, e.g. '[{"op":"replace","path":"/items/0/items/0:0/items/0:0:0/properties/text","value":"<h1>New</h1>"}]'
+   - Path: take the component path from components[] and append /text or /title
+4. If 409 or eTag error: call get again for fresh eTag, then retry
 
-Example — change hero text on SecurBank Home:
-  search → id = gnev4tt6Ll...
-  get → eTag: '"abc"', items["0"]["0:0"]["0:0:0"].properties.text = "<h1>Sail Into...</h1>"
-  patch → path "/items/0/items/0:0/items/0:0:0/properties/text", value "<h1>New Headline</h1>"
+Example — change hero text:
+  components[0] = { path: "/items/0/items/0:0/items/0:0:0/properties", text: "<h1>Old</h1>" }
+  patch path → "/items/0/items/0:0/items/0:0:0/properties/text", value → "<h1>New</h1>"
 
 ## Rules
 - Call tools immediately — do not explain before acting
