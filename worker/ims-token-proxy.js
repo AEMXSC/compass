@@ -1322,34 +1322,48 @@ async function handleBrowserRender(request, env) {
         document.querySelectorAll('link[rel="stylesheet"]').forEach(l => l.remove());
       }
 
-      // 2. Convert images to base64 data URIs (limit to images on same domain, max 500KB each)
+      // 2. Convert ALL images to base64 (img src + picture source + CSS backgrounds)
+      async function toDataUri(url) {
+        try {
+          const resp = await fetch(url, { credentials: 'include' });
+          if (!resp.ok) return null;
+          const blob = await resp.blob();
+          if (blob.size > 2000000) return null;
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+        } catch { return null; }
+      }
+
+      // img tags
       const imgs = document.querySelectorAll('img[src]');
       await Promise.allSettled([...imgs].map(async (img) => {
         const src = img.getAttribute('src');
         if (!src || src.startsWith('data:')) return;
-        try {
-          const resp = await fetch(src, { credentials: 'include' });
-          if (!resp.ok) return;
-          const contentLength = resp.headers.get('content-length');
-          if (contentLength && parseInt(contentLength) > 500000) return;
-          const blob = await resp.blob();
-          if (blob.size > 500000) return;
-          const reader = new FileReader();
-          const dataUri = await new Promise((resolve) => {
-            reader.onload = () => resolve(reader.result);
-            reader.readAsDataURL(blob);
-          });
-          img.setAttribute('src', dataUri);
-        } catch { /* skip failed images */ }
+        const dataUri = await toDataUri(src);
+        if (dataUri) img.setAttribute('src', dataUri);
       }));
 
-      // 3. Also inline CSS background images referenced in inline styles
-      document.querySelectorAll('[style*="background"]').forEach((el) => {
-        const bg = el.style.backgroundImage;
-        if (bg && bg.includes('url(') && !bg.includes('data:')) {
-          // Leave as-is — too complex to inline dynamically
-        }
-      });
+      // picture > source tags
+      const sources = document.querySelectorAll('picture source[srcset]');
+      await Promise.allSettled([...sources].map(async (source) => {
+        const srcset = source.getAttribute('srcset');
+        if (!srcset || srcset.startsWith('data:')) return;
+        const firstUrl = srcset.split(',')[0].trim().split(' ')[0];
+        const dataUri = await toDataUri(firstUrl);
+        if (dataUri) source.setAttribute('srcset', dataUri);
+      }));
+
+      // CSS background-image (inline styles only)
+      const bgEls = document.querySelectorAll('[style*="background-image"]');
+      await Promise.allSettled([...bgEls].map(async (el) => {
+        const match = el.style.backgroundImage.match(/url\(["']?([^"')]+)["']?\)/);
+        if (!match || match[1].startsWith('data:')) return;
+        const dataUri = await toDataUri(match[1]);
+        if (dataUri) el.style.backgroundImage = `url("${dataUri}")`;
+      }));
 
       return document.documentElement.outerHTML;
     });
