@@ -5251,15 +5251,29 @@ Run governance BEFORE calling \`accept_changes_tool\` so brand failures are caug
 Do not use DA tools (edit_page_content, preview_page) for this site.`;
     } else if (isDa) {
       toolRouting = `### Site tools — DA (Document Authoring)
+**Targeted edits** (specific text, headlines, CTAs):
 - Write: \`edit_page_content\` — modifies HTML in DA and auto-triggers preview
 - Read: \`get_page_content\` (skip if page HTML is already in context above)
 - List: \`list_site_pages\` · Preview: \`preview_page\` · Publish: \`publish_page\`
 
-**Experience Governance MCP** — Run before publishing to catch brand alignment issues:
-- \`bga_evaluate_page\` — Full page check: crawls URL, evaluates text + images against brand rules in one call
-- \`bga_evaluate_text\` — Check a specific text string against brand guidelines
+**Experience Production Agent** — AI-generated content workflow (works on EDS/DA too):
+Use when the user wants a full page rewrite, new page from template, translation, or modernization.
+- \`process_page_tool\` — Give it the public \`.aem.page\` URL + instructions → crawls, generates content, returns preview URL + downloadable .docx
+- \`get_status_tool\` — Poll {execution_id} until done (20–120s)
+- \`provide_feedback_tool\` — Iterate: "make the hero shorter", "add a CTA"
+- \`accept_changes_tool\` — Publish/promote the result
+
+**Decision rule — edit_page_content vs EPA**:
+| Task | Use |
+|---|---|
+| Change specific text, a headline, a property | \`edit_page_content\` (fast, surgical) |
+| Rewrite whole page, generate from brief, translate | EPA: \`process_page_tool\` |
+
+**Experience Governance MCP** — Brand compliance gate before publish:
+- \`bga_evaluate_page\` — Crawls the preview URL, evaluates text + images against brand rules in one call
+- \`bga_evaluate_text\` — Check a specific string against brand guidelines
 - \`bga_get_checks_by_url\` — Discover which brand governs a URL and get its guidelines
-Run \`bga_evaluate_page\` after \`edit_page_content\` + \`preview_page\` when user asks for governance/brand check.
+Run \`bga_evaluate_page\` before \`publish_page\` or \`accept_changes_tool\` when user asks for a brand/governance check.
 
 Do not use JCR/AEM Content MCP tools (patch-aem-page-content, copy_aem_page) for this site.`;
     } else {
