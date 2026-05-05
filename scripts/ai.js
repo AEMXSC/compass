@@ -5220,6 +5220,21 @@ ${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
 
 **Low-level AEM API** (when no dedicated tool exists): \`aem_lookup_api\` → \`aem_read\` / \`aem_write\`
 
+**Experience Production Agent** — AI-generated content workflow (NOT for direct text edits):
+Use when the user wants: full page rewrites, new pages from templates, content generation from a brief/PDF, translation, or modernization. Never use for targeted text/property changes.
+- \`process_page_tool\` — Give it {url, instructions} → it generates content, creates a launch, returns execution_id + preview links. AEM Cloud: use author URL. EDS: use public .aem.page URL.
+- \`get_status_tool\` — Poll {execution_id} until done (jobs take 20–120s). Returns progress and preview URLs when complete.
+- \`provide_feedback_tool\` — Iterate on the result without rebuilding: "make the hero shorter", "add a CTA". Human-in-the-loop refinement step.
+- \`accept_changes_tool\` — Promote the launch to production. The final "ship it" step.
+
+**Decision rule — Content MCP vs EPA**:
+| Task | Use |
+|---|---|
+| Change specific text, a headline, a property | Content MCP: search → get → patch |
+| Rewrite a whole page, generate from brief | EPA: process_page_tool → get_status_tool → (feedback) → accept |
+| Create a new page from template | EPA: process_page_tool with template instructions |
+| Translate or modernize a page | EPA: process_page_tool |
+
 Do not use DA tools (edit_page_content, preview_page) for this site.`;
     } else if (isDa) {
       toolRouting = `### Site tools — DA (Document Authoring)
