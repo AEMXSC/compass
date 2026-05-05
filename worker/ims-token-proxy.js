@@ -347,10 +347,13 @@ async function handleMcpProxy(request, env) {
   const mcpEndpoint = url.searchParams.get('endpoint') || '/adobe/mcp/aem';
   const targetUrl = `https://mcp.adobeaemcloud.com${mcpEndpoint}`;
 
-  // Always use S2S token for MCP (proven to work for Content MCP with 64 tools)
-  // S2S client_id is allowlisted in AEM Config Pipeline
-  const s2s = await getS2SToken(env);
-  const mcpToken = s2s;
+  // Prefer user token (from browser) for MCP — needed for write operations (patch returns 403 with S2S)
+  // Fall back to S2S for reads if no user token provided
+  const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '') || null;
+  let mcpToken = userToken;
+  if (!mcpToken) {
+    mcpToken = await getS2SToken(env);
+  }
 
   // Forward the request to MCP, preserving session ID
   const incomingBody = await request.text();
