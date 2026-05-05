@@ -347,38 +347,10 @@ async function handleMcpProxy(request) {
   const mcpEndpoint = url.searchParams.get('endpoint') || '/adobe/mcp/aem';
   const targetUrl = `https://mcp.adobeaemcloud.com${mcpEndpoint}`;
 
-  // Prefer user's IMS token (passed from browser) for MCP calls
-  // User tokens have agents entitlement needed for Governance MCP
-  // Fall back to S2S for unauthenticated calls (Content MCP works with S2S)
-  const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '') || null;
-  let mcpToken = userToken;
-
-  if (!mcpToken) {
-    const now = Date.now();
-    if (!cachedToken || tokenExpiry <= now + 300000) {
-      try {
-        const body = new URLSearchParams({
-          grant_type: 'client_credentials',
-          client_id: IMS_CLIENT_ID,
-          client_secret: IMS_CLIENT_SECRET,
-          scope: IMS_SCOPE,
-        });
-        const imsResp = await fetch(IMS_TOKEN_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body,
-        });
-        if (imsResp.ok) {
-          const data = await imsResp.json();
-          if (data.access_token) {
-            cachedToken = data.access_token;
-            tokenExpiry = now + (data.expires_in || 86400000);
-          }
-        }
-      } catch { /* S2S unavailable */ }
-    }
-    mcpToken = cachedToken;
-  }
+  // Always use S2S token for MCP (proven to work for Content MCP with 64 tools)
+  // S2S client_id is allowlisted in AEM Config Pipeline
+  const s2s = await getS2SToken(env);
+  const mcpToken = s2s;
 
   // Forward the request to MCP, preserving session ID
   const incomingBody = await request.text();

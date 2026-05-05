@@ -30,7 +30,7 @@ const WORKER_MCP_BASE = (localStorage.getItem('ew-ims-proxy') || 'https://compas
  * @returns MCP client object with initSession, callTool, getToolSchemas, resetSession, isAvailable
  */
 export function createMcpClient(endpointPath, label = 'MCP') {
-  const endpoint = endpointPath.startsWith('https://') ? endpointPath : `${MCP_BASE}${endpointPath}`;
+  const endpoint = endpointPath.startsWith('https://') ? endpointPath : `${WORKER_MCP_BASE}${endpointPath}`;
   let sessionId = null;
   let requestId = 0;
   let toolSchemas = null;
