@@ -5338,9 +5338,14 @@ ${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
     let toolRouting = '';
     if (isJcr && aemHost) {
       toolRouting = `### Site tools — AEM CS (JCR)
+**EDITING THE CURRENT PAGE — do this first:**
+The connected page is already known: authorUrl = \`${aemHost}\`, path = \`${context.pagePath || '/'}\`.
+${context.pageId ? `pageId = \`${context.pageId}\` (pre-fetched — skip search, call get-aem-page-content directly).` : `Call \`get-aem-page-content\` with {authorUrl: "${aemHost}", pageId} — get pageId from search-aem-pages if not known, but try the current page path first.`}
+**Do NOT search for the page by topic/keyword — the user is always editing the currently connected page unless they explicitly name a different one.**
+
 **Page reads/writes** use the Content MCP (map-based model):
-- Find page UUID: \`search-aem-pages\` — use the \`id\` field, not the JCR path
-- Read page + eTag: \`get-aem-page-content\` with {authorUrl, pageId: <UUID>} — returns {eTag, id, properties, items}; eTag is already quoted (pass it as-is to patch)
+- Find page UUID (only if needed): \`search-aem-pages\` — use the \`id\` field from results, not the JCR path
+- Read page + eTag: \`get-aem-page-content\` with {authorUrl, pageId} — returns {eTag, id, properties, items}; eTag is already quoted (pass as-is to patch)
 - Write page: \`patch-aem-page-content\` — jsonPatch is a JSON string: '[{"op":"replace","path":"/properties/jcr:title","value":"…"}]'; paths: /properties/<key> for page props, /items/0/items/0:0/items/0:0:0/properties/text for component text
 - Create from template: \`create_aem_page\` (call \`list_aem_templates\` first to find the template path)
 - Copy: \`copy_aem_page\` · Delete: \`delete_aem_page\` · List: \`list_aem_pages\`
