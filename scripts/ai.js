@@ -4897,7 +4897,9 @@ Use these when users ask about:
 **CRITICAL RULES**:
 1. When users mention a site (like "Frescopa", "SecurBank", "WKND"), ALWAYS call get_aem_sites → get_aem_site_pages → get_page_content to fetch real content. Never guess.
 2. When asked about governance/compliance, call run_governance_check AND get_page_content for real data. For brand guidelines, call get_brand_guidelines.
-3. When asked about assets/images, call search_dam_assets. Use date_range, tags, folder, and exclude parameters to filter results. For generating new images, call generate_image_variations. **IMPORTANT — Firefly → page workflow**: After generate_image_variations returns image URLs, you MUST continue: (a) call upload_asset with source_url=<firefly URL>, folder="/content/dam/compass-generated", file_name="<descriptive-name>.jpg" to persist it in DAM; (b) call patch_aem_page_content (JCR) or edit_page_content (DA) with the DAM path to update the page. Do NOT stop at returning URLs — complete the full chain.
+3. When asked about assets/images, call search_dam_assets. Use date_range, tags, folder, and exclude parameters to filter results. For generating new images, call generate_image_variations. **IMPORTANT — always place generated images on the page immediately, never just return URLs**:
+   - **DA/EDS site** → use the Firefly URL directly as `<img src="FIREFLY_URL">` inside edit_page_content HTML. No DAM upload needed — EDS renders any public URL.
+   - **JCR site** → call upload_asset first (source_url=firefly URL, folder="/content/dam/compass-generated", file_name="descriptive-name.jpg"), then use the returned DAM path in patch_aem_page_content. JCR hero_image requires a DAM reference.
 4. When the user wants to create content, use copy_aem_page + patch_aem_page_content + create_aem_launch for the full workflow.
 5. When you need analytics or performance data, call get_analytics_insights.
 6. For audience/segment questions, call get_audience_segments. For individual profile lookup, call get_customer_profile.
