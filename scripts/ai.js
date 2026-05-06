@@ -5222,8 +5222,12 @@ Shortcut — if pre-fetched JCR state is in context (eTag + components[]):
 - Only call get-aem-page-content if you get a 409 (stale eTag) — then retry patch once with the fresh eTag
 
 Workflow (fallback when no pre-fetched state):
-1. If pageId is not in context: call search-aem-pages with {authorUrl, q: "<page name>"} to get the UUID id field
-2. Call get-aem-page-content — read components[] to find the entry whose name/value matches what to change
+1. If pageId is not in context: call search-aem-pages to find the page UUID
+   - q = keywords from pagePath in context, NOT from the user's edit request
+   - pagePath is /content/<site>/…: use the site name with hyphens→spaces (e.g. /content/wknd-universal/… → q="wknd universal")
+   - Match results by their authorPath field to find the exact page
+   - Use the UUID id field as pageId — NEVER pass a /content/... JCR path as pageId (that causes 404)
+2. Call get-aem-page-content with {authorUrl, pageId: <UUID from search>} — read components[] to find the entry whose name/value matches what to change
 3. Call patch-aem-page-content immediately using:
    - eTag: exactly as returned (pass as-is — includes surrounding quotes)
    - jsonPatch: JSON string with the patchPath from components[], e.g. '[{"op":"replace","path":"/items/0/items/0:0/items/0:0:0/properties/text","value":"<h1>New</h1>"}]'
@@ -5340,7 +5344,7 @@ ${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
       toolRouting = `### Site tools — AEM CS (JCR)
 **EDITING THE CURRENT PAGE — do this first:**
 The connected page is already known: authorUrl = \`${aemHost}\`, path = \`${context.pagePath || '/'}\`.
-${context.pageId ? `pageId = \`${context.pageId}\` (pre-fetched — skip search, call get-aem-page-content directly).` : `Call \`get-aem-page-content\` with {authorUrl: "${aemHost}", pageId} — get pageId from search-aem-pages if not known, but try the current page path first.`}
+${context.pageId ? `pageId = \`${context.pageId}\` (pre-fetched — skip search, call get-aem-page-content directly).` : `To get pageId: search-aem-pages with q = site name from pagePath (e.g. /content/wknd-universal/… → q="wknd universal"), then match authorPath in results. NEVER use the /content/... path as pageId — it causes 404.`}
 **Do NOT search for the page by topic/keyword — the user is always editing the currently connected page unless they explicitly name a different one.**
 
 **Page reads/writes** use the Content MCP (map-based model):
