@@ -1480,7 +1480,7 @@ const TOOL_RENDERERS = {
     }
     // MCP server returns 'page_patched'; custom path returns 'updated' — accept both
     if (result.status !== 'updated' && result.status !== 'page_patched') return null;
-    const path = result.page_path || window.__EW_PAGE_ID || '';
+    const path = result.page_path || result.authorPath || window.__JCR_PREVIEW_CONFIG?.jcrPath || '';
     const fields = result.updated_fields || [];
     // Build URLs from result or fall back to known page state
     const orgCtx = window.__EW_ORG || {};
