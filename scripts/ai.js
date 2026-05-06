@@ -5351,7 +5351,7 @@ ${context.pageId ? `pageId = \`${context.pageId}\` (pre-fetched).` : `To get pag
 - Find page UUID (only if needed): \`search-aem-pages\` — use the \`id\` field from results, not the JCR path
 - Read page + eTag: \`get-aem-page-content\` with {authorUrl, pageId} — returns {eTag, id, properties, items}; eTag is already quoted (pass as-is to patch)
 - Write page: \`patch-aem-page-content\` — jsonPatch is a JSON string: '[{"op":"replace","path":"/properties/jcr:title","value":"…"}]'; paths: /properties/<key> for page props, /items/0/items/0:0/items/0:0:0/properties/text for component text
-- Create from template: \`create_aem_page\` (call \`list_aem_templates\` first to find the template path)
+- Create from template: \`create_aem_page\` (call \`list_aem_templates\` first to find the template path) — response includes \`id\` (UUID); use it directly as pageId for the next patch, do NOT search for the page
 - Copy: \`copy_aem_page\` · Delete: \`delete_aem_page\` · List: \`list_aem_pages\`
 
 **Content Fragments** (eTag-gated same as pages):
@@ -5639,6 +5639,16 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   } else {
     // Thinking Brain: lazy-init analytics MCPs on first analytics/performance query
     if (ANALYTICS_TRIGGERS.test(promptText)) await ensureAnalyticsTools();
+
+    // JCR sites: register contentMcp so create/patch route through real MCP, not static handler
+    if (siteType === 'aem-cs') {
+      try {
+        await contentMcp.initSession();
+        registerMcpTools(contentMcp);
+      } catch (e) {
+        console.warn('[AI] Content MCP init failed:', e.message);
+      }
+    }
 
     // Compass tools + ALL registered MCP tools
     // MCP tools take priority — filter Compass duplicates so tool names stay unique
