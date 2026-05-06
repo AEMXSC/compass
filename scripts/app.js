@@ -6676,9 +6676,6 @@ async function init() {
   // Context prefetch: pre-discover all AEM environments (like Adobe's AI Assistant pattern)
   // Runs async — doesn't block init. Results cached for instant lookup on site connect.
   if (isSignedIn()) {
-    // Run in parallel: prefetch environments + pre-warm MCP sessions
-    // Both async, neither blocks UI. Combined ~400ms.
-    prefetchAemEnvironments();
     prewarmSessions();
   }
 }
