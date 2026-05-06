@@ -1900,14 +1900,19 @@ function mcpError(toolName, err) {
  * Calls firefly-api.adobe.io directly with the user's IMS token.
  */
 async function callFireflyApi(prompt, { width = 1344, height = 768, numImages = 1 } = {}) {
-  const token = getToken();
-  if (!token) throw new Error('No IMS token available for Firefly');
+  // Prefer the Firefly-specific token (from Dev Console → Generate access token)
+  // Fall back to the user's IMS session token
+  const token = localStorage.getItem('ew-firefly-token') || getToken();
+  if (!token) throw new Error('No token available for Firefly. Generate one in Adobe Developer Console → Firefly API → Generate access token, then paste it in Compass Settings.');
+
+  // Client ID for the Firefly API project in Adobe Developer Console
+  const FIREFLY_CLIENT_ID = 'acd5f7410f024fb29412f6add92d3751';
 
   const resp = await fetch('https://firefly-api.adobe.io/v3/images/generate', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
-      'x-api-key': 'aem-extension-builder',
+      'x-api-key': FIREFLY_CLIENT_ID,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({

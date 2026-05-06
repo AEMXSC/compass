@@ -701,6 +701,46 @@ if (wfWebhookBtn && wfWebhookInput) {
   });
 }
 
+/* ── Firefly Token config ── */
+const fireflyTokenBtn = document.getElementById('fireflyTokenBtn');
+const fireflyTokenInput = document.getElementById('fireflyTokenInput');
+const fireflyTokenStatus = document.getElementById('fireflyTokenStatus');
+
+if (fireflyTokenBtn && fireflyTokenInput) {
+  const savedFF = localStorage.getItem('ew-firefly-token');
+  if (savedFF && fireflyTokenStatus) {
+    fireflyTokenInput.value = savedFF.slice(0, 12) + '...';
+    fireflyTokenStatus.textContent = 'Firefly token set — image generation enabled.';
+    fireflyTokenStatus.className = 'settings-token-status success';
+  }
+
+  fireflyTokenBtn.addEventListener('click', () => {
+    const val = fireflyTokenInput.value.trim();
+    if (!val || val.endsWith('...')) {
+      if (fireflyTokenStatus) {
+        fireflyTokenStatus.textContent = 'Paste a token generated from Adobe Developer Console.';
+        fireflyTokenStatus.className = 'settings-token-status error';
+      }
+      return;
+    }
+    if (val === 'clear') {
+      localStorage.removeItem('ew-firefly-token');
+      fireflyTokenInput.value = '';
+      if (fireflyTokenStatus) {
+        fireflyTokenStatus.textContent = 'Firefly token cleared.';
+        fireflyTokenStatus.className = 'settings-token-status';
+      }
+      return;
+    }
+    localStorage.setItem('ew-firefly-token', val);
+    fireflyTokenInput.value = val.slice(0, 12) + '...';
+    if (fireflyTokenStatus) {
+      fireflyTokenStatus.textContent = 'Firefly token saved — image generation ready.';
+      fireflyTokenStatus.className = 'settings-token-status success';
+    }
+  });
+}
+
 /* ── Relay Sign-In Modal ── */
 const relayModal = document.getElementById('relayModal');
 const relayModalClose = document.getElementById('relayModalClose');

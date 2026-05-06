@@ -183,6 +183,16 @@
         </div>
         <div class="settings-token-status" id="imsTokenStatus"></div>
 
+        <label class="settings-label" style="margin-top:16px" for="fireflyTokenInput">Firefly API Token</label>
+        <div class="settings-token-row">
+          <input type="password" id="fireflyTokenInput" class="settings-input" placeholder="eyJhbGci...">
+          <button class="settings-token-btn" id="fireflyTokenBtn" title="Set token">Set</button>
+        </div>
+        <div class="settings-hint">
+          Generate a token in <a href="https://developer.adobe.com/console" target="_blank" rel="noopener" class="settings-link">Adobe Developer Console</a> → Firefly API → Generate access token. Enables real Firefly image generation.
+        </div>
+        <div class="settings-token-status" id="fireflyTokenStatus"></div>
+
         <label class="settings-label" style="margin-top:16px">MCP Connectors</label>
         <div id="settingsConnectors" class="settings-connectors"></div>
         <div class="settings-hint">Registered connectors from Admin Console</div>
