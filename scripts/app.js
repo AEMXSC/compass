@@ -4164,22 +4164,26 @@ async function connectCustomSite(input) {
 
     // Load author page via Browser Rendering (headless Chrome with auth)
     if (previewFrame) {
-      const loadingSteps = [
-        '🔐 Borrowing your IMS token...',
-        '🧹 Busting CDN cache (again)...',
-        '🪄 Stripping X-Frame-Options headers...',
-        '🤖 Spinning up headless Chrome...',
-        '🎭 Pretending to be a real browser...',
-        '🍪 Negotiating with cookies...',
-        '📸 Inlining all the CSS so iframes don\'t cry...',
-        '⚡ Intercepting auth requests mid-flight...',
-        '🕵️ Injecting Bearer token before AEM notices...',
-        '🧃 Base64-encoding your images (yes, all of them)...',
-        '🔄 Retrying because the first render lied...',
-        '✨ Almost there. For real this time.',
-      ];
-      const loadingStep = loadingSteps[Math.floor(Math.random() * loadingSteps.length)];
-      previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center;max-width:380px"><p style="font-size:18px;margin:0 0 8px">Loading author preview...</p><p style="font-size:12px;color:#64748b;margin:0 0 24px">${jcrPath}</p><p style="font-size:12px;color:#475569;font-style:italic;margin:0">${loadingStep}</p></div></body></html>`;
+      previewFrame.srcdoc = `<!DOCTYPE html><html><head><style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font:14px/1.5 system-ui,sans-serif;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh}
+        .wrap{text-align:center;max-width:400px;padding:24px}
+        h2{font-size:18px;font-weight:500;color:#cbd5e1;margin-bottom:6px}
+        .path{font-size:11px;color:#475569;margin-bottom:28px;font-family:monospace}
+        .spinner{width:36px;height:36px;border:3px solid #1e293b;border-top-color:#6366f1;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 24px}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .step{font-size:12px;color:#64748b;font-style:italic;min-height:20px;transition:opacity 0.3s}
+        .step.fade{opacity:0}
+      </style></head><body><div class="wrap">
+        <div class="spinner"></div>
+        <h2>Loading author preview...</h2>
+        <div class="path">${jcrPath}</div>
+        <div class="step" id="s">🔐 Borrowing your IMS token...</div>
+      </div><script>
+        const steps=['🔐 Borrowing your IMS token...','🧹 Busting CDN cache (again)...','🪄 Stripping X-Frame-Options headers...','🤖 Spinning up headless Chrome...','🎭 Pretending to be a real browser...','🍪 Negotiating with cookies...','📸 Inlining all the CSS so iframes don\\'t cry...','⚡ Intercepting auth requests mid-flight...','🕵️ Injecting Bearer token before AEM notices...','🧃 Base64-encoding your images (yes, all of them)...','🔄 Retrying because the first render lied...','✨ Almost there. For real this time.'];
+        let i=0;const el=document.getElementById('s');
+        setInterval(()=>{el.classList.add('fade');setTimeout(()=>{i=(i+1)%steps.length;el.textContent=steps[i];el.classList.remove('fade')},300)},2200);
+      </script></body></html>`;
 
       const renderUrl = `${WORKER_BASE}/render?url=${encodeURIComponent(authorPageUrl)}&token=${encodeURIComponent(token || '')}`;
       fetch(renderUrl, { mode: 'cors' }).then(async (resp) => {
