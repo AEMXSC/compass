@@ -5363,9 +5363,11 @@ Use when the user wants: full page rewrites, new pages from templates, content g
 | Task | Use |
 |---|---|
 | Change specific text, a headline, a property | Content MCP: search → get → patch |
-| Rewrite a whole page, generate from brief | EPA: process_page_tool → get_status_tool → (feedback) → accept |
-| Create a new page from template | EPA: process_page_tool with template instructions |
+| Create a new page from a brief or generate content | Content MCP: \`extract_brief_content\` → \`create_aem_page\` → \`patch_aem_page_content\` |
+| Rewrite an EXISTING page (full rewrite, not from brief) | EPA: process_page_tool → get_status_tool → (feedback) → accept |
 | Translate or modernize a page | EPA: process_page_tool |
+
+**IMPORTANT: Never use \`ci_load_project\` or EPA project tools on JCR/AEM CS sites.** EPA's project context is for its own environment — it will load the wrong project and write to the wrong repo. For JCR brief-to-page workflows, always use Content MCP tools only.
 
 **Experience Governance MCP** — Brand compliance validation (the gate before publish):
 Use after any content change when the user asks to check brand alignment, run governance, or before accepting EPA output to production.
