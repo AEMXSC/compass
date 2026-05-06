@@ -1895,6 +1895,42 @@ function mcpError(toolName, err) {
   });
 }
 
+/**
+ * Firefly REST API fallback — used when Firefly MCP token lacks Firefly API scopes.
+ * Calls firefly-api.adobe.io directly with the user's IMS token.
+ */
+async function callFireflyApi(prompt, { width = 1344, height = 768, numImages = 1 } = {}) {
+  const token = getToken();
+  if (!token) throw new Error('No IMS token available for Firefly');
+
+  const resp = await fetch('https://firefly-api.adobe.io/v3/images/generate', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'x-api-key': 'aem-extension-builder',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      numVariations: numImages,
+      prompt,
+      size: { width, height },
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`Firefly API ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await resp.json();
+  // v3 response: { outputs: [{ seed, image: { url } }] }
+  const images = (data.outputs || []).map((o) => ({
+    url: o.image?.url || o.image || o.presignedUrl,
+    seed: o.seed,
+  }));
+  return { images, source: 'Adobe Firefly API' };
+}
+
 /** Sanitize page paths to prevent traversal attacks in URL construction */
 function sanitizePath(p) {
   let clean = (p || '/').replace(/\.html$/, '');
@@ -3079,7 +3115,7 @@ export async function executeTool(name, input) {
     case 'generate_image_variations': {
       if (!(await ensureAuth())) return authRequiredError('generate_image_variations');
       try {
-        const result = await fireflyMcp.callTool('firefly_generate_image', {
+        const mcpResult = await fireflyMcp.callTool('firefly_generate_image', {
           prompt: input.prompt,
           ...(input.model && { model: input.model }),
           ...(input.width && { width: input.width }),
@@ -3087,16 +3123,37 @@ export async function executeTool(name, input) {
           numImages: input.numImages || input.count || 1,
           ...(input.seed && { seed: input.seed }),
         });
-        return JSON.stringify({ ...result, source: 'Adobe Firefly MCP' }, null, 2);
+        // If MCP returns an auth error, fall back to Firefly REST API with IMS token
+        if (mcpResult?.error && /token|auth|oauth/i.test(mcpResult.error)) {
+          console.log('[Firefly] MCP auth failed — trying Firefly REST API with IMS token');
+          const restResult = await callFireflyApi(input.prompt, {
+            width: input.width,
+            height: input.height,
+            numImages: input.numImages || input.count || 1,
+          });
+          return JSON.stringify(restResult, null, 2);
+        }
+        return JSON.stringify({ ...mcpResult, source: 'Adobe Firefly MCP' }, null, 2);
       } catch (err) {
-        return mcpError('generate_image_variations', err);
+        console.log('[Firefly] MCP error — trying Firefly REST API with IMS token:', err.message);
+        try {
+          const restResult = await callFireflyApi(input.prompt, {
+            width: input.width,
+            height: input.height,
+            numImages: input.numImages || input.count || 1,
+          });
+          return JSON.stringify(restResult, null, 2);
+        } catch (restErr) {
+          console.error('[Firefly] REST API also failed:', restErr.message);
+          return JSON.stringify({ error: restErr.message, mcpError: err.message, hint: 'Firefly API access may not be provisioned for this account. Check Adobe Developer Console.', _source: 'error' });
+        }
       }
     }
 
     case 'edit_image_with_firefly': {
       if (!(await ensureAuth())) return authRequiredError('edit_image_with_firefly');
       try {
-        const result = await fireflyMcp.callTool('firefly_image_to_image', {
+        const mcpResult = await fireflyMcp.callTool('firefly_image_to_image', {
           prompt: input.prompt,
           imageUrl: input.imageUrl,
           ...(input.model && { model: input.model }),
@@ -3104,7 +3161,11 @@ export async function executeTool(name, input) {
           ...(input.height && { height: input.height }),
           numImages: input.numImages || 1,
         });
-        return JSON.stringify({ ...result, source: 'Adobe Firefly MCP' }, null, 2);
+        if (mcpResult?.error && /token|auth|oauth/i.test(mcpResult.error)) {
+          // image-to-image not in REST API v3 — return the error clearly
+          return JSON.stringify({ error: 'Image editing requires Firefly MCP auth. Generate from prompt works via REST fallback.', _source: 'error' });
+        }
+        return JSON.stringify({ ...mcpResult, source: 'Adobe Firefly MCP' }, null, 2);
       } catch (err) {
         return mcpError('edit_image_with_firefly', err);
       }
