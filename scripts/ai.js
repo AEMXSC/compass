@@ -760,17 +760,34 @@ const AEM_TOOLS = [
 
   {
     name: 'generate_image_variations',
-    description: 'Firefly Agent — Generate image variations using Adobe Firefly generative AI. Creates alternate versions of a source image with style, mood, or composition changes. Returns delivery URLs for generated assets.',
+    description: 'Firefly Agent — Generate images using Adobe Firefly AI from a text prompt. Use for hero images, campaign visuals, background art, or any new image asset. Returns generated image URLs.',
     input_schema: {
       type: 'object',
       properties: {
-        source_asset: { type: 'string', description: 'Source image path in DAM or delivery URL' },
-        prompt: { type: 'string', description: 'Natural language description of desired variations (e.g., "warmer tones, lifestyle setting, morning light")' },
-        count: { type: 'number', description: 'Number of variations to generate (1-4, default 3)' },
-        style: { type: 'string', description: 'Style preset', enum: ['photo', 'art', 'graphic', 'none'] },
-        aspect_ratio: { type: 'string', description: 'Output aspect ratio', enum: ['1:1', '4:3', '16:9', '9:16', 'original'] },
+        prompt: { type: 'string', description: 'Detailed description of the image to generate (e.g., "healthcare professional helping a patient in a modern hospital, warm lighting, photorealistic")' },
+        model: { type: 'string', description: 'Firefly model to use (optional — leave blank for default)' },
+        width: { type: 'number', description: 'Image width in pixels (e.g., 1792 for landscape hero)' },
+        height: { type: 'number', description: 'Image height in pixels (e.g., 1024 for landscape hero)' },
+        numImages: { type: 'number', description: 'Number of images to generate (1-4, default 1)' },
+        seed: { type: 'number', description: 'Random seed for reproducible results (optional)' },
       },
       required: ['prompt'],
+    },
+  },
+  {
+    name: 'edit_image_with_firefly',
+    description: 'Firefly Agent — Edit or transform an existing image using a text prompt. Upload a reference image URL and describe the desired changes. Use for updating existing hero images, adapting campaign visuals, or style transfers.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Description of the desired changes (e.g., "change background to sunset, keep the person")' },
+        imageUrl: { type: 'string', description: 'URL of the source image to edit' },
+        model: { type: 'string', description: 'Firefly model to use (optional)' },
+        width: { type: 'number', description: 'Output image width in pixels' },
+        height: { type: 'number', description: 'Output image height in pixels' },
+        numImages: { type: 'number', description: 'Number of variations to generate (1-4, default 1)' },
+      },
+      required: ['prompt', 'imageUrl'],
     },
   },
 
@@ -3062,20 +3079,34 @@ export async function executeTool(name, input) {
     case 'generate_image_variations': {
       if (!(await ensureAuth())) return authRequiredError('generate_image_variations');
       try {
-        const result = await contentUpdaterMcp.callTool('generate_image_variations', {
+        const result = await fireflyMcp.callTool('firefly_generate_image', {
           prompt: input.prompt,
-          source_asset: input.source_asset,
-          count: input.count || 3,
-          style: input.style,
-          aspect_ratio: input.aspect_ratio,
+          ...(input.model && { model: input.model }),
+          ...(input.width && { width: input.width }),
+          ...(input.height && { height: input.height }),
+          numImages: input.numImages || input.count || 1,
+          ...(input.seed && { seed: input.seed }),
         });
-        return JSON.stringify({
-          ...result,
-          _source: 'connected',
-          source: 'Adobe Firefly via AEM Content Updater MCP',
-        }, null, 2);
+        return JSON.stringify({ ...result, source: 'Adobe Firefly MCP' }, null, 2);
       } catch (err) {
         return mcpError('generate_image_variations', err);
+      }
+    }
+
+    case 'edit_image_with_firefly': {
+      if (!(await ensureAuth())) return authRequiredError('edit_image_with_firefly');
+      try {
+        const result = await fireflyMcp.callTool('firefly_image_to_image', {
+          prompt: input.prompt,
+          imageUrl: input.imageUrl,
+          ...(input.model && { model: input.model }),
+          ...(input.width && { width: input.width }),
+          ...(input.height && { height: input.height }),
+          numImages: input.numImages || 1,
+        });
+        return JSON.stringify({ ...result, source: 'Adobe Firefly MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('edit_image_with_firefly', err);
       }
     }
 

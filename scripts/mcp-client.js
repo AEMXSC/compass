@@ -421,7 +421,7 @@ export const ALL_MCP_CLIENTS = [
  * Critical sessions (content, governance) init first; others lazy.
  */
 export async function prewarmSessions() {
-  const critical = [contentMcp, governanceMcp, discoveryMcp];
+  const critical = [contentMcp, governanceMcp, discoveryMcp, fireflyMcp];
   const results = await Promise.allSettled(critical.map(async (c) => {
     await c.initSession();
     registerMcpTools(c);
