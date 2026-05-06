@@ -5234,6 +5234,11 @@ Example:
   components[0] = { name: "Hero", patchPath: "/items/0/items/0:0/items/0:0:0/properties/text", value: "<h1>Old</h1>" }
   → patch jsonPatch: '[{"op":"replace","path":"/items/0/items/0:0/items/0:0:0/properties/text","value":"<h1>New</h1>"}]'
 
+## Brief-to-page (JCR)
+extract_brief_content → create_aem_page → patch_aem_page_content
+- Use the pageId returned by create_aem_page directly — do NOT search for the page
+- Do NOT call get-aem-page-preview-url until AFTER patching (page isn't published yet)
+
 ## Rules
 - NEVER say what you are about to do — just call the tool immediately
 - NEVER explain steps, narrate the process, or preview your plan — silent execution only
@@ -5367,7 +5372,7 @@ Use when the user wants: full page rewrites, new pages from templates, content g
 | Task | Use |
 |---|---|
 | Change specific text, a headline, a property | Content MCP: search → get → patch |
-| Create a new page from a brief or generate content | Content MCP: \`extract_brief_content\` → \`create_aem_page\` → \`patch_aem_page_content\` |
+| Create a new page from a brief or generate content | Content MCP: \`extract_brief_content\` → \`create_aem_page\` → \`patch_aem_page_content\` (use the pageId returned by create_aem_page directly — do NOT search for it, do NOT call get-aem-page-preview-url until after patching) |
 | Rewrite an EXISTING page (full rewrite, not from brief) | EPA: process_page_tool → get_status_tool → (feedback) → accept |
 | Translate or modernize a page | EPA: process_page_tool |
 
