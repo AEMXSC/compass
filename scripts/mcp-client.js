@@ -359,8 +359,8 @@ export const contentQaMcp = createMcpClient('/adobe/mcp/loki/content-qa', 'Conte
 export const contentGenMcp = createMcpClient('/adobe/mcp/loki/skills', 'Content-Gen');
 
 // ── Analytics & Insights (prod gateway) ──
-export const cjaMcp = createMcpClient('https://mcp-gateway.adobe.io/cja/mcp', 'CJA', { tokenKey: 'ew-mcp-token-cja' });
-export const aaMcp = createMcpClient('https://mcp-gateway.adobe.io/aa/mcp', 'Adobe-Analytics', { tokenKey: 'ew-mcp-token-aa' });
+export const cjaMcp = createMcpClient('https://mcp-gateway.adobe.io/cja/mcp', 'CJA', { tokenKey: 'ew-ims-token' });
+export const aaMcp = createMcpClient('https://mcp-gateway.adobe.io/aa/mcp', 'Adobe-Analytics', { tokenKey: 'ew-ims-token' });
 
 // ── Adobe Express ──
 export const expressMcp = createMcpClient('https://express-mcp-service.adobe.io/mcp', 'Adobe-Express');
@@ -368,11 +368,11 @@ export const expressMcp = createMcpClient('https://express-mcp-service.adobe.io/
 // ── Cross-Product ──
 export const acrobatMcp = createMcpClient('/adobe/mcp/acrobat', 'Acrobat');
 export const marketingMcp = createMcpClient('https://aep-ai-ama-stage.adobe.io/mcp', 'Marketing-Agent');
-export const targetMcp = createMcpClient('https://targetmcp.adobe.io/mcp', 'Target', { tokenKey: 'ew-mcp-token-target' });
-export const rtcdpMcp = createMcpClient('https://rtcdp-mcp.adobe.io/mcp', 'RT-CDP', { tokenKey: 'ew-mcp-token-rtcdp' });
+export const targetMcp = createMcpClient('https://targetmcp.adobe.io/mcp', 'Target', { tokenKey: 'ew-ims-token' });
+export const rtcdpMcp = createMcpClient('https://rtcdp-mcp.adobe.io/mcp', 'RT-CDP', { tokenKey: 'ew-ims-token' });
 
 // ── AEP (Adobe Experience Platform) ──
-export const aepMcp = createMcpClient('https://aep-mcp.adobe.io/mcp', 'AEP', { tokenKey: 'ew-mcp-token-aep' });
+export const aepMcp = createMcpClient('https://aep-mcp.adobe.io/mcp', 'AEP', { tokenKey: 'ew-ims-token' });
 
 // ── AJO Prod (standalone host) ──
 export const ajoProdMcp = createMcpClient('https://ajo-mcp.adobe.io/mcp', 'AJO-Prod');

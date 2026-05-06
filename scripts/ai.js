@@ -14,7 +14,7 @@ import * as da from './da-client.js';
 import { isSignedIn, getToken, signIn } from './ims.js';
 import { hasGitHubToken, readContent as ghReadContent, writeContent as ghWriteContent, triggerPreview as ghTriggerPreview, getRepoInfo, listBranches as ghListBranches } from './github-content.js';
 import * as aemContent from './aem-content-mcp-client.js';
-import { contentMcp, experienceProductionMcp, getMcpRegistry, getAllMcpClaudeTools, initAndRegister, governanceMcp, fireflyMcp } from './mcp-client.js';
+import { contentMcp, experienceProductionMcp, getMcpRegistry, getAllMcpClaudeTools, initAndRegister, governanceMcp, fireflyMcp, registerMcpTools } from './mcp-client.js';
 import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
@@ -30,6 +30,18 @@ const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
 const STORAGE_KEY = 'ew-claude-key';
 const HTML_TRUNCATE_THRESHOLD = 15000;
+
+// Analytics lazy-load — triggered on first analytics/performance query
+const ANALYTICS_TRIGGERS = /traffic|visits|bounce|sessions|pageview|conversion|revenue|orders|24.?h|yesterday|last week|last month|last \d+ day|trend|drop|spike|what happened|how did|how.?s the site|site performance|analytics|report|metric|opportunit|audience|segment|cja\b|adobe analytics/i;
+let analyticsToolsLoaded = false;
+
+async function ensureAnalyticsTools() {
+  if (analyticsToolsLoaded) return;
+  analyticsToolsLoaded = true;
+  await Promise.allSettled([aaMcp, cjaMcp].map(async (c) => {
+    try { await c.initSession(); registerMcpTools(c); } catch { /* unavailable */ }
+  }));
+}
 
 /** Build the correct Universal Editor URL for an AEM CS page. */
 function buildUeUrl(aemHost, pagePath, orgCtx = {}) {
@@ -4999,7 +5011,12 @@ Use these when users ask about:
 26. **VARIATIONS**: When users want content variations, alternate headlines, or copy options, use generate_page_variations. Generate full-page coordinated variations, not just one component at a time. If they also want to test them, chain with setup_experiment.
 27. **BULK OPERATIONS**: When users say "all pages", "every page", "across the site", "update everywhere", or "change on all" — use \`batch_aem_update\`. ALWAYS call with confirmed=false first to show affected pages, then ask user to confirm before calling with confirmed=true. Never execute bulk updates without user confirmation.
 28. **ALT TEXT**: When users mention "ALT text", "accessibility", "image descriptions", "missing ALT", or "image audit" — use \`suggest_alt_text\` to analyze page images. Present suggestions as a table. Only call \`apply_alt_text\` after user approves specific suggestions.
-29. **ANALYTICS (CJA)**: For data questions — "How did we do?", "trend orders", "revenue by region", "why did X drop?" — use \`cja_visualize\`, \`cja_kpi_pulse\`, \`cja_executive_briefing\`, or \`cja_anomaly_triage\`. These connect to CJA data views.
+29. **ANALYTICS (Adobe Analytics)**: For site performance questions — "what happened", "traffic", "visits", "bounce rate", "top pages", "last 24 hours", "last week", "how did we do", "why did X drop" — use AA MCP tools in this sequence:
+    1. First time only: call \`findCompanies\` to discover the globalCompanyId, then \`findReportSuites\` to find the rsid
+    2. Call \`setSessionDefaults\` with the rsid and dateRange (ISO 8601 interval, e.g. "2025-05-05T00:00:00/2025-05-06T00:00:00")
+    3. Call \`runReport\` with the metric and dimension. Common combos: metric=visits+dimension=page for top pages; metric=visits+dimension=daterangeday for trend; metric=bounceRate for bounce rate
+    4. After reporting, always ask: "Want me to look for opportunities or build an experience for these insights?"
+    Use \`findMetrics\` and \`findDimensions\` to discover available metrics/dimensions when unsure.
 30. **JOURNEYS (AJO)**: For journey creation — "Create a welcome series", "Build a re-engagement drip" — use \`create_journey\`. For journey content — "Generate a push notification" — use \`generate_journey_content\`.
 31. **EXPERIMENTS**: For experiment analysis — "What did we learn?", "Why did variant A win?" — use \`analyze_experiment\`.
 32. **AUDIENCES (RT-CDP)**: For audience questions — "Show me our largest audiences", "Which audiences target California?" — use \`explore_audiences\`.
@@ -5599,7 +5616,10 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     const OPS_TOOLS = ['edit_page_content', 'preview_page', 'publish_page'];
     tools = getToolsForPrompt(promptText).filter(t => OPS_TOOLS.includes(t.name));
   } else {
-    // Thinking Brain: Compass tools + ALL registered MCP tools
+    // Thinking Brain: lazy-init analytics MCPs on first analytics/performance query
+    if (ANALYTICS_TRIGGERS.test(promptText)) await ensureAnalyticsTools();
+
+    // Compass tools + ALL registered MCP tools
     // MCP tools take priority — filter Compass duplicates so tool names stay unique
     const compassTools = getToolsForPrompt(promptText);
     const mcpTools = getAllMcpClaudeTools();
