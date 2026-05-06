@@ -4244,17 +4244,16 @@ async function connectCustomSite(input) {
         const result = await contentMcp.callTool('search-aem-pages', { authorUrl, q: siteQuery, limit: 50 });
         // callTool already parses the search response into an array
         const pages = Array.isArray(result) ? result : [];
-        // Only use an exact or prefix match — never fall back to an unrelated page
-        const page = pages.find((p) =>
-          p.authorPath === jcrPath
-          || p.authorPath === `${jcrPath}/index`
-          || p.authorPath?.startsWith(jcrPath + '/')
-        );
-        if (page?.id) {
-          window.__AEM_PAGE_ID = page.id;
-          console.log(`[EW] Pre-fetched pageId for ${page.authorPath}: ${page.id.slice(0, 30)}...`);
+        // Exact match: page IS the target
+        const exactPage = pages.find((p) => p.authorPath === jcrPath || p.authorPath === `${jcrPath}/index`);
+        // Child match: a child page of the target — its parentPageId IS the target UUID
+        const childPage = !exactPage ? pages.find((p) => p.authorPath?.startsWith(jcrPath + '/') && p.parentPageId) : null;
+        const pageId = exactPage?.id || childPage?.parentPageId || null;
+        if (pageId) {
+          window.__AEM_PAGE_ID = pageId;
+          console.log(`[EW] Pre-fetched pageId via ${exactPage ? 'exact' : 'child'} match: ${pageId.slice(0, 30)}...`);
           // Pre-fetch components+eTag so Claude can patch in 1 round (same as DA's pageHTML pre-fetch)
-          contentMcp.callTool('get-aem-page-content', { authorUrl, pageId: page.id })
+          contentMcp.callTool('get-aem-page-content', { authorUrl, pageId })
             .then((r) => {
               if (r?.eTag && r?.components?.length) {
                 window.__AEM_PAGE_COMPONENTS = { eTag: r.eTag, components: r.components, fetchedAt: Date.now() };
