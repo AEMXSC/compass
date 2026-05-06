@@ -45,13 +45,13 @@ Compass works across all three AEM deployment architectures:
 | **Edge Delivery Stack** (Document Authoring + Edge Delivery) | DA MCP — direct read/write to DA source, previews via `.aem.page` | IMS |
 | **Hybrid** (AEM Author + Edge Delivery) | Either path depending on what's being edited | IMS + MCP OAuth |
 
-~65% of AEM customers are on the Traditional Stack. ~35% are on or moving to the Edge Delivery Stack. Compass is one of very few tools that works natively with both — a meaningful XSC differentiator.
+~85% of AEM customers are on the Traditional Stack. ~15% are on or moving to the Edge Delivery Stack. Compass is one of very few tools that works natively with both — a meaningful XSC differentiator.
 
 ---
 
 ## Problem Statement
 
-Pre-sales demos for AEM's AI story are fragmented. AEM's native AI Assistant is product-scoped — it doesn't cross into DA, Firefly, Analytics, or Journey Optimizer, and it has no awareness of the customer's vertical, deal stage, or demo environment. XSCs stitching multi-product stories together are doing it manually, with browser tabs and rehearsed click paths.
+Pre-sales demos for AEM's AI story are fragmented. AEM's native AI Assistant is product-scoped — it doesn't cross into DA, ASO, LLMO, Firefly, Analytics, or Journey Optimizer, and it has no awareness of the customer's vertical, deal stage, or demo environment. XSCs stitching multi-product stories together are doing it manually, with browser tabs and rehearsed click paths.
 
 At the same time, enterprise customers — particularly technical teams — are no longer asking "does AEM have AI?" They're asking **"can AEM plug into *our* AI?"** They have existing AI platforms, internal copilots, or multi-vendor AI strategies, and they want AEM's capabilities as a composable layer inside their own orchestration, not another product UI to log into.
 
