@@ -22,7 +22,7 @@ Adobe's agentic story is structured around three deployment models. Understandin
 
 | Tier | Name | How It Works | Best For |
 |------|------|-------------|---------|
-| **1** | **Full-stack AEM** | AEM AI Assistant + Experience Workspace — Adobe owns the AI layer, orchestration, and execution context end-to-end | Marketers & practitioners |
+| **1** | **Full-stack AEM** | AEM AI Assistant — Adobe owns the AI layer, orchestration, and execution context end-to-end | Marketers & practitioners |
 | **2** | **AEM-orchestrated** | Customer uses their preferred AI surface (Copilot, Claude, ChatGPT, Gemini) — AEM's Agent Orchestrator provides the content context and manages approved content actions | Business teams |
 | **3** | **BYO Orchestration Layer** | Customer builds on their own harness and UI — AEM exposes its capabilities as MCP tools, APIs, and A2A endpoints for the customer to consume | Developers & technical teams |
 
