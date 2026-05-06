@@ -6690,6 +6690,12 @@ async function init() {
  * ~350ms — runs async, doesn't block UI.
  */
 async function prefetchAemEnvironments() {
+  // aemUnifiedMcp needs JCR/site auth — skip silently if MCP OAuth token not present
+  if (!localStorage.getItem('ew-mcp-token')) {
+    window.__AEM_ENVIRONMENTS = [];
+    window.__AEM_ENV_BY_AUTHOR = {};
+    return;
+  }
   try {
     const result = await aemUnifiedMcp.callTool('list-aem-environments', {});
     const environments = Array.isArray(result) ? result : (result?.environments || result?.value || []);
