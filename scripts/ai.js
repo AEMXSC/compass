@@ -5462,7 +5462,11 @@ export async function chat(userMessage, context = {}, _depth = 0) {
         const mcpClient = getMcpRegistry()[block.name];
         if (mcpClient) {
           console.log(`[MCP call] ${block.name}`, JSON.stringify(block.input, null, 2));
-          const mcpResult = await mcpClient.callTool(block.name, block.input);
+          let mcpResult = await mcpClient.callTool(block.name, block.input);
+          if (block.name === 'firefly_generate_image' && mcpResult?.error && /token|auth|oauth/i.test(mcpResult.error)) {
+            console.log('[Firefly] MCP auth failed — trying REST API with IMS token');
+            try { mcpResult = await callFireflyApi(block.input.prompt, { width: block.input.width, height: block.input.height, numImages: block.input.numImages || 1 }); } catch (e) { mcpResult = { error: e.message }; }
+          }
           console.log(`[MCP result] ${block.name}:`, typeof mcpResult === 'string' ? mcpResult.slice(0, 400) : JSON.stringify(mcpResult, null, 2).slice(0, 400));
           result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         } else {
@@ -5678,7 +5682,11 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
       const mcpClient = getMcpRegistry()[toolBlock.name];
       if (mcpClient) {
         console.log(`[MCP call] ${toolBlock.name}`, JSON.stringify(toolBlock.input, null, 2));
-        const mcpResult = await mcpClient.callTool(toolBlock.name, toolBlock.input);
+        let mcpResult = await mcpClient.callTool(toolBlock.name, toolBlock.input);
+        if (toolBlock.name === 'firefly_generate_image' && mcpResult?.error && /token|auth|oauth/i.test(mcpResult.error)) {
+          console.log('[Firefly] MCP auth failed — trying REST API with IMS token');
+          try { mcpResult = await callFireflyApi(toolBlock.input.prompt, { width: toolBlock.input.width, height: toolBlock.input.height, numImages: toolBlock.input.numImages || 1 }); } catch (e) { mcpResult = { error: e.message }; }
+        }
         console.log(`[MCP result] ${toolBlock.name}:`, typeof mcpResult === 'string' ? mcpResult.slice(0, 400) : JSON.stringify(mcpResult, null, 2).slice(0, 400));
         result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         // Auto-refresh JCR preview after a successful patch
