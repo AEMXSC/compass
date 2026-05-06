@@ -21,6 +21,23 @@ const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const GITHUB_SCOPE = 'repo,user';
 
+// Allowed external MCP hosts the worker may proxy to
+const ALLOWED_MCP_HOSTS = [
+  'mcp.adobeaemcloud.com',
+  'mcp-gateway.adobe.io',
+  'aa-mcp.adobe.io',
+  'cja-mcp.adobe.io',
+  'rtcdp-mcp.adobe.io',
+  'aep-mcp.adobe.io',
+  'targetmcp.adobe.io',
+  'ajo-mcp.adobe.io',
+  'express-mcp-service.adobe.io',
+  'aep-ai-ama-stage.adobe.io',
+  'emcee-stage.adobe.io',
+  'm-mcp-demo.adobe.io',
+  'spacecat.experiencecloud.live',
+];
+
 const ALLOWED_ORIGINS = [
   'https://aemxsc.github.io',
   'http://localhost:3000',
@@ -28,6 +45,7 @@ const ALLOWED_ORIGINS = [
   'https://main--compass--aemxsc.aem.page',
   'https://eds-migration--compass--aemxsc.aem.page',
   'https://main--compass--aemxsc.aem.live',
+  'https://compass.aemxsc.com',
 ];
 
 // Allowed return-to base URLs (must start with one of these)
@@ -39,6 +57,7 @@ const ALLOWED_RETURN_URLS = [
   'https://main--compass--aemxsc.aem.page/',
   'https://eds-migration--compass--aemxsc.aem.page/',
   'https://main--compass--aemxsc.aem.live/',
+  'https://compass.aemxsc.com/',
 ];
 
 // Cache the S2S token in memory (lives as long as the Worker instance)
@@ -115,6 +134,9 @@ async function route(request, env) {
   }
   if (url.pathname === '/mcp' && request.method === 'POST') {
     return handleMcpProxy(request, env);
+  }
+  if (url.pathname === '/mcp-discovery' && request.method === 'GET') {
+    return handleMcpDiscovery(request, env);
   }
   if (url.pathname === '/mcp-oauth/start' && request.method === 'GET') {
     return handleMcpOAuthStart(request);
@@ -350,24 +372,38 @@ async function handleTokenProxy(request) {
 
 async function handleMcpProxy(request, env) {
   const origin = request.headers.get('Origin') || '';
-  // Only allow explicitly listed origins (no wildcards — prevents abuse from arbitrary *.aem.page subdomains)
   if (!ALLOWED_ORIGINS.includes(origin)) {
     return new Response('Forbidden', { status: 403 });
   }
 
   const url = new URL(request.url);
   const mcpEndpoint = url.searchParams.get('endpoint') || '/adobe/mcp/aem';
-  const targetUrl = `https://mcp.adobeaemcloud.com${mcpEndpoint}`;
 
-  // Prefer user token (from browser) for MCP — needed for write operations (patch returns 403 with S2S)
-  // Fall back to S2S for reads if no user token provided
+  // Support full URLs for external MCPs (mcp-gateway.adobe.io, rtcdp-mcp.adobe.io, etc.)
+  // Relative paths are resolved against mcp.adobeaemcloud.com
+  let targetUrl;
+  if (mcpEndpoint.startsWith('https://')) {
+    // Validate against allowlist to prevent open-proxy abuse
+    try {
+      const host = new URL(mcpEndpoint).hostname;
+      if (!ALLOWED_MCP_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) {
+        return new Response('MCP endpoint not in allowlist', { status: 403 });
+      }
+    } catch {
+      return new Response('Invalid MCP endpoint URL', { status: 400 });
+    }
+    targetUrl = mcpEndpoint;
+  } else {
+    targetUrl = `https://mcp.adobeaemcloud.com${mcpEndpoint}`;
+  }
+
+  // Prefer user token — needed for write operations (S2S lacks AEM user permissions)
   const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '') || null;
   let mcpToken = userToken;
   if (!mcpToken) {
     mcpToken = await getS2SToken(env);
   }
 
-  // Forward the request to MCP, preserving session ID
   const incomingBody = await request.text();
   const clientSessionId = request.headers.get('mcp-session-id');
 
@@ -378,17 +414,34 @@ async function handleMcpProxy(request, env) {
       Authorization: `Bearer ${token}`,
     };
     if (clientSessionId) headers['Mcp-Session-Id'] = clientSessionId;
+
+    // Inject product-specific context headers for Experience Cloud MCPs
+    try {
+      const targetHost = new URL(targetUrl).hostname;
+      const isGateway = targetHost.includes('mcp-gateway.adobe.io')
+        || targetHost.includes('rtcdp-mcp.adobe.io')
+        || targetHost.includes('aep-mcp.adobe.io')
+        || targetHost.includes('targetmcp.adobe.io')
+        || targetHost.includes('ajo-mcp.adobe.io');
+      if (isGateway) {
+        if (env.IMS_ORG_ID) headers['x-gw-ims-org-id'] = env.IMS_ORG_ID;
+        if (env.AA_GLOBAL_COMPANY_ID && targetUrl.includes('/aa/')) {
+          headers['x-global-company-id'] = env.AA_GLOBAL_COMPANY_ID;
+        }
+        if (env.AEP_SANDBOX_NAME
+          && (targetHost.includes('rtcdp-mcp') || targetHost.includes('aep-mcp'))) {
+          headers['x-sandbox-name'] = env.AEP_SANDBOX_NAME;
+        }
+      }
+    } catch { /* header injection best-effort */ }
+
     return fetch(targetUrl, { method: 'POST', headers, body: incomingBody });
   }
 
-  // Use the token directly — no silent fallback to S2S (which lacks AEM permissions)
   const mcpResp = await forwardToMcp(mcpToken);
-
-  // Capture session ID from MCP response
   const sessionId = mcpResp.headers.get('mcp-session-id') || '';
-
-  // Forward response body and status, adding session ID as an exposed header
   const responseBody = await mcpResp.text();
+
   return new Response(responseBody, {
     status: mcpResp.status,
     headers: {
@@ -401,6 +454,57 @@ async function handleMcpProxy(request, env) {
       'Access-Control-Allow-Credentials': 'true',
     },
   });
+}
+
+/* ─── GET /mcp-discovery — Fetch .well-known OAuth metadata for an MCP endpoint ─── */
+
+async function handleMcpDiscovery(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const url = new URL(request.url);
+  const endpoint = url.searchParams.get('endpoint');
+  if (!endpoint) {
+    return jsonResponse({ error: 'Missing ?endpoint= parameter' }, 400, origin);
+  }
+
+  // Validate endpoint is in allowlist
+  try {
+    const host = new URL(endpoint).hostname;
+    if (!ALLOWED_MCP_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) {
+      return jsonResponse({ error: 'Endpoint not in allowlist' }, 403, origin);
+    }
+  } catch {
+    return jsonResponse({ error: 'Invalid endpoint URL' }, 400, origin);
+  }
+
+  // Step 1: Fetch OAuth Protected Resource metadata
+  let resourceMeta = null;
+  try {
+    const rmResp = await fetch(`${endpoint}/.well-known/oauth-protected-resource`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (rmResp.ok) resourceMeta = await rmResp.json();
+  } catch { /* not available */ }
+
+  // Step 2: Resolve authorization server metadata URL
+  let authMeta = null;
+  const authServerBase = resourceMeta?.authorization_servers?.[0]
+    || (() => { try { return new URL(endpoint).origin; } catch { return null; } })();
+
+  if (authServerBase) {
+    const wellKnown = authServerBase.includes('/.well-known/')
+      ? authServerBase
+      : `${authServerBase}/.well-known/oauth-authorization-server`;
+    try {
+      const amResp = await fetch(wellKnown, { headers: { Accept: 'application/json' } });
+      if (amResp.ok) authMeta = await amResp.json();
+    } catch { /* not available */ }
+  }
+
+  return jsonResponse({ resourceMeta, authMeta }, 200, origin);
 }
 
 /* ─── GET /preview — Full-page proxy for AEM JCR/xwalk content ─── */
@@ -1390,7 +1494,6 @@ const MCP_OAUTH_REDIRECT_URI = 'https://compass-ims-proxy.compass-xsc.workers.de
 async function handleMcpOAuthStart(request) {
   const url = new URL(request.url);
 
-  // Browser sends code_challenge + state; Worker just builds the redirect
   const codeChallenge = url.searchParams.get('code_challenge');
   const state = url.searchParams.get('state');
 
@@ -1398,8 +1501,12 @@ async function handleMcpOAuthStart(request) {
     return new Response('Missing code_challenge or state', { status: 400 });
   }
 
+  // Generic: accepts any discovered auth endpoint, defaults to AEM Cloud
+  const authEndpoint = url.searchParams.get('auth_endpoint') || 'https://oauth.adobeaemcloud.com/oauth/authorize';
+  const clientId = url.searchParams.get('client_id') || MCP_OAUTH_CLIENT_ID;
+
   const params = new URLSearchParams({
-    client_id: MCP_OAUTH_CLIENT_ID,
+    client_id: clientId,
     redirect_uri: MCP_OAUTH_REDIRECT_URI,
     response_type: 'code',
     code_challenge: codeChallenge,
@@ -1407,7 +1514,7 @@ async function handleMcpOAuthStart(request) {
     state,
   });
 
-  return Response.redirect(`https://oauth.adobeaemcloud.com/oauth/authorize?${params}`, 302);
+  return Response.redirect(`${authEndpoint}?${params}`, 302);
 }
 
 /**
@@ -1450,8 +1557,9 @@ function escapeHtmlInline(s) {
 }
 
 /**
- * POST /mcp-oauth/register — attempt dynamic client registration on oauth.adobeaemcloud.com.
- * One-time operation. If it succeeds, update MCP_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI constants.
+ * POST /mcp-oauth/register — Dynamic Client Registration (RFC 7591).
+ * Accepts a registrationEndpoint from the body to support any MCP's auth server.
+ * Defaults to oauth.adobeaemcloud.com for backward compat.
  */
 async function handleMcpOAuthRegister(request) {
   const origin = request.headers.get('Origin') || '';
@@ -1459,18 +1567,19 @@ async function handleMcpOAuthRegister(request) {
     return new Response('Forbidden', { status: 403 });
   }
 
-  const callbackUrl = 'https://compass-ims-proxy.compass-xsc.workers.dev/mcp-oauth/callback';
+  const body = await request.json().catch(() => ({}));
+  const registrationEndpoint = body.registrationEndpoint || 'https://oauth.adobeaemcloud.com/oauth/register';
+  const redirectUri = body.redirectUri || MCP_OAUTH_REDIRECT_URI;
 
-  // Try OIDC dynamic client registration (RFC 7591)
-  const regResp = await fetch('https://oauth.adobeaemcloud.com/oauth/register', {
+  const regResp = await fetch(registrationEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      redirect_uris: [callbackUrl],
+      redirect_uris: [redirectUri],
       client_name: 'Compass Web App',
       grant_types: ['authorization_code'],
       response_types: ['code'],
-      token_endpoint_auth_method: 'client_secret_post',
+      token_endpoint_auth_method: 'none', // public client — PKCE, no secret
       scope: 'openid AdobeID',
     }),
   });
@@ -1494,7 +1603,7 @@ async function handleMcpOAuthToken(request) {
   }
 
   const body = await request.json();
-  const { code, codeVerifier } = body;
+  const { code, codeVerifier, tokenEndpoint, clientId } = body;
 
   if (!code || !codeVerifier) {
     return new Response(JSON.stringify({ error: 'Missing code or codeVerifier' }), {
@@ -1502,17 +1611,23 @@ async function handleMcpOAuthToken(request) {
     });
   }
 
-  // Exchange code for token — codeVerifier comes from the browser (stateless)
+  const resolvedTokenEndpoint = tokenEndpoint || 'https://oauth.adobeaemcloud.com/oauth/token';
+  const resolvedClientId = clientId || MCP_OAUTH_CLIENT_ID;
+
   const tokenBody = new URLSearchParams({
     grant_type: 'authorization_code',
-    client_id: MCP_OAUTH_CLIENT_ID,
-    client_secret: MCP_OAUTH_CLIENT_SECRET,
+    client_id: resolvedClientId,
     code,
     redirect_uri: MCP_OAUTH_REDIRECT_URI,
     code_verifier: codeVerifier,
   });
 
-  const tokenResp = await fetch('https://oauth.adobeaemcloud.com/oauth/token', {
+  // Only add client_secret for the default AEM Cloud client (public PKCE clients omit it)
+  if (!clientId || clientId === MCP_OAUTH_CLIENT_ID) {
+    tokenBody.append('client_secret', MCP_OAUTH_CLIENT_SECRET);
+  }
+
+  const tokenResp = await fetch(resolvedTokenEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: tokenBody,
