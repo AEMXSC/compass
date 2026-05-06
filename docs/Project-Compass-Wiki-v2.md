@@ -140,7 +140,7 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 | AJO Prod | `ajo-mcp.adobe.io/mcp` | **Session Ready** | Journey orchestration (standalone host) |
 | Adobe Express | `express-mcp-service.adobe.io/mcp` | **Session Ready** | Design operations |
 | Marketing Agent | `aep-ai-ama-stage.adobe.io/mcp` | **Stage** | Marketing orchestration |
-| Sites Optimizer | `m-mcp-demo.adobe.io/mcp` | **Session Ready** | SEO, performance audits |
+| Sites Optimizer | `m-mcp-demo.adobe.io/mcp` | **Working** | SEO, performance audits, AI Content Visibility Checker (scores how well AI agents can read + cite page content) |
 | Spacecat | `spacecat.experiencecloud.live/api/v1/mcp` | **Session Ready** | Site audits |
 
 ---
