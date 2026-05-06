@@ -13,7 +13,7 @@
 // Different query strings (e.g., './da-client.js' vs './da-client.js?v=57') create
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
-import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken } from './ims.js';
+import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken, initS2SToken } from './ims.js';
 import * as ai from './ai.js';
 import { TOOL_AGENT_MAP } from './ai.js';
 import * as da from './da-client.js';
@@ -829,6 +829,7 @@ window.addEventListener('ew-auth-change', async (e) => {
     );
 
     console.log('[Auth] Signed in — warming sessions...');
+    initS2SToken().catch(() => {}); // Auto-refresh S2S token (Firefly + AEM scopes)
     await Promise.all(warmups);
 
     // Refresh page tree now that DA auth is available

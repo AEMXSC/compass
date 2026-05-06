@@ -80,6 +80,35 @@ export async function ensureToken() {
   return null;
 }
 
+/**
+ * Auto-fetch the S2S token from the worker and store as ew-s2s-token.
+ * The worker uses client_credentials with Firefly + AEM scopes.
+ * Called once on init — no manual token pasting needed.
+ */
+export async function initS2SToken() {
+  // Don't overwrite a manually-pasted token that's still valid
+  const existing = localStorage.getItem('ew-s2s-token');
+  if (existing) {
+    try {
+      const payload = JSON.parse(atob(existing.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const expiresAt = (payload.created_at + payload.expires_in) || 0;
+      if (expiresAt > Date.now()) return existing;
+    } catch { /* invalid token — fall through to refresh */ }
+  }
+  try {
+    const resp = await fetch(`${IMS_WORKER}/auth`, { credentials: 'omit' });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.access_token) {
+        localStorage.setItem('ew-s2s-token', data.access_token);
+        console.log('[IMS] S2S token auto-refreshed from worker');
+        return data.access_token;
+      }
+    }
+  } catch { /* worker unavailable — manual token still works */ }
+  return null;
+}
+
 export function isSignedIn() { return !!getToken(); }
 export function getAuthMethod() { return authMethod; }
 
