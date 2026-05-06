@@ -41,9 +41,9 @@ Compass works across all three AEM deployment architectures:
 
 | Stack | How Compass Connects | Auth Pattern |
 |-------|---------------------|-------------|
-| **Traditional Stack** (AEM Author + AEM Publish) | JCR MCP — headless Chrome renders author pages, reads + patches JCR content via `patch-aem-page-content` | IMS + MCP OAuth |
+| **Traditional Stack** (AEM Author + AEM Publish) | JCR MCP — headless Chrome renders author pages, reads + patches JCR content via `patch-aem-page-content` | IMS |
 | **Edge Delivery Stack** (Document Authoring + Edge Delivery) | DA MCP — direct read/write to DA source, previews via `.aem.page` | IMS |
-| **Hybrid** (AEM Author + Edge Delivery) | Either path depending on what's being edited | IMS + MCP OAuth |
+| **Hybrid** (AEM Author + Edge Delivery) | Either path depending on what's being edited | IMS |
 
 ~85% of AEM customers are on the Traditional Stack. ~15% are on or moving to the Edge Delivery Stack. Compass is one of very few tools that works natively with both — a meaningful XSC differentiator.
 
@@ -81,24 +81,26 @@ Neither need is served by what exists today. Compass addresses both.
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| UI | Vanilla JS SPA on AEM Edge Delivery Services | Single-page app at `eds-migration--compass--aemxsc.aem.page` |
-| Auth | imslib + `aem-extension-builder` IMS client | User OAuth for MCP operations |
+| UI | Vanilla JS SPA on AEM Edge Delivery Services | Single-page app at `compass.aemxsc.com` / `eds-migration--compass--aemxsc.aem.page` |
+| Auth | imslib + `aem-extension-builder` IMS client | Single IMS sign-in covers all 25 MCP servers — no per-product Connect flow |
 | Service Auth | S2S via Cloudflare Worker | Read-only AEM access, JCR page rendering |
 | AI Engine | Claude API (Sonnet) | Reasoning, tool selection, content generation |
-| MCP Connectivity | Direct browser connections to all Adobe MCP servers | Full product stack integration (CORS verified working) |
+| MCP Connectivity | All external MCPs routed through Cloudflare Worker BFF | CORS handling, product header injection, allowlist security |
 | Preview | Cloudflare Worker + Browser Rendering API | Headless Chrome renders authenticated AEM author pages |
-| Proxy | Cloudflare Worker (`compass-ims-proxy`) | Auth gateway, MCP session management, page rendering |
+| Proxy | Cloudflare Worker (`compass-ims-proxy`) | Auth gateway, MCP session management, page rendering, MCP proxy |
 
 ### How It Works
 
 ```
-User connects a site (DA or JCR)
+User signs in (IMS — one sign-in covers all 25 MCP servers)
+  -> User connects a site (DA or JCR)
   -> Compass detects site type (DA-backed EDS or AEM Cloud Service)
   -> For DA: loads .aem.page preview directly
   -> For JCR: renders author page via headless Chrome with S2S Bearer auth
   -> MCP sessions initialize (Content, Governance, DA, etc.)
   -> Page components pre-fetched in background (enables 1-round edits)
   -> User types a request
+  -> If analytics query: AA/CJA tools lazy-loaded on first use
   -> Claude reasons + calls MCP tools (same tools Claude.ai uses)
   -> Results shown in chat + preview refreshes
 ```
@@ -107,9 +109,11 @@ User connects a site (DA or JCR)
 
 JCR edits complete in **~10–18 seconds** (vs. 45–60s without optimization). On page connect, Compass pre-fetches `get-aem-page-content` and stores the eTag + component structure. When an edit request arrives, a synthetic tool result is injected before the first API call — Claude's first response is always `patch-aem-page-content`. No intermediate round trips.
 
-### MCP Integrations (All CORS-Verified from .aem.page Origins)
+### MCP Integrations
 
-27 MCP clients are wired in `scripts/mcp-client.js`. Key servers:
+25 MCP clients are wired in `scripts/mcp-client.js`, all using the user's IMS token. External MCPs (gateway, RT-CDP, AEP, Target, Express, AJO) route through the Cloudflare Worker BFF for CORS handling and product header injection.
+
+**AEM Cloud MCPs** (`mcp.adobeaemcloud.com`)
 
 | MCP Server | Endpoint | Status | Capabilities |
 |---|---|---|---|
@@ -117,7 +121,7 @@ JCR edits complete in **~10–18 seconds** (vs. 45–60s without optimization). 
 | AEM Content Read-Only | `.../content-readonly` | **Working** | Asset/page search without write risk |
 | AEM Content Updater | `.../content-updater` | **Session Ready** | AI-powered content updates (uses credits) |
 | AEM DA | `.../da` | **Working** | Get/create/update/delete/copy/move source, upload media |
-| Experience Governance | `.../experience-governance` | **Needs User OAuth** | 7 tools: evaluate page/text/image against brand policies |
+| Experience Governance | `.../experience-governance` | **Working** | 7 tools: evaluate page/text/image against brand policies |
 | Experience Production | `.../experience-production` | **Working (async, ~30s)** | AI page generation from natural language |
 | Discovery | `.../discovery` | **Session Ready** | Asset/CF/form/page search |
 | Development | `.../development` | **Session Ready** | Pipeline troubleshooting |
@@ -126,16 +130,22 @@ JCR edits complete in **~10–18 seconds** (vs. 45–60s without optimization). 
 | AJO | `.../loki/ajo` | **Session Ready** | Journey orchestration |
 | Content QA Agent | `.../loki/content-qa` | **Session Ready** | Content quality validation |
 | Content Gen Skills | `.../loki/skills` | **Session Ready** | AI writing with brand voice |
-| Target | `.../target` | **Session Ready** | Personalization |
 | Acrobat | `.../acrobat` | **Session Ready** | PDF operations |
-| CJA | `mcp-gateway.adobe.io/cja/mcp` | **Session Ready** | Customer journey analytics |
-| Adobe Analytics | `mcp-gateway.adobe.io/aa/mcp` | **Session Ready** | Reporting queries |
-| Adobe Express | `express-mcp-service.adobe.io` | **Session Ready** | Design operations |
-| Marketing Agent | `aep-ai-ama-stage.adobe.io` | **Stage** | Marketing orchestration |
-| RT-CDP | `rtcdp-mcp.adobe.io` | **Session Ready** | Segments, audiences |
-| AEP | `aep-mcp.adobe.io` | **Session Ready** | Platform data operations |
-| Sites Optimizer | `m-mcp-demo.adobe.io` | **Session Ready** | SEO, performance audits |
-| Spacecat | `spacecat.experiencecloud.live` | **Session Ready** | Site audits |
+
+**Experience Cloud MCPs** (via Worker BFF → external gateway)
+
+| MCP Server | Endpoint | Status | Capabilities |
+|---|---|---|---|
+| Adobe Analytics | `mcp-gateway.adobe.io/aa/mcp` | **Session Ready** | Reporting queries — lazy-loaded on first analytics question |
+| CJA | `mcp-gateway.adobe.io/cja/mcp` | **Session Ready** | Customer journey analytics — lazy-loaded on first analytics question |
+| Target | `targetmcp.adobe.io/mcp` | **Session Ready** | A/B testing, personalization, activity management |
+| RT-CDP | `rtcdp-mcp.adobe.io/mcp` | **Session Ready** | Segments, audiences |
+| AEP | `aep-mcp.adobe.io/mcp` | **Session Ready** | Platform data operations |
+| AJO Prod | `ajo-mcp.adobe.io/mcp` | **Session Ready** | Journey orchestration (standalone host) |
+| Adobe Express | `express-mcp-service.adobe.io/mcp` | **Session Ready** | Design operations |
+| Marketing Agent | `aep-ai-ama-stage.adobe.io/mcp` | **Stage** | Marketing orchestration |
+| Sites Optimizer | `m-mcp-demo.adobe.io/mcp` | **Session Ready** | SEO, performance audits |
+| Spacecat | `spacecat.experiencecloud.live/api/v1/mcp` | **Session Ready** | Site audits |
 
 ---
 
@@ -147,9 +157,10 @@ JCR edits complete in **~10–18 seconds** (vs. 45–60s without optimization). 
 | DA design view / file browser | **Working** | Same renderer as da.live, full content tree |
 | JCR content editing | **Working** | ~10–18s end-to-end with pre-fetch optimization |
 | AEM author page preview | **Working** | Headless Chrome, full CSS + images inlined |
-| Content governance checks | **Working*** | *Requires one-time OAuth per session — see Gotchas |
+| Content governance checks | **Working** | No extra OAuth step — IMS sign-in covers it |
 | Generative page creation | **Working** | Experience Production Agent, ~30s async |
-| Cross-product tool execution | **Working** | 27 MCP servers, CORS verified from `.aem.page` |
+| Analytics Q&A | **Working** | AA/CJA tools lazy-loaded on first analytics question; AA tool sequence: findCompanies → findReportSuites → setSessionDefaults → runReport |
+| Cross-product tool execution | **Working** | 25 MCP servers via single IMS sign-in |
 | Customer-specific context | **Working** | Per-account system prompt + vertical demo flows |
 
 ---
@@ -162,44 +173,29 @@ JCR edits complete in **~10–18 seconds** (vs. 45–60s without optimization). 
 |---|---|
 | Multi-user / concurrent sessions | Single-user demo tool — no session isolation |
 | Persistent conversation history | Resets on page reload |
-| Governance checks without extra step | Experience Governance MCP requires a separate OAuth consent — see Gotchas |
 | Universal Editor side-panel | Requires App Builder extension framework — not built |
 | AEM 6.x / on-premise | JCR path targets AEM Cloud Service only |
+| AA/CJA analytics without worker secrets | `AA_GLOBAL_COMPANY_ID` and `IMS_ORG_ID` must be set as Cloudflare Worker secrets for AA reporting to return real data |
 
 ### Requires Manual Steps
 
 | Task | Why |
 |---|---|
-| JCR write auth | Local server must be running before connecting a JCR site — see Gotchas |
-| Token renewal | MCP OAuth tokens expire every ~23 hours and must be refreshed manually |
 | New JCR environment | S2S Bearer token must be added to Config Pipeline for each new AEM environment |
 | Customer profiles | Per-account system prompts are hand-authored — no automated ingestion |
+| Worker secrets for analytics | `IMS_ORG_ID`, `AA_GLOBAL_COMPANY_ID`, `AEP_SANDBOX_NAME` — set via `wrangler secret put` in `worker/` |
 
 ---
 
 ## Gotchas
 
-### JCR Writes: Local Auth Server Required
+### Auth: Single IMS Sign-In
 
-AEM's MCP OAuth server (`oauth.adobeaemcloud.com`) only accepts `http://localhost` as a redirect URI — it does not accept production URLs like `eds-migration--compass--aemxsc.aem.page`. This means the write token can't be obtained from the browser app directly.
+All 25 MCP servers — AEM Cloud, DA, Firefly, Governance, AA, CJA, Target, RT-CDP, AEP, AJO — now accept the user's IMS token directly. One sign-in at app load covers everything. No per-product "Connect" buttons, no separate OAuth popups, no local server required for governance or DA.
 
-**Workaround:** Run a local Node.js server that captures the OAuth callback:
+**JCR write auth (IMS):** The JCR Content MCP (`mcp.adobeaemcloud.com/adobe/mcp/content`) is now wired to use the IMS token. If writes return 403, it means the IMS client (`aem-extension-builder`) hasn't been added to the Config Pipeline allowlist for that AEM environment. Add it in Cloud Manager → Environments → Configuration Pipeline.
 
-```bash
-node scripts/aem-connect-server.mjs
-# [AEM Connect] Listening on http://localhost:80
-# [AEM Connect] Compass can now connect AEM Content automatically.
-```
-
-When you click "Connect AEM Content" in Compass, it opens the MCP OAuth flow in the browser. The callback redirects to `http://localhost`, the local server captures the authorization code, exchanges it for a token, and stores it. Compass then uses that token for all JCR write operations.
-
-**What to know:**
-- Token lasts ~23 hours — re-run the script after it expires
-- Must be running **before** you connect a JCR site in Compass
-- Requires binding to port 80 — run as Administrator on Windows or use `sudo` on macOS
-- Script is at `scripts/aem-connect-server.mjs` in the repo root
-
-**Long-term fix:** Register `https://eds-migration--compass--aemxsc.aem.page/` as an allowed redirect URI in the AEM MCP OAuth registration (requires IMS admin or MCP team). One config change eliminates the local server entirely.
+**Legacy local server:** `scripts/aem-connect-server.mjs` is no longer needed for standard JCR write operations. It can be removed in a future cleanup.
 
 ---
 
@@ -304,7 +300,8 @@ AI is the layer everyone sells. Governance is the layer nobody wants to rebuild.
 - `#aem-xsc-compass` (primary)
 
 ### Live App
-- `eds-migration--compass--aemxsc.aem.page`
+- `compass.aemxsc.com` (custom domain)
+- `eds-migration--compass--aemxsc.aem.page` (AEM preview URL)
 - Worker: `compass-ims-proxy.compass-xsc.workers.dev`
 
 ### GitHub
@@ -325,5 +322,5 @@ AI is the layer everyone sells. Governance is the layer nobody wants to rebuild.
 
 ---
 
-*Accurate as of: May 5, 2026*
+*Accurate as of: May 6, 2026*
 *Based on: production codebase + verified testing session*
