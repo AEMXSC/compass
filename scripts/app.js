@@ -4237,7 +4237,11 @@ async function connectCustomSite(input) {
     import('./mcp-client.js').then(async ({ contentMcp }) => {
       try {
         await contentMcp.initSession();
-        const result = await contentMcp.callTool('search-aem-pages', { authorUrl, q: jcrPath.split('/').pop() || 'index' });
+        // Use site name (2nd path segment after /content/) for the search query — not the last segment
+        // e.g. /content/wknd-universal/language-masters/en → q="wknd universal", limit=50 to find the exact page
+        const pathSegs = jcrPath.split('/').filter(Boolean); // ['content', 'wknd-universal', 'language-masters', 'en']
+        const siteQuery = (pathSegs[1] || pathSegs[0] || 'index').replace(/-/g, ' ');
+        const result = await contentMcp.callTool('search-aem-pages', { authorUrl, q: siteQuery, limit: 50 });
         // callTool already parses the search response into an array
         const pages = Array.isArray(result) ? result : [];
         // Only use an exact or prefix match — never fall back to an unrelated page
