@@ -402,7 +402,14 @@ async function handleMcpProxy(request, env) {
   const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '') || null;
   let mcpToken = userToken;
   if (!mcpToken) {
-    mcpToken = await getS2SToken(env);
+    try {
+      mcpToken = await getS2SToken(env);
+    } catch {
+      return new Response(JSON.stringify({ error: 'No auth token available — sign in to Compass or check worker S2S credentials' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+      });
+    }
   }
 
   const incomingBody = await request.text();
