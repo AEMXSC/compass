@@ -1054,6 +1054,10 @@ function getPageContext() {
     ctx.jcrEtag = cachedJcrEtag;
     ctx.jcrEtagPath = cachedJcrEtagPath;
   }
+  // Attach pre-fetched MCP components (5-min TTL) — lets Claude skip get-aem-page-content entirely
+  if (window.__AEM_PAGE_COMPONENTS && Date.now() - window.__AEM_PAGE_COMPONENTS.fetchedAt < 300_000) {
+    ctx.pageComponents = window.__AEM_PAGE_COMPONENTS;
+  }
   // Attach project memory (persistent across sessions)
   const mem = getProjectMemory();
   if (mem) ctx.projectMemory = mem;
@@ -2113,18 +2117,16 @@ async function handleRealChat(text, file) {
           // JCR: single background re-render after edit propagates
           setTimeout(() => window.__refreshJcrPreview?.(), 3000);
         } else if (previewFrame && AEM_ORG.previewOrigin) {
-          // DA site: reload from .aem.page after CDN propagation
-          const refreshPreview = () => {
+          // DA site: reload from .aem.page (preview trigger is synchronous — content is ready)
+          setTimeout(() => {
             const url = AEM_ORG.previewOrigin + path + '?_t=' + Date.now();
             previewFrame.removeAttribute('srcdoc');
-            previewFrame.src = 'about:blank';
-            setTimeout(() => { previewFrame.src = url; }, 100);
+            previewFrame.src = url;
             cachedPageHTML = null;
             cachedPageHTMLTimestamp = 0;
-          };
-          // First attempt at 3s, retry at 6s in case CDN is slow
-          setTimeout(refreshPreview, 3000);
-          setTimeout(refreshPreview, 6000);
+            // Re-fetch page context in background so next edit has fresh HTML
+            ensurePageContext().catch(() => {});
+          }, 2000);
         }
       }
 
@@ -4015,6 +4017,13 @@ async function connectCustomSite(input) {
     }
   }
 
+  // Clear stale globals from any previous connection — prevents JCR/DA cross-contamination
+  window.__JCR_PREVIEW_CONFIG = null;
+  window.__AEM_PAGE_ID = null;
+  window.__AEM_PAGE_COMPONENTS = null;
+  window.__EW_AEM_HOST = null;
+  window.__EW_SITE_TYPE = null;
+
   // If parsed from a JCR/author URL, set the AEM host immediately (skip fstab detection)
   if (parsed.aemHost) {
     window.__EW_AEM_HOST = `https://${parsed.aemHost}`;
@@ -4156,6 +4165,15 @@ async function connectCustomSite(input) {
         if (page?.id) {
           window.__AEM_PAGE_ID = page.id;
           console.log(`[EW] Pre-fetched pageId for ${page.authorPath}: ${page.id.slice(0, 30)}...`);
+          // Pre-fetch components+eTag so Claude can patch in 1 round (same as DA's pageHTML pre-fetch)
+          contentMcp.callTool('get-aem-page-content', { authorUrl, pageId: page.id })
+            .then((r) => {
+              if (r?.eTag && r?.components?.length) {
+                window.__AEM_PAGE_COMPONENTS = { eTag: r.eTag, components: r.components, fetchedAt: Date.now() };
+                console.log(`[EW] Pre-fetched ${r.components.length} components, eTag: ${r.eTag.slice(0, 20)}...`);
+              }
+            })
+            .catch(() => {});
         }
       } catch (e) { console.warn('[EW] pageId prefetch failed:', e.message); }
     });

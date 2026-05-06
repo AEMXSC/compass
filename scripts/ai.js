@@ -5096,7 +5096,12 @@ Every MCP tool returns live data. Always base your next call on what the previou
 get-aem-page-content returns a compact summary:
 { eTag: '"abc123"', pageProperties: {jcr:title}, components: [{name: "Hero", patchPath: "/items/0/items/0:0/items/0:0:0/properties/text", value: "<h1>Old</h1>"}, …] }
 
-Workflow:
+Shortcut — if pre-fetched JCR state is in context (eTag + components[]):
+- Skip steps 1 and 2 entirely
+- Call patch-aem-page-content immediately using the pre-fetched eTag and the patchPath from components[]
+- Only call get-aem-page-content if you get a 409 (stale eTag) — then retry patch once with the fresh eTag
+
+Workflow (fallback when no pre-fetched state):
 1. If pageId is not in context: call search-aem-pages with {authorUrl, q: "<page name>"} to get the UUID id field
 2. Call get-aem-page-content — read components[] to find the entry whose name/value matches what to change
 3. Call patch-aem-page-content immediately using:
@@ -5134,6 +5139,13 @@ function buildSystemParts(context = {}, { fast = false } = {}) {
     if (context.authorUrl) siteContext += `authorUrl: ${context.authorUrl}. `;
     if (context.pageId) siteContext += `pageId: ${context.pageId}. `;
     if (siteContext) blocks.push({ type: 'text', text: siteContext.trim() });
+    if (context.pageComponents?.components?.length) {
+      const { eTag, components } = context.pageComponents;
+      blocks.push({
+        type: 'text',
+        text: `Pre-fetched JCR state (skip get-aem-page-content):\neTag: ${eTag}\ncomponents: ${JSON.stringify(components)}`,
+      });
+    }
     if (context.pageHTML) {
       blocks.push({ type: 'text', text: `Current page HTML:\n${context.pageHTML.slice(0, 8000)}` });
     }
@@ -5481,9 +5493,28 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     tools = getToolsForPrompt(promptText).filter(t => OPS_TOOLS.includes(t.name));
   } else {
     // Thinking Brain: Compass tools + ALL registered MCP tools
+    // MCP tools take priority — filter Compass duplicates so tool names stay unique
     const compassTools = getToolsForPrompt(promptText);
     const mcpTools = getAllMcpClaudeTools();
-    tools = [...compassTools, ...mcpTools];
+    const mcpNames = new Set(mcpTools.map((t) => t.name));
+    tools = [...compassTools.filter((t) => !mcpNames.has(t.name)), ...mcpTools];
+  }
+
+  // Synthetic tool injection: pre-fetched JCR state → skip get-aem-page-content entirely.
+  // Inject a synthetic tool_use + tool_result pair so Claude's first response is always patch.
+  if (isOps && siteType === 'aem-cs' && context.pageComponents?.components?.length) {
+    const synthId = `synth_get_${Date.now()}`;
+    messages.push(
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: synthId, name: 'get_aem_page_content', input: { authorUrl: context.authorUrl, pageId: context.pageId } }],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: synthId, content: JSON.stringify({ eTag: context.pageComponents.eTag, components: context.pageComponents.components }) }],
+      }
+    );
+    console.debug('[AI] Injected synthetic get-aem-page-content — Claude will patch in round 0');
   }
 
   let fullText = '';
@@ -5556,6 +5587,21 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
         // Auto-refresh JCR preview after a successful patch
         if (toolBlock.name === 'patch_aem_page_content' && mcpResult?.status === 'page_patched') {
           setTimeout(() => window.__refreshJcrPreview?.(), 1500);
+          // Invalidate stale components and re-fetch in background so the next edit is also 1-round
+          window.__AEM_PAGE_COMPONENTS = null;
+          setTimeout(() => {
+            if (!window.__AEM_PAGE_ID || !window.__EW_AEM_HOST) return;
+            import('./mcp-client.js').then(({ contentMcp }) =>
+              contentMcp.callTool('get-aem-page-content', {
+                authorUrl: window.__EW_AEM_HOST,
+                pageId: window.__AEM_PAGE_ID,
+              })
+            ).then((r) => {
+              if (r?.eTag && r?.components?.length) {
+                window.__AEM_PAGE_COMPONENTS = { eTag: r.eTag, components: r.components, fetchedAt: Date.now() };
+              }
+            }).catch(() => {});
+          }, 2000);
         }
       } else {
         result = await executeTool(toolBlock.name, toolBlock.input);
