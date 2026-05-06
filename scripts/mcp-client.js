@@ -326,62 +326,64 @@ export function createMcpClient(endpointPath, label = 'MCP', options = {}) {
 /* ─── Pre-built endpoint clients ─── */
 /* Direct connection — CORS is open on all Adobe MCP endpoints */
 
+const IMS = { tokenKey: 'ew-ims-token' };
+
 // ── AEM Content (Critical) ──
-export const daMcp = createMcpClient('/adobe/mcp/da', 'DA-MCP');
-export const contentMcp = createMcpClient('/adobe/mcp/content', 'AEM-Content');
-export const contentReadonlyMcp = createMcpClient('/adobe/mcp/content-readonly', 'AEM-ReadOnly');
-export const contentUpdaterMcp = createMcpClient('/adobe/mcp/content-updater', 'AEM-Updater');
-export const aemUnifiedMcp = createMcpClient('/adobe/mcp/aem', 'AEM-Unified');
+export const daMcp = createMcpClient('/adobe/mcp/da', 'DA-MCP', IMS);
+export const contentMcp = createMcpClient('/adobe/mcp/content', 'AEM-Content', IMS);
+export const contentReadonlyMcp = createMcpClient('/adobe/mcp/content-readonly', 'AEM-ReadOnly', IMS);
+export const contentUpdaterMcp = createMcpClient('/adobe/mcp/content-updater', 'AEM-Updater', IMS);
+export const aemUnifiedMcp = createMcpClient('/adobe/mcp/aem', 'AEM-Unified', IMS);
 
 // ── AEM Governance & Discovery ──
-export const governanceMcp = createMcpClient('/adobe/mcp/experience-governance', 'AEM-Governance');
-export const discoveryMcp = createMcpClient('/adobe/mcp/discovery', 'AEM-Discovery');
+export const governanceMcp = createMcpClient('/adobe/mcp/experience-governance', 'AEM-Governance', IMS);
+export const discoveryMcp = createMcpClient('/adobe/mcp/discovery', 'AEM-Discovery', IMS);
 
 // ── AEM Development ──
-export const developmentMcp = createMcpClient('/adobe/mcp/development', 'AEM-Dev');
+export const developmentMcp = createMcpClient('/adobe/mcp/development', 'AEM-Dev', IMS);
 
 // ── AEM Odin (Cloud Manager) ──
-export const odinMcp = createMcpClient('/adobe/mcp/odin/prod', 'AEM-Odin');
+export const odinMcp = createMcpClient('/adobe/mcp/odin/prod', 'AEM-Odin', IMS);
 
 // ── Experience Production Agent (DA content authoring via MCP) ──
-export const experienceProductionMcp = createMcpClient('/adobe/mcp/experience-production', 'Experience-Production');
+export const experienceProductionMcp = createMcpClient('/adobe/mcp/experience-production', 'Experience-Production', IMS);
 
 // ── Firefly (Image Generation) ──
-export const fireflyMcp = createMcpClient('/adobe/mcp/loki/firefly', 'Firefly');
+export const fireflyMcp = createMcpClient('/adobe/mcp/loki/firefly', 'Firefly', IMS);
 
 // ── Adobe Journey Optimizer ──
-export const ajoMcp = createMcpClient('/adobe/mcp/loki/ajo', 'AJO');
+export const ajoMcp = createMcpClient('/adobe/mcp/loki/ajo', 'AJO', IMS);
 
 // ── Content QA Agent ──
-export const contentQaMcp = createMcpClient('/adobe/mcp/loki/content-qa', 'Content-QA');
+export const contentQaMcp = createMcpClient('/adobe/mcp/loki/content-qa', 'Content-QA', IMS);
 
 // ── Content Generation Skills ──
-export const contentGenMcp = createMcpClient('/adobe/mcp/loki/skills', 'Content-Gen');
+export const contentGenMcp = createMcpClient('/adobe/mcp/loki/skills', 'Content-Gen', IMS);
 
 // ── Analytics & Insights (prod gateway) ──
-export const cjaMcp = createMcpClient('https://mcp-gateway.adobe.io/cja/mcp', 'CJA', { tokenKey: 'ew-ims-token' });
-export const aaMcp = createMcpClient('https://mcp-gateway.adobe.io/aa/mcp', 'Adobe-Analytics', { tokenKey: 'ew-ims-token' });
+export const cjaMcp = createMcpClient('https://mcp-gateway.adobe.io/cja/mcp', 'CJA', IMS);
+export const aaMcp = createMcpClient('https://mcp-gateway.adobe.io/aa/mcp', 'Adobe-Analytics', IMS);
 
 // ── Adobe Express ──
-export const expressMcp = createMcpClient('https://express-mcp-service.adobe.io/mcp', 'Adobe-Express');
+export const expressMcp = createMcpClient('https://express-mcp-service.adobe.io/mcp', 'Adobe-Express', IMS);
 
 // ── Cross-Product ──
-export const acrobatMcp = createMcpClient('/adobe/mcp/acrobat', 'Acrobat');
-export const marketingMcp = createMcpClient('https://aep-ai-ama-stage.adobe.io/mcp', 'Marketing-Agent');
-export const targetMcp = createMcpClient('https://targetmcp.adobe.io/mcp', 'Target', { tokenKey: 'ew-ims-token' });
-export const rtcdpMcp = createMcpClient('https://rtcdp-mcp.adobe.io/mcp', 'RT-CDP', { tokenKey: 'ew-ims-token' });
+export const acrobatMcp = createMcpClient('/adobe/mcp/acrobat', 'Acrobat', IMS);
+export const marketingMcp = createMcpClient('https://aep-ai-ama-stage.adobe.io/mcp', 'Marketing-Agent', IMS);
+export const targetMcp = createMcpClient('https://targetmcp.adobe.io/mcp', 'Target', IMS);
+export const rtcdpMcp = createMcpClient('https://rtcdp-mcp.adobe.io/mcp', 'RT-CDP', IMS);
 
 // ── AEP (Adobe Experience Platform) ──
-export const aepMcp = createMcpClient('https://aep-mcp.adobe.io/mcp', 'AEP', { tokenKey: 'ew-ims-token' });
+export const aepMcp = createMcpClient('https://aep-mcp.adobe.io/mcp', 'AEP', IMS);
 
 // ── AJO Prod (standalone host) ──
-export const ajoProdMcp = createMcpClient('https://ajo-mcp.adobe.io/mcp', 'AJO-Prod', { tokenKey: 'ew-ims-token' });
+export const ajoProdMcp = createMcpClient('https://ajo-mcp.adobe.io/mcp', 'AJO-Prod', IMS);
 
 // ── ACPC (Adobe Campaign/Personalization) ──
-export const acpcMcp = createMcpClient('https://emcee-stage.adobe.io/mcp', 'ACPC');
+export const acpcMcp = createMcpClient('https://emcee-stage.adobe.io/mcp', 'ACPC', IMS);
 
 // ── Sites & LLM Optimizer ──
-export const sitesOptimizerMcp = createMcpClient('https://m-mcp-demo.adobe.io/mcp', 'Sites-Optimizer');
+export const sitesOptimizerMcp = createMcpClient('https://m-mcp-demo.adobe.io/mcp', 'Sites-Optimizer', IMS);
 
 // ── External ──
 export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
