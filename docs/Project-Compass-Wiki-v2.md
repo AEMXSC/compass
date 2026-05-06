@@ -268,9 +268,9 @@ AI is the layer everyone sells. Governance is the layer nobody wants to rebuild.
 
 | Site | Type | Status |
 |------|------|--------|
-| SecurBank (`markszulc/securbank-aem-ue`) | AEM CS (xwalk) | **Fully working** — preview + edits + re-render |
-| Lifepoint (`aemxsc/lifepoint`) | DA-backed EDS | Fully working (edit + preview + design) |
-| XSC Team Site (`aemxsc/xscteamsite`) | DA-backed EDS | Fully working |
+| SecurBank | AEM CS (xwalk) | **Fully working** — preview + edits + re-render |
+| Lifepoint | DA-backed EDS | Fully working (edit + preview + design) |
+| XSC Team Site | DA-backed EDS | Fully working |
 | Frescopa | AEM CS (xwalk) | Fully working |
 | WKND Universal | AEM CS (xwalk) | Fully working |
 
