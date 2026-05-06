@@ -2166,7 +2166,7 @@ async function handleRealChat(text, file) {
 
         if (window.__JCR_PREVIEW_CONFIG) {
           // JCR: single background re-render after edit propagates
-          setTimeout(() => window.__refreshJcrPreview?.(), 3000);
+          setTimeout(() => window.__refreshJcrPreview?.(), 1000);
         } else if (previewFrame && AEM_ORG.previewOrigin) {
           // DA site: reload from .aem.page (preview trigger is synchronous — content is ready)
           setTimeout(() => {
