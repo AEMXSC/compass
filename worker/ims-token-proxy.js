@@ -31,6 +31,7 @@ const ALLOWED_MCP_HOSTS = [
   'aep-mcp.adobe.io',
   'targetmcp.adobe.io',
   'ajo-mcp.adobe.io',
+  'targetmcp.adobe.io',
   'express-mcp-service.adobe.io',
   'aep-ai-ama-stage.adobe.io',
   'emcee-stage.adobe.io',

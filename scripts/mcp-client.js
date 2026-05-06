@@ -375,7 +375,7 @@ export const rtcdpMcp = createMcpClient('https://rtcdp-mcp.adobe.io/mcp', 'RT-CD
 export const aepMcp = createMcpClient('https://aep-mcp.adobe.io/mcp', 'AEP', { tokenKey: 'ew-ims-token' });
 
 // ── AJO Prod (standalone host) ──
-export const ajoProdMcp = createMcpClient('https://ajo-mcp.adobe.io/mcp', 'AJO-Prod');
+export const ajoProdMcp = createMcpClient('https://ajo-mcp.adobe.io/mcp', 'AJO-Prod', { tokenKey: 'ew-ims-token' });
 
 // ── ACPC (Adobe Campaign/Personalization) ──
 export const acpcMcp = createMcpClient('https://emcee-stage.adobe.io/mcp', 'ACPC');
