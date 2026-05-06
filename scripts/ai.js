@@ -5606,12 +5606,21 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const siteType = window.__EW_SITE_TYPE || 'unknown';
   let tools;
   if (isOps && siteType === 'aem-cs') {
-    // JCR OPS: Content MCP tools only (getClaudeTools returns underscore names)
-    await contentMcp.initSession();
+    // JCR OPS: prefer live Content MCP tool schemas; fall back to static AEM_TOOLS if unavailable
+    try {
+      await contentMcp.initSession();
+    } catch (e) {
+      console.warn('[AI] Content MCP init failed, falling back to static JCR tools:', e.message);
+    }
     const mcpTools = contentMcp.getClaudeTools();
-    tools = mcpTools.filter(t => ['search_aem_pages', 'get_aem_page_content', 'patch_aem_page_content'].includes(t.name));
+    const JCR_OPS = ['search_aem_pages', 'get_aem_page_content', 'patch_aem_page_content'];
+    tools = mcpTools.filter(t => JCR_OPS.includes(t.name));
     if (tools.length === 0) {
-      return 'Connect AEM Content first — click the Connect button to get write access.';
+      // MCP unavailable — fall back to static tool definitions so edits still work
+      tools = getToolsForSiteType().filter(t => JCR_OPS.includes(t.name));
+    }
+    if (tools.length === 0) {
+      return 'AEM Content MCP is unavailable. Please check your connection and try again.';
     }
   } else if (isOps) {
     // DA OPS: use Compass's tools
