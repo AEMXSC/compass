@@ -1478,40 +1478,50 @@ const TOOL_RENDERERS = {
           </div>
         </div>`;
     }
-    if (result.status !== 'updated') return null;
-    const path = result.page_path || '';
+    // MCP server returns 'page_patched'; custom path returns 'updated' — accept both
+    if (result.status !== 'updated' && result.status !== 'page_patched') return null;
+    const path = result.page_path || window.__EW_PAGE_ID || '';
     const fields = result.updated_fields || [];
-    const ueUrl = result.edit_urls?.universal_editor;
+    // Build URLs from result or fall back to known page state
+    const orgCtx = window.__EW_ORG || {};
+    const host = window.__EW_AEM_HOST || '';
+    const previewOrigin = orgCtx.previewOrigin || '';
+    const previewUrl = result.preview_url || (previewOrigin && path ? `${previewOrigin}${path}` : null);
+    const ueUrl = result.edit_urls?.universal_editor || (host && path ? buildUeUrl(host, path, orgCtx) : null);
     return `
       <div class="page-card page-card-live">
         <div class="page-card-header">
           <div class="page-card-icon">✓</div>
           <div class="page-card-meta">
-            <div class="page-card-title">${path} — Updated via AEM Content MCP</div>
-            <div class="page-card-author">${fields.length} field(s) updated · Preview refreshing</div>
+            <div class="page-card-title">${escapeHtml(path)} — Saved & Previewing</div>
+            <div class="page-card-author">${fields.length ? `${fields.length} field(s) updated · ` : ''}Preview refreshing</div>
           </div>
         </div>
-        ${result.preview_url ? `<a href="${result.preview_url}" target="_blank" rel="noopener" class="page-card-link">Open preview →</a>` : ''}
-        ${ueUrl ? `<a href="${ueUrl}" target="_blank" rel="noopener" class="page-card-link page-card-link-secondary">Edit in Universal Editor →</a>` : ''}
+        ${previewUrl ? `<a href="${escapeHtml(previewUrl)}" target="_blank" rel="noopener" class="page-card-link">Open preview →</a>` : ''}
+        ${ueUrl ? `<a href="${escapeHtml(ueUrl)}" target="_blank" rel="noopener" class="page-card-link page-card-link-secondary">Edit in Universal Editor →</a>` : ''}
       </div>`;
   },
 
   /* ─ AEM Content MCP: JCR Page Copy Card ─ */
   copy_aem_page(result) {
     if (result.status !== 'created') return null;
-    const path = result.path || '';
-    const ueUrl = result.edit_urls?.universal_editor;
+    const path = result.path || result.destination_path || '';
+    const orgCtx = window.__EW_ORG || {};
+    const host = window.__EW_AEM_HOST || '';
+    const previewOrigin = orgCtx.previewOrigin || '';
+    const previewUrl = result.preview_url || (previewOrigin && path ? `${previewOrigin}${path}` : null);
+    const ueUrl = result.edit_urls?.universal_editor || (host && path ? buildUeUrl(host, path, orgCtx) : null);
     return `
       <div class="page-card page-card-live">
         <div class="page-card-header">
           <div class="page-card-icon">✓</div>
           <div class="page-card-meta">
-            <div class="page-card-title">${path} — Page Created</div>
-            <div class="page-card-author">Copied from ${result.copied_from || 'template'}</div>
+            <div class="page-card-title">${escapeHtml(path)} — Page Created</div>
+            <div class="page-card-author">Copied from ${escapeHtml(result.copied_from || 'template')}</div>
           </div>
         </div>
-        ${result.preview_url ? `<a href="${result.preview_url}" target="_blank" rel="noopener" class="page-card-link">Open preview →</a>` : ''}
-        ${ueUrl ? `<a href="${ueUrl}" target="_blank" rel="noopener" class="page-card-link page-card-link-secondary">Edit in Universal Editor →</a>` : ''}
+        ${previewUrl ? `<a href="${escapeHtml(previewUrl)}" target="_blank" rel="noopener" class="page-card-link">Open preview →</a>` : ''}
+        ${ueUrl ? `<a href="${escapeHtml(ueUrl)}" target="_blank" rel="noopener" class="page-card-link page-card-link-secondary">Edit in Universal Editor →</a>` : ''}
       </div>`;
   },
 
