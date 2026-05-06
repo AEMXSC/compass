@@ -15,7 +15,7 @@
  */
 
 const IMS_TOKEN_URL = 'https://ims-na1.adobelogin.com/ims/token/v3';
-const IMS_SCOPE = 'aem.frontend.all,openid,AdobeID,read_organizations,additional_info.projectedProductContext,aem_mcp';
+const IMS_SCOPE = 'aem.frontend.all,openid,AdobeID,read_organizations,additional_info.projectedProductContext';
 
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
@@ -72,7 +72,7 @@ async function getS2SToken(env) {
     grant_type: 'client_credentials',
     client_id: env.IMS_CLIENT_ID,
     client_secret: env.IMS_CLIENT_SECRET,
-    scope: 'openid,AdobeID,read_organizations,additional_info.projectedProductContext,aem.frontend.all,aem_mcp,firefly_api,ff_apis,aem.assets.author,aem.assets.delivery,aem.fragments.management,aem.folders,session',
+    scope: 'openid,AdobeID,read_organizations,additional_info.projectedProductContext,aem.frontend.all',
   });
   const resp = await fetch('https://ims-na1.adobelogin.com/ims/token/v3', { method: 'POST', body });
   if (!resp.ok) throw new Error('S2S token fetch failed');
