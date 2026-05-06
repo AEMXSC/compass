@@ -90,9 +90,10 @@ export function createMcpClient(endpointPath, label = 'MCP') {
    * Handles both direct JSON and SSE response formats.
    */
   async function mcpRequest(method, params = {}, { isNotification = false, _isRetry = false } = {}) {
-    // Prefer MCP OAuth token (has write permissions) over imslib token
+    // Token priority: MCP OAuth → Dev Console S2S → IMS session
     const mcpToken = localStorage.getItem('ew-mcp-token');
-    const token = mcpToken || getToken();
+    const s2sToken = localStorage.getItem('ew-s2s-token');
+    const token = mcpToken || s2sToken || getToken();
     const headers = {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',

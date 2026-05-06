@@ -1902,7 +1902,7 @@ function mcpError(toolName, err) {
 async function callFireflyApi(prompt, { width = 1344, height = 768, numImages = 1 } = {}) {
   // Prefer the Firefly-specific token (from Dev Console → Generate access token)
   // Fall back to the user's IMS session token
-  const token = localStorage.getItem('ew-firefly-token') || getToken();
+  const token = localStorage.getItem('ew-s2s-token') || getToken();
   if (!token) throw new Error('No token available for Firefly. Generate one in Adobe Developer Console → Firefly API → Generate access token, then paste it in Compass Settings.');
 
   // Client ID for the Firefly API project in Adobe Developer Console

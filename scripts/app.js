@@ -707,10 +707,10 @@ const fireflyTokenInput = document.getElementById('fireflyTokenInput');
 const fireflyTokenStatus = document.getElementById('fireflyTokenStatus');
 
 if (fireflyTokenBtn && fireflyTokenInput) {
-  const savedFF = localStorage.getItem('ew-firefly-token');
+  const savedFF = localStorage.getItem('ew-s2s-token');
   if (savedFF && fireflyTokenStatus) {
     fireflyTokenInput.value = savedFF.slice(0, 12) + '...';
-    fireflyTokenStatus.textContent = 'Firefly token set — image generation enabled.';
+    fireflyTokenStatus.textContent = 'Token set — Firefly, AEM Assets, Dynamic Media, and more enabled.';
     fireflyTokenStatus.className = 'settings-token-status success';
   }
 
@@ -724,7 +724,7 @@ if (fireflyTokenBtn && fireflyTokenInput) {
       return;
     }
     if (val === 'clear') {
-      localStorage.removeItem('ew-firefly-token');
+      localStorage.removeItem('ew-s2s-token');
       fireflyTokenInput.value = '';
       if (fireflyTokenStatus) {
         fireflyTokenStatus.textContent = 'Firefly token cleared.';
@@ -732,10 +732,10 @@ if (fireflyTokenBtn && fireflyTokenInput) {
       }
       return;
     }
-    localStorage.setItem('ew-firefly-token', val);
+    localStorage.setItem('ew-s2s-token', val);
     fireflyTokenInput.value = val.slice(0, 12) + '...';
     if (fireflyTokenStatus) {
-      fireflyTokenStatus.textContent = 'Firefly token saved — image generation ready.';
+      fireflyTokenStatus.textContent = 'Token saved — covers all APIs in your Developer Console project.';
       fireflyTokenStatus.className = 'settings-token-status success';
     }
   });
