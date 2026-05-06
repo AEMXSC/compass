@@ -22,7 +22,7 @@ import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCust
 import { detectSiteMention, resolveSite } from './known-sites.js';
 import { getGitHubToken, setGitHubToken, hasGitHubToken, getRepoInfo, listBranches, getRepoTree } from './github-content.js';
 import { detectAndCacheSiteType, getSiteType } from './site-detect.js';
-import { aemUnifiedMcp, contentMcp, prewarmSessions, registerMcpTools } from './mcp-client.js';
+import { aemUnifiedMcp, contentMcp, daMcp, prewarmSessions, registerMcpTools } from './mcp-client.js';
 
 /* ── Dynamic Org Configuration (from customer profile) ── */
 let AEM_ORG = getOrgConfig();
@@ -3102,7 +3102,7 @@ async function loadResources() {
     } catch { /* ignore */ }
   }
 
-  // Fallback: DA Admin API list (shows all content pages — requires IMS auth)
+  // Fallback: DA MCP da_list_sources (uses warmed daMcp session — no direct admin.da.live fetch)
   if (sitePages.length <= 1 && da.getOrg() && isSignedIn()) {
     try {
       const daOrg = da.getOrg().toLowerCase();
@@ -3110,35 +3110,36 @@ async function loadResources() {
       const pathPrefix = `/${daOrg}/${daRepo}/`;
       const infraFiles = new Set(['nav', 'footer', 'header', 'head', '404']);
       const daPages = [];
+
       const listDir = async (dir) => {
-        const items = await da.listPages(dir);
+        const raw = await daMcp.callTool('da_list_sources', { org: daOrg, repo: daRepo, path: dir });
+        // da_list_sources returns JSON string or array
+        const items = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (!Array.isArray(items)) return;
         for (const item of items) {
-          if (item.ext === 'html' || item.path?.endsWith('.html')) {
-            const name = (item.name || '').replace('.html', '');
-            if (!infraFiles.has(name) && !name.endsWith('.plain')) {
-              daPages.push(item);
-            }
+          const name = (item.name || '').replace('.html', '');
+          if (item.ext === 'html' || item.name?.endsWith('.html')) {
+            if (!infraFiles.has(name) && !name.endsWith('.plain')) daPages.push(item);
           } else if (!item.ext && item.name && !item.name.startsWith('.')) {
             if (dir === '/') await listDir(`/${item.name}`).catch(() => {});
           }
         }
       };
+
       await listDir('/');
       if (daPages.length > 0) {
         sitePages = daPages.map((p) => {
-          let raw = p.path || p.name || '';
-          // Strip org/repo prefix from DA paths (e.g. /aemxsc/lifepoint/index.html → /index)
-          if (raw.toLowerCase().startsWith(pathPrefix)) raw = raw.slice(pathPrefix.length - 1);
-          const pagePath = '/' + raw.replace(/\.html$/, '').replace(/^\//, '');
+          let rawPath = p.path || p.name || '';
+          if (rawPath.toLowerCase().startsWith(pathPrefix)) rawPath = rawPath.slice(pathPrefix.length - 1);
+          const pagePath = '/' + rawPath.replace(/\.html$/, '').replace(/^\//, '');
           return {
             path: pagePath === '/index' ? '/' : pagePath,
-            title: raw.replace('.html', '').split('/').pop() || 'index',
+            title: rawPath.replace('.html', '').split('/').pop() || 'index',
             description: '',
           };
         });
       }
-    } catch (e) { console.warn('[Resources] DA list failed:', e.message); }
+    } catch (e) { console.warn('[Resources] DA MCP list failed:', e.message); }
   }
 
   // Fallback: GitHub API tree (works for private repos with PAT)
@@ -4210,9 +4211,8 @@ async function connectCustomSite(input) {
   // P4: Parallel pre-warming on site connect (non-blocking)
   // Fire all warmup tasks concurrently — none blocks UI or each other
   Promise.allSettled([
-    ensurePageContext(),                            // Pre-fetch page HTML into cache
-    isSignedIn() ? prewarmSessions() : null,        // Pre-warm MCP sessions
-    isSignedIn() ? prefetchAemEnvironments() : null, // Pre-discover AEM environments
+    ensurePageContext(),                      // Pre-fetch page HTML into cache
+    isSignedIn() ? prewarmSessions() : null,  // Pre-warm MCP sessions
   ].filter(Boolean)).catch(() => { /* non-blocking */ });
 
   // Populate branch select — real branches from GitHub API
