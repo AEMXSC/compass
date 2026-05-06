@@ -5351,7 +5351,7 @@ ${context.pageId ? `pageId = \`${context.pageId}\` (pre-fetched).` : `To get pag
 - Find page UUID (only if needed): \`search-aem-pages\` — use the \`id\` field from results, not the JCR path
 - Read page + eTag: \`get-aem-page-content\` with {authorUrl, pageId} — returns {eTag, id, properties, items}; eTag is already quoted (pass as-is to patch)
 - Write page: \`patch-aem-page-content\` — jsonPatch is a JSON string: '[{"op":"replace","path":"/properties/jcr:title","value":"…"}]'; paths: /properties/<key> for page props, /items/0/items/0:0/items/0:0:0/properties/text for component text
-- Create from template: \`create_aem_page\` (call \`list_aem_templates\` first to find the template path) — response includes \`id\` (UUID); use it directly as pageId for the next patch, do NOT search for the page
+- Create from template: \`create-aem-page\` (call \`list-aem-templates\` first to find the template path) — response includes \`id\` (UUID); use it directly as pageId for the next patch, do NOT search for the page
 - Copy: \`copy_aem_page\` · Delete: \`delete_aem_page\` · List: \`list_aem_pages\`
 
 **Content Fragments** (eTag-gated same as pages):
@@ -5651,10 +5651,14 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     }
 
     // Compass tools + ALL registered MCP tools
-    // MCP tools take priority — filter Compass duplicates so tool names stay unique
+    // MCP tools take priority — filter Compass duplicates by both hyphenated AND underscored names
+    // so e.g. static create_aem_page is removed when MCP has create-aem-page (different string, same tool)
     const compassTools = getToolsForPrompt(promptText);
     const mcpTools = getAllMcpClaudeTools();
-    const mcpNames = new Set(mcpTools.map((t) => t.name));
+    const mcpNames = new Set([
+      ...mcpTools.map((t) => t.name),
+      ...mcpTools.map((t) => t.name.replace(/-/g, '_')),
+    ]);
     tools = [...compassTools.filter((t) => !mcpNames.has(t.name)), ...mcpTools];
   }
 
