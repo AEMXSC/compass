@@ -418,15 +418,25 @@ export const ALL_MCP_CLIENTS = [
 
 /**
  * Initialize MCP sessions and register their tools in the registry.
- * Critical sessions (content, governance) init first; others lazy.
+ * Critical sessions init on load; others lazy.
  */
 export async function prewarmSessions() {
-  const critical = [contentMcp, governanceMcp, discoveryMcp, fireflyMcp];
+  const critical = [
+    contentMcp, governanceMcp, discoveryMcp, fireflyMcp,
+    daMcp, experienceProductionMcp, contentGenMcp, spacecatMcp,
+  ];
   const results = await Promise.allSettled(critical.map(async (c) => {
     await c.initSession();
     registerMcpTools(c);
   }));
-  const ok = results.filter((r) => r.status === 'fulfilled').length;
+  let ok = 0;
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      ok++;
+    } else {
+      console.warn(`[MCP] ${critical[i].label} init failed:`, r.reason?.message?.slice(0, 120));
+    }
+  });
   console.log(`[MCP] Pre-warmed ${ok}/${critical.length} sessions, ${Object.keys(mcpToolRegistry).length} tools registered`);
   return ok;
 }
