@@ -3062,44 +3062,49 @@ async function loadResources() {
   sitePages = [];
 
   const origin = AEM_ORG.previewOrigin;
-  // Try query-index.json first
-  try {
-    const resp = await fetch(`${origin}/query-index.json`);
-    if (resp.ok) {
-      const data = await resp.json();
-      const entries = data.data || data;
-      if (Array.isArray(entries) && entries.length > 0) {
-        sitePages = entries.map((e) => ({
-          path: e.path,
-          title: e.title || e.path.split('/').pop() || 'index',
-          description: e.description || '',
-          lastModified: e.lastModified || '',
-          image: e.image || '',
-        }));
-      }
-    }
-  } catch { /* ignore */ }
+  const isDaSite = window.__EW_SITE_TYPE === 'da' || window.__EW_SITE_TYPE === 'eds';
 
-  // Fallback: try sitemap
-  if (sitePages.length === 0) {
+  // DA/EDS sites: skip query-index and sitemap (cross-origin CORS always fails) — go straight to DA MCP
+  if (!isDaSite) {
+    // Try query-index.json first (works for same-origin or CORS-enabled origins)
     try {
-      const resp = await fetch(`${origin}/sitemap.xml`);
+      const resp = await fetch(`${origin}/query-index.json`);
       if (resp.ok) {
-        const text = await resp.text();
-        const parser = new DOMParser();
-        const xml = parser.parseFromString(text, 'text/xml');
-        const locs = xml.querySelectorAll('url > loc');
-        locs.forEach((loc) => {
-          const url = loc.textContent;
-          const path = new URL(url).pathname;
-          sitePages.push({
-            path,
-            title: path.split('/').filter(Boolean).pop() || 'index',
-            description: '',
-          });
-        });
+        const data = await resp.json();
+        const entries = data.data || data;
+        if (Array.isArray(entries) && entries.length > 0) {
+          sitePages = entries.map((e) => ({
+            path: e.path,
+            title: e.title || e.path.split('/').pop() || 'index',
+            description: e.description || '',
+            lastModified: e.lastModified || '',
+            image: e.image || '',
+          }));
+        }
       }
     } catch { /* ignore */ }
+
+    // Fallback: try sitemap
+    if (sitePages.length === 0) {
+      try {
+        const resp = await fetch(`${origin}/sitemap.xml`);
+        if (resp.ok) {
+          const text = await resp.text();
+          const parser = new DOMParser();
+          const xml = parser.parseFromString(text, 'text/xml');
+          const locs = xml.querySelectorAll('url > loc');
+          locs.forEach((loc) => {
+            const url = loc.textContent;
+            const path = new URL(url).pathname;
+            sitePages.push({
+              path,
+              title: path.split('/').filter(Boolean).pop() || 'index',
+              description: '',
+            });
+          });
+        }
+      } catch { /* ignore */ }
+    }
   }
 
   // Fallback: DA MCP da_list_sources (uses warmed daMcp session — no direct admin.da.live fetch)
