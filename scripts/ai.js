@@ -5245,7 +5245,18 @@ extract_brief_content → create_aem_page → patch_aem_page_content
 - Derive all IDs, keys, and paths from actual tool responses — never hardcode
 - After success: 1 sentence confirming what changed. Nothing more.
 
-## EDS markup knowledge
+## JCR content model (AEM CS sites)
+Page properties (patch via /properties/<key>): jcr:title · jcr:description · navTitle · hideInNav · pageTitle · cq:tags
+Component properties by type — read sling:resourceType from components[] to confirm:
+- Text:        text (richtext HTML string), richText: true
+- Image:       fileReference (DAM path e.g. /content/dam/…), alt, title
+- Hero/Banner: title (or jcr:title), subtitle, actionText, actionUrl, fileReference
+- Teaser:      jcr:title, jcr:description, actionText, actionUrl, fileReference
+- Container:   layout, columns — child components live at /items/N/…
+JCR path structure: /content/{site}/{locale}/{page}/jcr:content/root/container/{component-node}
+DAM assets always referenced via fileReference, never an inline src
+
+## EDS markup knowledge (DA/EDS sites)
 - Blocks = div tables: <div class="blockname"><div><div>row</div></div></div>
 - Sections separated by <hr>
 - Metadata block at end: <div class="metadata"><div><div>key</div><div>value</div></div></div>
@@ -5356,10 +5367,27 @@ ${context.pageId ? `pageId = \`${context.pageId}\` (pre-fetched).` : `To get pag
 
 **Content Fragments** (eTag-gated same as pages):
 - Read: \`get_content_fragment\` · Create: \`create_content_fragment\` · Update: \`update_content_fragment\`
+- CF model path: \`/conf/{site}/settings/dam/cfm/models/{model}\` · Variations: master (default), named siblings
+- CF field access: \`data.{fieldName}\` · Multi-value: \`data.{field}[0]\`
 
 **Launches**: \`create_aem_launch\` → \`promote_aem_launch\`
 
 **Low-level AEM API** (when no dedicated tool exists): \`aem_lookup_api\` → \`aem_read\` / \`aem_write\`
+
+**JCR content model — property names by component type:**
+Read \`sling:resourceType\` from component data to confirm type, then use the correct property names:
+| Component | Key properties |
+|---|---|
+| Text | \`text\` (richtext HTML), \`richText: true\` |
+| Image | \`fileReference\` (DAM path), \`alt\`, \`title\` |
+| Hero / Banner | \`title\` (or \`jcr:title\`), \`subtitle\`, \`actionText\`, \`actionUrl\`, \`fileReference\` |
+| Teaser | \`jcr:title\`, \`jcr:description\`, \`actionText\`, \`actionUrl\`, \`fileReference\` |
+| Container | \`layout\`, \`columns\` — children live under \`/items/N/…\` |
+
+Page-level properties (patch via \`/properties/<key>\`): \`jcr:title\` · \`jcr:description\` · \`navTitle\` · \`hideInNav\` · \`pageTitle\` · \`cq:tags\`
+
+JCR path pattern: \`/content/{site}/{locale}/{page}/jcr:content/root/container/{component-node}\`
+DAM assets always use \`fileReference\` (never inline \`src\`). Template storage: \`/conf/{site}/settings/wcm/templates/\`
 
 **Experience Production Agent** — AI-generated content workflow (NOT for direct text edits):
 Use when the user wants: full page rewrites, new pages from templates, content generation from a brief/PDF, translation, or modernization. Never use for targeted text/property changes.
