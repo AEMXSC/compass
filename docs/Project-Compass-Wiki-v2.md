@@ -51,7 +51,7 @@ Compass works across all three AEM deployment architectures:
 
 ## Problem Statement
 
-Pre-sales demos for AEM's AI story are fragmented. AEM's native AI Assistant is product-scoped — it doesn't cross into DA, ASO, LLMO, Firefly, Analytics, or Journey Optimizer, and it has no awareness of the customer's vertical, deal stage, or demo environment. XSCs stitching multi-product stories together are doing it manually, with browser tabs and rehearsed click paths.
+Pre-sales demos for AEM's AI story are fragmented. AEM's native AI Assistant is product-scoped and has produced mixed results in front of customers — it doesn't cross into DA, ASO, LLMO, Firefly, Analytics, or Journey Optimizer, and it has no awareness of the customer's vertical, deal stage, or demo environment. XSCs stitching multi-product stories together are doing it manually, with browser tabs and rehearsed click paths.
 
 At the same time, enterprise customers — particularly technical teams — are no longer asking "does AEM have AI?" They're asking **"can AEM plug into *our* AI?"** They have existing AI platforms, internal copilots, or multi-vendor AI strategies, and they want AEM's capabilities as a composable layer inside their own orchestration, not another product UI to log into.
 
@@ -214,7 +214,7 @@ Compass pre-fetches JCR page components on connect (enables 1-round edits). The 
 ## Relationship to Existing Adobe AI Efforts
 
 ### vs. Native AEM AI Assistant (Full-stack AEM / Tier 1)
-Complementary. The native assistant is product-scoped and ships with AEM. Compass is the BYO orchestration layer above it — useful for pre-sales demos targeting enterprise technical teams who want to integrate AEM into their own AI platforms.
+Complementary, not competing. The native assistant is product-scoped, ships with AEM, and has had mixed results in customer-facing demos. Compass is the BYO orchestration layer above it — a cross-product, customer-contextualized alternative for demos where the native assistant isn't landing, and a live example for enterprise technical teams who want to integrate AEM capabilities into their own AI platforms.
 
 ### vs. AEM-orchestrated Pattern (Tier 2)
 Compass can also demonstrate the Tier 2 pattern: Claude (or any model) as the preferred UI surface, with AEM's Agent Orchestrator providing content context. The same Compass architecture illustrates both Tier 2 and Tier 3 depending on how the conversation is framed.
