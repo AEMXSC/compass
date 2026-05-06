@@ -4477,6 +4477,11 @@ textarea:focus-visible,
   margin: 0;
 }
 
+/* Spacer that pushes messages to the bottom when conversation is short (Claude.ai pattern) */
+.chat-spacer {
+  flex: 1;
+}
+
 /* Chat Welcome (editor view) */
 .chat-welcome {
   text-align: center;
