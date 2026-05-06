@@ -178,23 +178,13 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 
 | Task | Why |
 |---|---|
-| New JCR environment | S2S Bearer token must be added to Config Pipeline for each new AEM environment |
+| New JCR environment | S2S Bearer token must be added to Config Pipeline for each new AEM environment. If JCR writes return 403, also add `aem-extension-builder` to the Config Pipeline allowlist in Cloud Manager → Environments → Configuration Pipeline |
 | Customer profiles | Per-account system prompts are hand-authored — no automated ingestion |
 | Worker secrets for analytics | `IMS_ORG_ID`, `AA_GLOBAL_COMPANY_ID`, `AEP_SANDBOX_NAME` — set via `wrangler secret put` in `worker/` |
 
 ---
 
 ## Gotchas
-
-### Auth: Single IMS Sign-In
-
-All 25 MCP servers — AEM Cloud, DA, Firefly, Governance, AA, CJA, Target, RT-CDP, AEP, AJO — now accept the user's IMS token directly. One sign-in at app load covers everything. No per-product "Connect" buttons, no separate OAuth popups, no local server required for governance or DA.
-
-**JCR write auth (IMS):** The JCR Content MCP (`mcp.adobeaemcloud.com/adobe/mcp/content`) is now wired to use the IMS token. If writes return 403, it means the IMS client (`aem-extension-builder`) hasn't been added to the Config Pipeline allowlist for that AEM environment. Add it in Cloud Manager → Environments → Configuration Pipeline.
-
-**Legacy local server:** `scripts/aem-connect-server.mjs` is no longer needed for standard JCR write operations. It can be removed in a future cleanup.
-
----
 
 ### Switching Between JCR and DA Sites
 
