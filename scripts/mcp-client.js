@@ -128,13 +128,19 @@ export function createMcpClient(endpointPath, label = 'MCP') {
     if (isNotification) return null;
 
     if (!resp.ok) {
-      // 401 with a stale/malformed MCP OAuth token — clear it, re-auth, retry once
+      // 401 with a stale/malformed MCP OAuth token — re-auth, retry once.
+      // Only remove the token AFTER a successful refresh (avoids clearing it for
+      // parallel prewarm clients that haven't sent their request yet).
       if (resp.status === 401 && !_isRetry) {
-        localStorage.removeItem('ew-mcp-token');
         try {
           const fresh = await signInMcpOAuth();
-          if (fresh) return mcpRequest(method, params, { isNotification, _isRetry: true });
+          if (fresh) {
+            localStorage.setItem('ew-mcp-token', fresh);
+            return mcpRequest(method, params, { isNotification, _isRetry: true });
+          }
         } catch { /* fall through to error below */ }
+        // Refresh failed — clear the bad token so subsequent calls use IMS fallback
+        localStorage.removeItem('ew-mcp-token');
       }
       const errorText = await resp.text().catch(() => '');
       throw new Error(`[${label}] MCP error ${resp.status}: ${errorText.slice(0, 300)}`);
