@@ -4332,7 +4332,64 @@ async function connectCustomSite(input) {
 /* ── Flow Router ── */
 function runBrief() {
   if (!ai.hasApiKey()) { requireApiKey(); return; }
-  runRealBrief();
+
+  // Attach file via the same path as the paperclip button, then pre-fill the prompt.
+  // handleRealChat sends the PDF as a Claude document block and uses tool calls directly —
+  // one LLM round instead of 3 sequential streamChat calls.
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.pdf,.txt,.doc,.docx';
+  fileInput.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Remove any existing indicator
+    document.querySelector('.file-attach-indicator')?.remove();
+
+    const indicator = document.createElement('div');
+    indicator.className = 'file-attach-indicator';
+    indicator.innerHTML = `
+      <span class="file-attach-icon">📄</span>
+      <span class="file-attach-name">${escapeHtml(file.name)}</span>
+      <span class="file-attach-size">${(file.size / 1024).toFixed(0)} KB</span>
+      <button class="file-attach-remove" title="Remove">✕</button>
+    `;
+    document.querySelector('.input-wrapper')?.prepend(indicator);
+    indicator.querySelector('.file-attach-remove').addEventListener('click', () => {
+      pendingFile = null;
+      indicator.remove();
+    });
+
+    try {
+      if (file.type === 'application/pdf') {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        pendingFile = { name: file.name, type: 'pdf', size: file.size, content: btoa(binary), mediaType: 'application/pdf' };
+      } else if (file.name.endsWith('.docx') && window.mammoth) {
+        const buffer = await file.arrayBuffer();
+        const result = await window.mammoth.extractRawText({ arrayBuffer: buffer });
+        pendingFile = { name: file.name, type: 'document', size: file.size, content: result.value, mediaType: 'text/plain' };
+      } else {
+        const text = await file.text();
+        pendingFile = { name: file.name, type: 'document', size: file.size, content: text, mediaType: file.type };
+      }
+    } catch (err) {
+      indicator.remove();
+      addMessage('assistant', `Could not read file: ${err.message}`, 'System');
+      return;
+    }
+
+    // Pre-fill the chat input and focus so user can send immediately (or customize)
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput && !chatInput.value.trim()) {
+      chatInput.value = 'Create an AEM page from this brief and publish it to the site';
+      chatInput.dispatchEvent(new Event('input'));
+    }
+    chatInput?.focus();
+  };
+  fileInput.click();
 }
 
 function runGovernance() {
