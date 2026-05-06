@@ -18,7 +18,18 @@
 const IMS_LIB_URL = 'https://auth.services.adobe.com/imslib/imslib.min.js';
 const IMS_CLIENT_ID = 'aem-extension-builder';
 const IMS_SCOPE = 'AdobeID,openid,read_organizations,additional_info.projectedProductContext';
-const IMS_REDIRECT_URI = 'https://eds-migration--compass--aemxsc.aem.page/';
+const IMS_REDIRECT_URI = (() => {
+  const { origin } = window.location;
+  const knownOrigins = [
+    'https://compass.aemxsc.com',
+    'https://eds-migration--compass--aemxsc.aem.page',
+    'https://main--compass--aemxsc.aem.page',
+    'https://main--compass--aemxsc.aem.live',
+    'http://localhost:3000',
+    'http://localhost:3001',
+  ];
+  return knownOrigins.includes(origin) ? `${origin}/` : 'https://eds-migration--compass--aemxsc.aem.page/';
+})();
 const IMS_WORKER = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
 const IMSLIB_INIT_TIMEOUT_MS = 3000;
 

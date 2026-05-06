@@ -71,10 +71,15 @@ function summarizePageContent(eTag, content) {
  * Create an MCP client for a specific endpoint path.
  * @param {string} endpointPath — e.g. '/adobe/mcp/content' or full URL 'https://...'
  * @param {string} label — human-readable name for console logs
+ * @param {object} options — { tokenKey: 'ew-mcp-token-aa' } for per-product token storage
  * @returns MCP client object with initSession, callTool, getToolSchemas, resetSession, isAvailable
  */
-export function createMcpClient(endpointPath, label = 'MCP') {
-  const endpoint = endpointPath.startsWith('https://') ? endpointPath : `${WORKER_MCP_BASE}${endpointPath}`;
+export function createMcpClient(endpointPath, label = 'MCP', options = {}) {
+  // All endpoints route through the worker — needed for auth header injection and CORS
+  // Full URLs are passed as ?endpoint=<url> so the worker can proxy with product headers
+  const endpoint = endpointPath.startsWith('https://')
+    ? `${WORKER_MCP_BASE}${encodeURIComponent(endpointPath)}`
+    : `${WORKER_MCP_BASE}${endpointPath}`;
   let sessionId = null;
   let requestId = 0;
   let toolSchemas = null;
@@ -90,8 +95,9 @@ export function createMcpClient(endpointPath, label = 'MCP') {
    * Handles both direct JSON and SSE response formats.
    */
   async function mcpRequest(method, params = {}, { isNotification = false, _isRetry = false } = {}) {
-    // Token priority: MCP OAuth → Dev Console S2S → IMS session
-    const mcpToken = localStorage.getItem('ew-mcp-token');
+    // Token priority: per-product token → MCP OAuth → Dev Console S2S → IMS session
+    const productToken = options.tokenKey ? localStorage.getItem(options.tokenKey) : null;
+    const mcpToken = productToken || localStorage.getItem('ew-mcp-token');
     const s2sToken = localStorage.getItem('ew-s2s-token');
     const token = mcpToken || s2sToken || getToken();
     const headers = {
@@ -133,15 +139,19 @@ export function createMcpClient(endpointPath, label = 'MCP') {
       // Only remove the token AFTER a successful refresh (avoids clearing it for
       // parallel prewarm clients that haven't sent their request yet).
       if (resp.status === 401 && !_isRetry) {
-        try {
-          const fresh = await signInMcpOAuth();
-          if (fresh) {
-            localStorage.setItem('ew-mcp-token', fresh);
-            return mcpRequest(method, params, { isNotification, _isRetry: true });
-          }
-        } catch { /* fall through to error below */ }
-        // Refresh failed — clear the bad token so subsequent calls use IMS fallback
-        localStorage.removeItem('ew-mcp-token');
+        if (options.tokenKey) {
+          // Product-specific token is stale — clear it and fall back to IMS on retry
+          localStorage.removeItem(options.tokenKey);
+        } else {
+          try {
+            const fresh = await signInMcpOAuth();
+            if (fresh) {
+              localStorage.setItem('ew-mcp-token', fresh);
+              return mcpRequest(method, params, { isNotification, _isRetry: true });
+            }
+          } catch { /* fall through to error below */ }
+          localStorage.removeItem('ew-mcp-token');
+        }
       }
       const errorText = await resp.text().catch(() => '');
       throw new Error(`[${label}] MCP error ${resp.status}: ${errorText.slice(0, 300)}`);
@@ -349,8 +359,8 @@ export const contentQaMcp = createMcpClient('/adobe/mcp/loki/content-qa', 'Conte
 export const contentGenMcp = createMcpClient('/adobe/mcp/loki/skills', 'Content-Gen');
 
 // ── Analytics & Insights (prod gateway) ──
-export const cjaMcp = createMcpClient('https://mcp-gateway.adobe.io/cja/mcp', 'CJA');
-export const aaMcp = createMcpClient('https://mcp-gateway.adobe.io/aa/mcp', 'Adobe-Analytics');
+export const cjaMcp = createMcpClient('https://mcp-gateway.adobe.io/cja/mcp', 'CJA', { tokenKey: 'ew-mcp-token-cja' });
+export const aaMcp = createMcpClient('https://mcp-gateway.adobe.io/aa/mcp', 'Adobe-Analytics', { tokenKey: 'ew-mcp-token-aa' });
 
 // ── Adobe Express ──
 export const expressMcp = createMcpClient('https://express-mcp-service.adobe.io/mcp', 'Adobe-Express');
@@ -358,11 +368,11 @@ export const expressMcp = createMcpClient('https://express-mcp-service.adobe.io/
 // ── Cross-Product ──
 export const acrobatMcp = createMcpClient('/adobe/mcp/acrobat', 'Acrobat');
 export const marketingMcp = createMcpClient('https://aep-ai-ama-stage.adobe.io/mcp', 'Marketing-Agent');
-export const targetMcp = createMcpClient('/adobe/mcp/target', 'Target');
-export const rtcdpMcp = createMcpClient('https://rtcdp-mcp.adobe.io/mcp', 'RT-CDP');
+export const targetMcp = createMcpClient('https://targetmcp.adobe.io/mcp', 'Target', { tokenKey: 'ew-mcp-token-target' });
+export const rtcdpMcp = createMcpClient('https://rtcdp-mcp.adobe.io/mcp', 'RT-CDP', { tokenKey: 'ew-mcp-token-rtcdp' });
 
 // ── AEP (Adobe Experience Platform) ──
-export const aepMcp = createMcpClient('https://aep-mcp.adobe.io/mcp', 'AEP');
+export const aepMcp = createMcpClient('https://aep-mcp.adobe.io/mcp', 'AEP', { tokenKey: 'ew-mcp-token-aep' });
 
 // ── AJO Prod (standalone host) ──
 export const ajoProdMcp = createMcpClient('https://ajo-mcp.adobe.io/mcp', 'AJO-Prod');
