@@ -105,10 +105,6 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
   -> Results shown in chat + preview refreshes
 ```
 
-### Speed Optimization: Pre-Fetch + Synthetic Injection
-
-JCR edits complete in **~10–18 seconds** (vs. 45–60s without optimization). On page connect, Compass pre-fetches `get-aem-page-content` and stores the eTag + component structure. When an edit request arrives, a synthetic tool result is injected before the first API call — Claude's first response is always `patch-aem-page-content`. No intermediate round trips.
-
 ### MCP Integrations
 
 25 MCP clients are wired in `scripts/mcp-client.js`, all using the user's IMS token. External MCPs (gateway, RT-CDP, AEP, Target, Express, AJO) route through the Cloudflare Worker BFF for CORS handling and product header injection.
