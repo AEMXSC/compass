@@ -28,8 +28,8 @@ Adobe's agentic story is structured around three deployment models. Understandin
 
 **Compass lives in Tier 3.** It is a working, customer-demonstrable example of the BYO Orchestration Layer in action:
 
-- Custom AI harness (Claude via Anthropic API)
-- Custom UI (EDS-hosted SPA)
+- Custom AI harness (Claude today — swappable for OpenAI, Gemini, or any LLM API)
+- Custom UI (EDS-hosted web app)
 - AEM capabilities consumed as MCP tools and APIs
 - Governance, authoring, analytics, and creative tools all orchestrated from outside AEM's native UI
 
@@ -81,7 +81,7 @@ Neither need is served by what exists today. Compass addresses both.
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| UI | Vanilla JS SPA on AEM Edge Delivery Services | Single-page app at `compass.aemxsc.com` / `eds-migration--compass--aemxsc.aem.page` |
+| UI | Vanilla JS web app on AEM Edge Delivery Services | `compass.aemxsc.com` / `eds-migration--compass--aemxsc.aem.page` |
 | Auth | imslib + `aem-extension-builder` IMS client | Single IMS sign-in covers all 25 MCP servers — no per-product Connect flow |
 | Service Auth | S2S via Cloudflare Worker | Read-only AEM access, JCR page rendering |
 | AI Engine | Claude API (Sonnet) | Reasoning, tool selection, content generation |
