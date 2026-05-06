@@ -51,7 +51,7 @@ Compass works across all three AEM deployment architectures:
 
 ## Problem Statement
 
-Pre-sales demos for AEM's AI story are fragmented. AEM's native AI Assistant is product-scoped and has produced mixed results in front of customers — it doesn't cross into DA, ASO, LLMO, Firefly, Analytics, or Journey Optimizer, and it has no awareness of the customer's vertical, deal stage, or demo environment. XSCs stitching multi-product stories together are doing it manually, with browser tabs and rehearsed click paths.
+Pre-sales demos for AEM's AI story are fragmented. AEM's native AI Assistant is product-scoped and has produced mixed results in front of customers — it doesn't cross into DA, ASO, LLMO, Firefly, Analytics, or Journey Optimizer, and it has no awareness of the customer's vertical, integration stack, or demo environment. XSCs stitching multi-product stories together are doing it manually, with browser tabs and rehearsed click paths.
 
 At the same time, enterprise customers — particularly technical teams — are no longer asking "does AEM have AI?" They're asking **"can AEM plug into *our* AI?"** They have existing AI platforms, internal copilots, or multi-vendor AI strategies, and they want AEM's capabilities as a composable layer inside their own orchestration, not another product UI to log into.
 
@@ -68,7 +68,7 @@ Neither need is served by what exists today. Compass addresses both.
 | Cross-product orchestration | AEM only | AEM + DA + Workfront + Firefly + Governance + CJA + AJO via MCP |
 | Page-aware context | Requires user to describe page | Reads current page structure + content automatically |
 | Customer-specific intelligence | Generic | Per-account system prompt, vertical-specific demo flows |
-| Content governance | Not available | Brand policy evaluation across pages (7 governance tools) |
+| Content governance | Partial | Brand policy evaluation across pages (7 governance tools) |
 | Author page preview | Requires browser tab switch | Inline preview via headless Chrome rendering |
 | DA + JCR unified | Separate tools | Single interface for both authoring backends |
 | BYO orchestration pattern | Not demonstrable | Live working example — MCP + A2A + custom harness |
