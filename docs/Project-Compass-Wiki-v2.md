@@ -1,6 +1,6 @@
 # Project Compass
 
-*Cross-Product AI Orchestration for AEM — Built by XSC*
+*Cross-Product AI Orchestration for AEM — Built by the AEM XSC Team
 
 **Owner:** Courtney Remekie, Sr. Manager AEM XSC | **Repo:** AEMXSC/compass | **Status:** Functional Prototype, Seeking Production Investment
 
