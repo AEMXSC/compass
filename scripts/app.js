@@ -4164,7 +4164,22 @@ async function connectCustomSite(input) {
 
     // Load author page via Browser Rendering (headless Chrome with auth)
     if (previewFrame) {
-      previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><p>Loading author preview...</p><p style="font-size:12px;color:#64748b">${jcrPath}</p></div></body></html>`;
+      const loadingSteps = [
+        '🔐 Borrowing your IMS token...',
+        '🧹 Busting CDN cache (again)...',
+        '🪄 Stripping X-Frame-Options headers...',
+        '🤖 Spinning up headless Chrome...',
+        '🎭 Pretending to be a real browser...',
+        '🍪 Negotiating with cookies...',
+        '📸 Inlining all the CSS so iframes don\'t cry...',
+        '⚡ Intercepting auth requests mid-flight...',
+        '🕵️ Injecting Bearer token before AEM notices...',
+        '🧃 Base64-encoding your images (yes, all of them)...',
+        '🔄 Retrying because the first render lied...',
+        '✨ Almost there. For real this time.',
+      ];
+      const loadingStep = loadingSteps[Math.floor(Math.random() * loadingSteps.length)];
+      previewFrame.srcdoc = `<!DOCTYPE html><html><body style="font:14px/1.5 system-ui;color:#94a3b8;background:#0f172a;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center;max-width:380px"><p style="font-size:18px;margin:0 0 8px">Loading author preview...</p><p style="font-size:12px;color:#64748b;margin:0 0 24px">${jcrPath}</p><p style="font-size:12px;color:#475569;font-style:italic;margin:0">${loadingStep}</p></div></body></html>`;
 
       const renderUrl = `${WORKER_BASE}/render?url=${encodeURIComponent(authorPageUrl)}&token=${encodeURIComponent(token || '')}`;
       fetch(renderUrl, { mode: 'cors' }).then(async (resp) => {
