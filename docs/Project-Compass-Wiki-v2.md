@@ -156,6 +156,7 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 | Content governance checks | **Working** | No extra OAuth step — IMS sign-in covers it |
 | Generative page creation | **Working** | Experience Production Agent, ~30s async |
 | Analytics Q&A | **Working** | AA/CJA tools lazy-loaded on first analytics question; AA tool sequence: findCompanies → findReportSuites → setSessionDefaults → runReport |
+| AI Content Visibility | **Working** | Sites Optimizer MCP scores how well AI agents can read + cite page content (LLMO readiness) |
 | Cross-product tool execution | **Working** | 25 MCP servers via single IMS sign-in |
 | Customer-specific context | **Working** | Per-account system prompt + vertical demo flows |
 
