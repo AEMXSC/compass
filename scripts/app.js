@@ -3113,15 +3113,23 @@ async function loadResources() {
 
       const listDir = async (dir) => {
         const raw = await daMcp.callTool('da_list_sources', { org: daOrg, repo: daRepo, path: dir });
-        // da_list_sources returns JSON string or array
-        const items = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        // da_list_sources returns JSON array (mcp-client already parses JSON)
+        let items = raw;
+        if (typeof raw === 'string') {
+          try { items = JSON.parse(raw); } catch { return; }
+        }
         if (!Array.isArray(items)) return;
         for (const item of items) {
-          const name = (item.name || '').replace('.html', '');
-          if (item.ext === 'html' || item.name?.endsWith('.html')) {
-            if (!infraFiles.has(name) && !name.endsWith('.plain')) daPages.push(item);
-          } else if (!item.ext && item.name && !item.name.startsWith('.')) {
-            if (dir === '/') await listDir(`/${item.name}`).catch(() => {});
+          const itemName = item.name || '';
+          const isHtml = item.ext === 'html'
+            || itemName.endsWith('.html')
+            || item.path?.endsWith('.html');
+          const baseName = itemName.replace(/\.html$/, '');
+          if (isHtml) {
+            if (!infraFiles.has(baseName) && !baseName.endsWith('.plain')) daPages.push(item);
+          } else if (!item.ext && itemName && !itemName.startsWith('.')) {
+            // directory — recurse one level deep from root
+            if (dir === '/') await listDir(`/${itemName}`).catch(() => {});
           }
         }
       };
