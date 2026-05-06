@@ -17,7 +17,7 @@
  *   /adobe/mcp/development     — Pipeline troubleshooting (uses credits)
  */
 
-import { getToken, ensureToken } from './ims.js';
+import { getToken, ensureToken, signInMcpOAuth } from './ims.js';
 
 const MCP_BASE = 'https://mcp.adobeaemcloud.com';
 const MCP_PROTOCOL_VERSION = '2025-03-26';
@@ -89,7 +89,7 @@ export function createMcpClient(endpointPath, label = 'MCP') {
    * Send a JSON-RPC request to the MCP endpoint.
    * Handles both direct JSON and SSE response formats.
    */
-  async function mcpRequest(method, params = {}, { isNotification = false } = {}) {
+  async function mcpRequest(method, params = {}, { isNotification = false, _isRetry = false } = {}) {
     // Prefer MCP OAuth token (has write permissions) over imslib token
     const mcpToken = localStorage.getItem('ew-mcp-token');
     const token = mcpToken || getToken();
@@ -128,6 +128,14 @@ export function createMcpClient(endpointPath, label = 'MCP') {
     if (isNotification) return null;
 
     if (!resp.ok) {
+      // 401 with a stale/malformed MCP OAuth token — clear it, re-auth, retry once
+      if (resp.status === 401 && !_isRetry) {
+        localStorage.removeItem('ew-mcp-token');
+        try {
+          const fresh = await signInMcpOAuth();
+          if (fresh) return mcpRequest(method, params, { isNotification, _isRetry: true });
+        } catch { /* fall through to error below */ }
+      }
       const errorText = await resp.text().catch(() => '');
       throw new Error(`[${label}] MCP error ${resp.status}: ${errorText.slice(0, 300)}`);
     }
