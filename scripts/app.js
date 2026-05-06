@@ -4233,34 +4233,27 @@ async function connectCustomSite(input) {
       authorPageUrl,
     };
 
-    // Pre-fetch pageId for the current page (needed by MCP tools)
+    // Pre-fetch pageId + components so Claude can patch without searching
     import('./mcp-client.js').then(async ({ contentMcp }) => {
       try {
         await contentMcp.initSession();
-        // Use site name (2nd path segment after /content/) for the search query — not the last segment
-        // e.g. /content/wknd-universal/language-masters/en → q="wknd universal", limit=50 to find the exact page
-        const pathSegs = jcrPath.split('/').filter(Boolean); // ['content', 'wknd-universal', 'language-masters', 'en']
-        const siteQuery = (pathSegs[1] || pathSegs[0] || 'index').replace(/-/g, ' ');
-        const result = await contentMcp.callTool('search-aem-pages', { authorUrl, q: siteQuery, limit: 50 });
-        // callTool already parses the search response into an array
-        const pages = Array.isArray(result) ? result : [];
-        // Exact match: page IS the target
+        const siteQuery = jcrPath.split('/').filter(Boolean)[1]?.replace(/-/g, ' ') || 'index';
+        const raw = await contentMcp.callTool('search-aem-pages', { authorUrl, q: siteQuery, limit: 50 });
+        const pages = Array.isArray(raw) ? raw : [];
         const exactPage = pages.find((p) => p.authorPath === jcrPath || p.authorPath === `${jcrPath}/index`);
-        // Child match: a child page of the target — its parentPageId IS the target UUID
         const childPage = !exactPage ? pages.find((p) => p.authorPath?.startsWith(jcrPath + '/') && p.parentPageId) : null;
         const pageId = exactPage?.id || childPage?.parentPageId || null;
         if (pageId) {
           window.__AEM_PAGE_ID = pageId;
-          console.log(`[EW] Pre-fetched pageId via ${exactPage ? 'exact' : 'child'} match: ${pageId.slice(0, 30)}...`);
-          // Pre-fetch components+eTag so Claude can patch in 1 round (same as DA's pageHTML pre-fetch)
+          console.debug(`[EW] pageId pre-fetched (${exactPage ? 'exact' : 'child'}): ${pageId.slice(0, 30)}...`);
           contentMcp.callTool('get-aem-page-content', { authorUrl, pageId })
             .then((r) => {
               if (r?.eTag && r?.components?.length) {
                 window.__AEM_PAGE_COMPONENTS = { eTag: r.eTag, components: r.components, fetchedAt: Date.now() };
-                console.log(`[EW] Pre-fetched ${r.components.length} components, eTag: ${r.eTag.slice(0, 20)}...`);
+                console.debug(`[EW] ${r.components.length} components pre-fetched`);
               }
             })
-            .catch(() => {});
+            .catch((e) => { console.warn('[EW] component prefetch failed:', e.message); });
         }
       } catch (e) { console.warn('[EW] pageId prefetch failed:', e.message); }
     });

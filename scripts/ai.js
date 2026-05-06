@@ -5222,12 +5222,9 @@ Shortcut — if pre-fetched JCR state is in context (eTag + components[]):
 - Only call get-aem-page-content if you get a 409 (stale eTag) — then retry patch once with the fresh eTag
 
 Workflow (fallback when no pre-fetched state):
-1. If pageId is not in context: call search-aem-pages to find the page UUID
-   - q = keywords from pagePath in context, NOT from the user's edit request
-   - pagePath is /content/<site>/…: use the site name with hyphens→spaces (e.g. /content/wknd-universal/… → q="wknd universal")
-   - Match results by their authorPath field to find the exact page
-   - Use the UUID id field as pageId — NEVER pass a /content/... JCR path as pageId (that causes 404)
-2. Call get-aem-page-content with {authorUrl, pageId: <UUID from search>} — read components[] to find the entry whose name/value matches what to change
+1. If pageId is not in context: call search-aem-pages {authorUrl, q: site name from pagePath (hyphens→spaces, e.g. "wknd-universal" → "wknd universal"), limit: 50}
+   — Match results by authorPath; use the UUID id field as pageId — never pass a /content/... JCR path as pageId (causes 404)
+2. Call get-aem-page-content {authorUrl, pageId} — read components[] to find the entry whose name/value matches what to change
 3. Call patch-aem-page-content immediately using:
    - eTag: exactly as returned (pass as-is — includes surrounding quotes)
    - jsonPatch: JSON string with the patchPath from components[], e.g. '[{"op":"replace","path":"/items/0/items/0:0/items/0:0:0/properties/text","value":"<h1>New</h1>"}]'
@@ -5342,10 +5339,8 @@ ${context.pageHTML.slice(0, HTML_TRUNCATE_THRESHOLD)}
     let toolRouting = '';
     if (isJcr && aemHost) {
       toolRouting = `### Site tools — AEM CS (JCR)
-**EDITING THE CURRENT PAGE — do this first:**
-The connected page is already known: authorUrl = \`${aemHost}\`, path = \`${context.pagePath || '/'}\`.
-${context.pageId ? `pageId = \`${context.pageId}\` (pre-fetched — skip search, call get-aem-page-content directly).` : `To get pageId: search-aem-pages with q = site name from pagePath (e.g. /content/wknd-universal/… → q="wknd universal"), then match authorPath in results. NEVER use the /content/... path as pageId — it causes 404.`}
-**Do NOT search for the page by topic/keyword — the user is always editing the currently connected page unless they explicitly name a different one.**
+**Connected page:** authorUrl = \`${aemHost}\`, path = \`${context.pagePath || '/'}\`.
+${context.pageId ? `pageId = \`${context.pageId}\` (pre-fetched).` : `To get pageId: search-aem-pages with q = site name from pagePath, match by authorPath. UUID id field only — never use a /content/... JCR path as pageId.`}
 
 **Page reads/writes** use the Content MCP (map-based model):
 - Find page UUID (only if needed): \`search-aem-pages\` — use the \`id\` field from results, not the JCR path
@@ -5615,9 +5610,10 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
   const siteType = window.__EW_SITE_TYPE || 'unknown';
   let tools;
   if (isOps && siteType === 'aem-cs') {
-    // JCR OPS: prefer live Content MCP tool schemas; fall back to static AEM_TOOLS if unavailable
+    // JCR OPS: init Content MCP and register it so tool calls route through MCP, not the static handler
     try {
       await contentMcp.initSession();
+      registerMcpTools(contentMcp);
     } catch (e) {
       console.warn('[AI] Content MCP init failed, falling back to static JCR tools:', e.message);
     }
