@@ -102,13 +102,19 @@ export async function ensureToken() {
  * Called once on init — no manual token pasting needed.
  */
 export async function initS2SToken() {
-  // Don't overwrite a manually-pasted token that's still valid
+  // Don't overwrite a manually-pasted token that's still valid and has required scopes
   const existing = localStorage.getItem('ew-s2s-token');
   if (existing) {
     try {
       const payload = JSON.parse(atob(existing.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
       const expiresAt = ((payload.created_at + payload.expires_in) * 1000) || 0;
-      if (expiresAt > Date.now()) return existing;
+      const scopes = (payload.scope || '').split(/[, ]+/);
+      const hasFirefly = scopes.includes('firefly_api');
+      if (expiresAt > Date.now() && hasFirefly) return existing;
+      if (!hasFirefly) {
+        console.log('[IMS] S2S token lacks firefly_api scope — refreshing');
+        localStorage.removeItem('ew-s2s-token');
+      }
     } catch { /* invalid token — fall through to refresh */ }
   }
   try {
