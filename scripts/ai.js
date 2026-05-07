@@ -778,8 +778,8 @@ const AEM_TOOLS = [
       properties: {
         prompt: { type: 'string', description: 'Narrative prose description (1000–1800 chars ideal). Full sentences with subject, setting, composition, lighting, color palette, photography style. Example: "A tall slender bottle of tropical coconut vodka with a deep navy label, placed on a weathered teak bar at golden hour..." — NOT "bottle, tropical, sunset, 4K".' },
         model: { type: 'string', description: 'Default: nano-banana-pro (Gemini 3 — best for narrative prompts). Other options: nano-banana (Gemini 2.5), imagen-4, imagen-3, flux-pro, flux-ultra, ideogram, gpt-image, runway, firefly-image-3, firefly-image-4, firefly-image-4-ultra. Avoid firefly-image-5 (entitlement issues).' },
-        width: { type: 'number', description: 'Width in pixels. Valid landscape: 1344×756, 1344×768, 2304×1792, 2688×1536. Square: 1024×1024, 2048×2048. Portrait: 896×1152, 1792×2304.' },
-        height: { type: 'number', description: 'Height in pixels — must match a supported pair (see width). For landscape hero use 1344 wide × 768 tall.' },
+        width: { type: 'number', description: 'Width in pixels. MUST be a supported pair — arbitrary sizes are rejected. Landscape hero: 1344×768, 2688×1536, 4032×2304. Square: 1024×1024, 2048×2048. Portrait: 896×1152, 1792×2304. DEFAULT if omitted: 1344×768 for hero/banner, 1024×1024 for other.' },
+        height: { type: 'number', description: 'Height in pixels — must match a supported pair (see width). For landscape hero: 768. DO NOT use 800, 1080, or other non-standard values.' },
         numImages: { type: 'number', description: 'Always 1 per call (MCP hard cap). Make sequential calls with varied prompts for multiple options.' },
         seed: { type: 'number', description: 'Random seed for reproducible results (optional)' },
       },
@@ -3133,11 +3133,24 @@ export async function executeTool(name, input) {
     case 'generate_image_variations': {
       if (!(await ensureAuth())) return authRequiredError('generate_image_variations');
       try {
+        // Snap to nearest valid Firefly size — arbitrary sizes like 1920×800 are rejected
+        const FF_VALID = [[1024,1024],[2048,2048],[3072,3072],[1344,768],[2304,1792],[2688,1536],[4032,2304],[1152,896],[896,1152],[1792,2304],[720,1280],[1440,2560],[2160,3840],[2688,3456],[3456,2688]];
+        function snapFireflySize(w, h) {
+          if (!w && !h) return {};
+          const r = (w || h) / (h || w);
+          let [bw, bh] = [1344, 768];
+          let bd = Infinity;
+          for (const [sw, sh] of FF_VALID) {
+            const d = Math.abs(sw / sh - r);
+            if (d < bd) { bd = d; [bw, bh] = [sw, sh]; }
+          }
+          return { width: bw, height: bh };
+        }
+        const dims = snapFireflySize(input.width, input.height);
         const mcpResult = await fireflyMcp.callTool('firefly_generate_image', {
           prompt: input.prompt,
           model: input.model || 'nano-banana-pro',
-          ...(input.width && { width: input.width }),
-          ...(input.height && { height: input.height }),
+          ...dims,
           numImages: 1,
           ...(input.seed && { seed: input.seed }),
         });
@@ -3148,8 +3161,7 @@ export async function executeTool(name, input) {
           const fallbackResult = await fireflyMcp.callTool('firefly_generate_image', {
             prompt: input.prompt,
             model: 'firefly-image-3',
-            ...(input.width && { width: input.width }),
-            ...(input.height && { height: input.height }),
+            ...dims,
             numImages: 1,
             ...(input.seed && { seed: input.seed }),
           });
@@ -5002,6 +5014,12 @@ ALWAYS write narrative prose (1000–1800 chars). NEVER comma-separated keyword 
 - Positive framing only: "empty street" not "no cars"
 - Response field is \`imageUrl\` (not \`url\`) — always read \`images[0].imageUrl\` from the MCP result
 - One image per call — make sequential calls with prompt variations for multiple options
+
+**Valid sizes (MUST use exactly, no arbitrary values):**
+- Landscape hero: 1344×768, 2688×1536, 4032×2304
+- Portrait: 896×1152, 1792×2304
+- Square: 1024×1024, 2048×2048
+- Default when user doesn't specify: omit width/height (Firefly picks best for model)
 
 Prompt formula: [Subject] + [Action/State] + [Location/Context] + [Composition] + [Lighting] + [Color Palette] + [Photography Style]
 
