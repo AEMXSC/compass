@@ -507,6 +507,23 @@ function toggleSettings() {
       imsStatus.className = 'settings-token-status success';
     }
   }
+  // Show OpenAI key status
+  const openaiIn = document.getElementById('openaiKeyInput');
+  const openaiSt = document.getElementById('openaiKeyStatus');
+  const savedOpenAI = localStorage.getItem('ew-openai-key');
+  if (openaiIn && savedOpenAI) {
+    openaiIn.value = savedOpenAI.slice(0, 8) + '...';
+    if (openaiSt) { openaiSt.textContent = 'OpenAI key set'; openaiSt.className = 'settings-token-status success'; }
+  }
+  // Show Google Gemini key status
+  const googleIn = document.getElementById('googleKeyInput');
+  const googleSt = document.getElementById('googleKeyStatus');
+  const savedGoogle = localStorage.getItem('ew-google-key');
+  if (googleIn && savedGoogle) {
+    googleIn.value = savedGoogle.slice(0, 8) + '...';
+    if (googleSt) { googleSt.textContent = 'Google Gemini key set'; googleSt.className = 'settings-token-status success'; }
+  }
+
   // Render brand policies
   if (settingsPanel.classList.contains('visible')) initBrandGovernance();
 
@@ -645,59 +662,47 @@ if (imsTokenHelp) {
   });
 }
 
-/* ── Workfront Webhook config ── */
-const wfWebhookBtn = document.getElementById('workfrontWebhookBtn');
-const wfWebhookInput = document.getElementById('workfrontWebhookInput');
-const wfWebhookStatus = document.getElementById('workfrontWebhookStatus');
+/* ── BYO LLM Key config — OpenAI ── */
+const openaiKeyBtn = document.getElementById('openaiKeyBtn');
+const openaiKeyInput = document.getElementById('openaiKeyInput');
+const openaiKeyStatus = document.getElementById('openaiKeyStatus');
 
-if (wfWebhookBtn && wfWebhookInput) {
-  // Populate from localStorage on load
-  const savedUrl = localStorage.getItem('ew-workfront-webhook') || '';
-  if (savedUrl) {
-    wfWebhookInput.value = savedUrl;
-    wfWebhookStatus.textContent = 'Webhook configured — tasks will be created via webhook.';
-    wfWebhookStatus.className = 'settings-token-status success';
+if (openaiKeyBtn && openaiKeyInput) {
+  const savedOAI = localStorage.getItem('ew-openai-key') || '';
+  if (savedOAI) {
+    openaiKeyInput.value = savedOAI.slice(0, 8) + '...';
+    openaiKeyStatus.textContent = 'OpenAI key set';
+    openaiKeyStatus.className = 'settings-token-status success';
   }
+  openaiKeyBtn.addEventListener('click', () => {
+    const val = openaiKeyInput.value.trim();
+    if (!val || val.endsWith('...')) return;
+    localStorage.setItem('ew-openai-key', val);
+    openaiKeyInput.value = val.slice(0, 8) + '...';
+    openaiKeyStatus.textContent = 'OpenAI key set';
+    openaiKeyStatus.className = 'settings-token-status success';
+  });
+}
 
-  wfWebhookBtn.addEventListener('click', async () => {
-    const url = wfWebhookInput.value.trim();
+/* ── BYO LLM Key config — Google Gemini ── */
+const googleKeyBtn = document.getElementById('googleKeyBtn');
+const googleKeyInput = document.getElementById('googleKeyInput');
+const googleKeyStatus = document.getElementById('googleKeyStatus');
 
-    // Allow clearing the webhook
-    if (!url) {
-      localStorage.removeItem('ew-workfront-webhook');
-      wfWebhookStatus.textContent = 'Webhook cleared — using simulated mode.';
-      wfWebhookStatus.className = 'settings-token-status';
-      return;
-    }
-
-    // Basic URL validation
-    try {
-      const parsed = new URL(url);
-      if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('bad protocol');
-    } catch {
-      wfWebhookStatus.textContent = 'Invalid URL. Enter a valid https:// webhook endpoint.';
-      wfWebhookStatus.className = 'settings-token-status error';
-      return;
-    }
-
-    // Test the webhook with a ping
-    wfWebhookStatus.textContent = 'Testing webhook...';
-    wfWebhookStatus.className = 'settings-token-status';
-    try {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'ping', timestamp: new Date().toISOString() }),
-      });
-      localStorage.setItem('ew-workfront-webhook', url);
-      wfWebhookStatus.textContent = `Webhook set (${resp.status}). Workfront tasks will route here.`;
-      wfWebhookStatus.className = 'settings-token-status success';
-    } catch (err) {
-      // Store anyway — CORS might block the test but webhook could still work server-to-server
-      localStorage.setItem('ew-workfront-webhook', url);
-      wfWebhookStatus.textContent = 'Webhook saved (test failed — CORS may block browser test). Try creating a task.';
-      wfWebhookStatus.className = 'settings-token-status success';
-    }
+if (googleKeyBtn && googleKeyInput) {
+  const savedGoog = localStorage.getItem('ew-google-key') || '';
+  if (savedGoog) {
+    googleKeyInput.value = savedGoog.slice(0, 8) + '...';
+    googleKeyStatus.textContent = 'Google Gemini key set';
+    googleKeyStatus.className = 'settings-token-status success';
+  }
+  googleKeyBtn.addEventListener('click', () => {
+    const val = googleKeyInput.value.trim();
+    if (!val || val.endsWith('...')) return;
+    localStorage.setItem('ew-google-key', val);
+    googleKeyInput.value = val.slice(0, 8) + '...';
+    googleKeyStatus.textContent = 'Google Gemini key set';
+    googleKeyStatus.className = 'settings-token-status success';
   });
 }
 
