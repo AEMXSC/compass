@@ -399,10 +399,14 @@ async function handleMcpProxy(request, env) {
     targetUrl = `https://mcp.adobeaemcloud.com${mcpEndpoint}`;
   }
 
+  // Endpoints that use their own auth headers (not IMS Bearer) — skip IMS token requirement
+  const targetHostname = (() => { try { return new URL(targetUrl).hostname; } catch { return ''; } })();
+  const usesOwnAuth = targetHostname.includes('workfront.adobe.com') || targetHostname.includes('workfront.com');
+
   // Prefer user token — needed for write operations (S2S lacks AEM user permissions)
   const userToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '') || null;
   let mcpToken = userToken;
-  if (!mcpToken) {
+  if (!mcpToken && !usesOwnAuth) {
     try {
       mcpToken = await getS2SToken(env);
     } catch {
