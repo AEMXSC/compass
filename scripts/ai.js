@@ -777,7 +777,7 @@ const AEM_TOOLS = [
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'Narrative prose description (1000–1800 chars ideal). Full sentences with subject, setting, composition, lighting, color palette, photography style. Example: "A tall slender bottle of tropical coconut vodka with a deep navy label, placed on a weathered teak bar at golden hour..." — NOT "bottle, tropical, sunset, 4K".' },
-        model: { type: 'string', description: 'Default is nano-banana-pro. Only override if explicitly requested.' },
+        model: { type: 'string', description: 'Default: nano-banana-pro (Gemini 3 — best for narrative prompts). Other options: nano-banana (Gemini 2.5), imagen-4, imagen-3, flux-pro, flux-ultra, ideogram, gpt-image, runway, firefly-image-3, firefly-image-4, firefly-image-4-ultra. Avoid firefly-image-5 (entitlement issues).' },
         width: { type: 'number', description: 'Width in pixels. Valid landscape: 1344×756, 1344×768, 2304×1792, 2688×1536. Square: 1024×1024, 2048×2048. Portrait: 896×1152, 1792×2304.' },
         height: { type: 'number', description: 'Height in pixels — must match a supported pair (see width). For landscape hero use 1344 wide × 768 tall.' },
         numImages: { type: 'number', description: 'Always 1 per call (MCP hard cap). Make sequential calls with varied prompts for multiple options.' },
@@ -794,7 +794,7 @@ const AEM_TOOLS = [
       properties: {
         prompt: { type: 'string', description: 'Description of the desired changes (e.g., "change background to sunset, keep the person")' },
         imageUrl: { type: 'string', description: 'URL of the source image to edit' },
-        model: { type: 'string', description: 'Must be nano-banana-pro (default) — first-party Firefly Image 4/5 are not supported for image-to-image.' },
+        model: { type: 'string', description: 'Default: nano-banana-pro. 3P models only (nano-banana, imagen-4, imagen-3, flux-pro, flux-ultra, ideogram, gpt-image, runway also work). First-party Firefly Image 3/4/5 are NOT supported for image-to-image.' },
         width: { type: 'number', description: 'Output image width in pixels' },
         height: { type: 'number', description: 'Output image height in pixels' },
         numImages: { type: 'number', description: 'Number of variations to generate (1-4, default 1)' },
@@ -4961,8 +4961,22 @@ These tools write to the real Document Authoring API. The user must be signed in
 - **get_customer_profile** — Look up a real-time customer profile with identity graph, segment memberships, recent events, and consent.
 
 ### Firefly Agent (Generative AI)
-- **generate_image_variations** — Generate images via Adobe Firefly using nano-banana-pro (Google Gemini 3.1 via Firefly MCP). One image per call.
-- **edit_image_with_firefly** — Image-to-image transform. Requires a reference image URL. nano-banana-pro only.
+- **generate_image_variations** — Generate images via Adobe Firefly MCP. One image per call. Default model: nano-banana-pro.
+- **edit_image_with_firefly** — Image-to-image transform with reference URL. 3P models only (not Firefly Image 3/4/5).
+
+#### Available Models
+| Model | Best for |
+|---|---|
+| nano-banana-pro | **Default.** Long narrative prompts, text rendering, spatial reasoning (Gemini 3) |
+| nano-banana | Shorter prompts, faster (Gemini 2.5) |
+| imagen-4 | Photorealism, fine detail (Google) |
+| imagen-3 | Balanced quality/speed (Google) |
+| flux-pro | Creative/artistic styles |
+| flux-ultra | Max quality creative |
+| ideogram | Strong text-in-image rendering |
+| gpt-image | Instruction-following, editing |
+| runway | Motion-style stills, cinematic |
+| firefly-image-3/4/4-ultra | Adobe first-party (text-to-image only, NOT image-to-image) |
 
 #### Nano Banana 2 Prompting Rules (nano-banana-pro)
 
@@ -4973,7 +4987,7 @@ ALWAYS write narrative prose (1000–1800 chars). NEVER comma-separated keyword 
 - Restate full color palette in EVERY call when generating multiple images for a campaign
 - Positive framing only: "empty street" not "no cars"
 - Response field is \`imageUrl\` (not \`url\`) — always read \`images[0].imageUrl\` from the MCP result
-- One image per call — make sequential calls with varied prompts for multiple options
+- One image per call — make sequential calls with prompt variations for multiple options
 
 Prompt formula: [Subject] + [Action/State] + [Location/Context] + [Composition] + [Lighting] + [Color Palette] + [Photography Style]
 

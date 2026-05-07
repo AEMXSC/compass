@@ -122,7 +122,7 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 | Discovery | `.../discovery` | **Session Ready** | Asset/CF/form/page search |
 | Development | `.../development` | **Session Ready** | Pipeline troubleshooting |
 | Cloud Manager (Odin) | `.../odin/prod` | **Session Ready** | Programs, environments, pipelines |
-| Firefly | `.../loki/firefly` | **Session Ready** | AI image generation |
+| Firefly | `.../loki/firefly` | **Working** | 4 tools: text-to-image + image-to-image. Models: nano-banana-pro (default/Gemini 3), nano-banana, imagen-4, imagen-3, flux-pro, flux-ultra, ideogram, gpt-image, runway, firefly-image-3/4/4-ultra. Auth: `ew-s2s-token` via CF Worker `/auth`. |
 | AJO | `.../loki/ajo` | **Session Ready** | Journey orchestration |
 | Content QA Agent | `.../loki/content-qa` | **Session Ready** | Content quality validation |
 | Content Gen Skills | `.../loki/skills` | **Session Ready** | AI writing with brand voice |
