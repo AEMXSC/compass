@@ -95,11 +95,21 @@ export function createMcpClient(endpointPath, label = 'MCP', options = {}) {
    * Handles both direct JSON and SSE response formats.
    */
   async function mcpRequest(method, params = {}, { isNotification = false, _isRetry = false } = {}) {
-    // Token priority: per-product token → MCP OAuth → Dev Console S2S → IMS session
-    const productToken = options.tokenKey ? localStorage.getItem(options.tokenKey) : null;
-    const mcpToken = productToken || localStorage.getItem('ew-mcp-token');
+    // Token priority:
+    //   preferUserToken (Firefly): IMS user session → MCP OAuth → S2S fallback when not signed in
+    //   default: per-product/product token → MCP OAuth → S2S → IMS session
+    const userToken = getToken();
     const s2sToken = localStorage.getItem('ew-s2s-token');
-    const token = mcpToken || s2sToken || getToken();
+    let token;
+    if (options.preferUserToken) {
+      // Firefly: prefer user's IMS token (carries personal 3P model entitlements)
+      // Fall back to S2S only when user is not signed in
+      token = userToken || localStorage.getItem('ew-mcp-token') || s2sToken;
+    } else {
+      const productToken = options.tokenKey ? localStorage.getItem(options.tokenKey) : null;
+      const mcpToken = productToken || localStorage.getItem('ew-mcp-token');
+      token = mcpToken || s2sToken || userToken;
+    }
     const headers = {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
@@ -346,8 +356,8 @@ export const odinMcp = createMcpClient('/adobe/mcp/odin/prod', 'AEM-Odin', IMS);
 // ── Experience Production Agent (DA content authoring via MCP) ──
 export const experienceProductionMcp = createMcpClient('/adobe/mcp/experience-production', 'Experience-Production', IMS);
 
-// ── Firefly (Image Generation) — requires S2S token (Firefly scopes), not IMS ──
-export const fireflyMcp = createMcpClient('/adobe/mcp/loki/firefly', 'Firefly', { tokenKey: 'ew-s2s-token' });
+// ── Firefly (Image Generation) — prefer user IMS token for 3P model entitlements; S2S fallback ──
+export const fireflyMcp = createMcpClient('/adobe/mcp/loki/firefly', 'Firefly', { preferUserToken: true });
 
 // ── Adobe Journey Optimizer ──
 export const ajoMcp = createMcpClient('/adobe/mcp/loki/ajo', 'AJO', IMS);
