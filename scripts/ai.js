@@ -5932,7 +5932,8 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     // so e.g. static create_aem_page is removed when MCP has create-aem-page (different string, same tool)
     const compassTools = getToolsForPrompt(promptText);
     // Hide raw Firefly tools — brain must use generate_and_insert_image / generate_image_variations wrappers
-    const FIREFLY_RAW_TOOLS = new Set(['firefly_generate_image', 'firefly-generate-image', 'firefly_image_to_image', 'firefly-image-to-image', 'firefly_list_models', 'firefly-list-models', 'firefly_check_credits', 'firefly-check-credits']);
+    // Hide raw Firefly generate tools only — diagnostics (check_credits, list_models) stay visible
+    const FIREFLY_RAW_TOOLS = new Set(['firefly_generate_image', 'firefly-generate-image', 'firefly_image_to_image', 'firefly-image-to-image']);
     const mcpTools = getAllMcpClaudeTools().filter((t) => !FIREFLY_RAW_TOOLS.has(t.name));
     const mcpNames = new Set([
       ...mcpTools.map((t) => t.name),
