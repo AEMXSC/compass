@@ -161,6 +161,21 @@
         <input type="password" id="claudeKeyInput" class="settings-input" placeholder="sk-ant-...">
         <div class="settings-hint">Enables real AI chat, governance analysis, and brief processing</div>
 
+        <label class="settings-label-sm" style="margin-top:12px" for="openaiKeyInput">OpenAI API Key</label>
+        <div class="settings-token-row">
+          <input type="password" id="openaiKeyInput" class="settings-input" placeholder="sk-...">
+          <button class="settings-token-btn" id="openaiKeyBtn" title="Set key">Set</button>
+        </div>
+        <div class="settings-token-status" id="openaiKeyStatus"></div>
+
+        <label class="settings-label-sm" style="margin-top:12px" for="googleKeyInput">Google Gemini API Key</label>
+        <div class="settings-token-row">
+          <input type="password" id="googleKeyInput" class="settings-input" placeholder="AIza...">
+          <button class="settings-token-btn" id="googleKeyBtn" title="Set key">Set</button>
+        </div>
+        <div class="settings-token-status" id="googleKeyStatus"></div>
+        <div class="settings-hint">Swap in OpenAI or Gemini to show the orchestration layer is model-agnostic.</div>
+
         <label class="settings-label" style="margin-top:16px" for="githubTokenInput">GitHub Token (PAT)</label>
         <div class="settings-token-row">
           <input type="password" id="githubTokenInput" class="settings-input" placeholder="ghp_...">
@@ -196,25 +211,6 @@
         <label class="settings-label" style="margin-top:16px">MCP Connectors</label>
         <div id="settingsConnectors" class="settings-connectors"></div>
         <div class="settings-hint">Registered connectors from Admin Console</div>
-
-        <!-- BYO LLM Keys -->
-        <div class="settings-divider"></div>
-        <label class="settings-label">Bring Your Own AI Key</label>
-        <div class="settings-hint" style="margin-bottom:8px">Compass runs on Claude by default. Paste an OpenAI or Google key to demonstrate that the orchestration layer is model-agnostic — customers can swap in their preferred LLM.</div>
-
-        <label class="settings-label-sm" for="openaiKeyInput">OpenAI API Key</label>
-        <div class="settings-token-row">
-          <input type="password" id="openaiKeyInput" class="settings-input" placeholder="sk-...">
-          <button class="settings-token-btn" id="openaiKeyBtn" title="Set key">Set</button>
-        </div>
-        <div class="settings-token-status" id="openaiKeyStatus"></div>
-
-        <label class="settings-label-sm" style="margin-top:12px" for="googleKeyInput">Google Gemini API Key</label>
-        <div class="settings-token-row">
-          <input type="password" id="googleKeyInput" class="settings-input" placeholder="AIza...">
-          <button class="settings-token-btn" id="googleKeyBtn" title="Set key">Set</button>
-        </div>
-        <div class="settings-token-status" id="googleKeyStatus"></div>
 
         <!-- Brand Governance -->
         <div class="settings-divider"></div>
