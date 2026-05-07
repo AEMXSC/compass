@@ -356,8 +356,8 @@ export const odinMcp = createMcpClient('/adobe/mcp/odin/prod', 'AEM-Odin', IMS);
 // ── Experience Production Agent (DA content authoring via MCP) ──
 export const experienceProductionMcp = createMcpClient('/adobe/mcp/experience-production', 'Experience-Production', IMS);
 
-// ── Firefly (Image Generation) — prefer user IMS token for 3P model entitlements; S2S fallback ──
-export const fireflyMcp = createMcpClient('/adobe/mcp/loki/firefly', 'Firefly', { preferUserToken: true });
+// ── Firefly (Image Generation) — S2S token carries firefly_api scope; IMS session token does not ──
+export const fireflyMcp = createMcpClient('/adobe/mcp/loki/firefly', 'Firefly', { tokenKey: 'ew-s2s-token' });
 
 // ── Adobe Journey Optimizer ──
 export const ajoMcp = createMcpClient('/adobe/mcp/loki/ajo', 'AJO', IMS);
