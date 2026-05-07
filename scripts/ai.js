@@ -927,11 +927,11 @@ const AEM_TOOLS = [
 
   {
     name: 'transform_image',
-    description: 'Content Optimization Agent — Transform an image with crop, mirror, resize, rotate, format conversion, or quality adjustment. Uses Dynamic Media + OpenAPI for non-destructive transforms.',
+    description: 'Content Optimization Agent — Transform an image with crop, mirror, resize, rotate, format conversion, or quality adjustment. Uses Dynamic Media + OpenAPI. IMPORTANT: asset_path must be an AEM DAM path (e.g. /content/dam/project/image.jpg) or an existing DM delivery URL — external URLs (Unsplash, CDNs, etc.) cannot be transformed.',
     input_schema: {
       type: 'object',
       properties: {
-        asset_path: { type: 'string', description: 'Source asset DAM path or delivery URL' },
+        asset_path: { type: 'string', description: 'AEM DAM path like /content/dam/project/image.jpg — NOT an external URL. Use search_dam_assets first if you do not have the path.' },
         operations: {
           type: 'array',
           items: { type: 'string' },
@@ -946,11 +946,11 @@ const AEM_TOOLS = [
   },
   {
     name: 'create_image_renditions',
-    description: 'Content Optimization Agent — Generate multiple image renditions for different channels and formats in batch. Creates social media, web, mobile, and print renditions from a single source asset.',
+    description: 'Content Optimization Agent — Generate multiple image renditions for different channels and formats in batch. IMPORTANT: asset_path must be an AEM DAM path (e.g. /content/dam/project/image.jpg) or an existing DM delivery URL — external URLs cannot be used.',
     input_schema: {
       type: 'object',
       properties: {
-        asset_path: { type: 'string', description: 'Source asset DAM path or delivery URL' },
+        asset_path: { type: 'string', description: 'AEM DAM path like /content/dam/project/image.jpg — NOT an external URL. Use search_dam_assets first to find the DAM path.' },
         renditions: {
           type: 'array',
           items: { type: 'object' },
@@ -3417,14 +3417,33 @@ export async function executeTool(name, input) {
           _source: 'error',
         });
       }
+      const assetPath = (input.asset_path || '').trim();
+      // Reject external URLs — DM can only transform assets in AEM DAM
+      if (assetPath.startsWith('http') && !assetPath.includes('/adobe/dynamicmedia/deliver') && !assetPath.includes('/content/dam')) {
+        return JSON.stringify({
+          error: 'transform_image requires an AEM DAM asset path, not an external URL.',
+          hint: 'Use search_dam_assets to find an asset in your DAM (path starts with /content/dam/...), then pass that path here.',
+          received: assetPath,
+          _source: 'error',
+        });
+      }
+      // Derive the content path for DM delivery:
+      //   /content/dam/project/img.jpg  → content/dam/project/img.jpg
+      //   existing DM URL               → extract path segment after /deliver/
+      let dmPath;
+      if (assetPath.includes('/adobe/dynamicmedia/deliver/')) {
+        dmPath = assetPath.split('/adobe/dynamicmedia/deliver/')[1].split('?')[0];
+      } else {
+        dmPath = assetPath.replace(/^https?:\/\/[^/]+/, '').replace(/^\//, '');
+      }
+
       const ops = input.operations || [];
       const smartCrop = input.smart_crop;
       const format = input.output_format || 'webp';
       const quality = input.quality || 85;
-      const assetName = input.asset_path?.split('/').pop()?.replace(/\.[^.]+$/, '') || 'transformed';
 
       // Build DM URL with transformation parameters using real delivery host
-      let dmParams = `quality=${quality}`;
+      let dmParams = `quality=${quality}&format=${format}`;
       if (smartCrop) dmParams += `&crop=${smartCrop}`;
       ops.forEach((op) => {
         if (op.startsWith('resize:')) {
@@ -3437,7 +3456,8 @@ export async function executeTool(name, input) {
         if (op.startsWith('mirror:')) dmParams += `&flip=${op.slice(7)}`;
       });
 
-      const deliveryUrl = `https://${dmHost}/adobe/dynamicmedia/deliver/${assetName}/transformed.${format}?${dmParams}`;
+      const dmBase = dmHost.startsWith('http') ? dmHost : `https://${dmHost}`;
+      const deliveryUrl = `${dmBase}/adobe/dynamicmedia/deliver/${dmPath}?${dmParams}`;
 
       return JSON.stringify({
         status: 'transformed',
@@ -3465,7 +3485,22 @@ export async function executeTool(name, input) {
           _source: 'error',
         });
       }
-      const assetName = input.asset_path?.split('/').pop()?.replace(/\.[^.]+$/, '') || 'source';
+      const assetPath = (input.asset_path || '').trim();
+      if (assetPath.startsWith('http') && !assetPath.includes('/adobe/dynamicmedia/deliver') && !assetPath.includes('/content/dam')) {
+        return JSON.stringify({
+          error: 'create_image_renditions requires an AEM DAM asset path, not an external URL.',
+          hint: 'Use search_dam_assets to find an asset in your DAM (path starts with /content/dam/...), then pass that path here.',
+          received: assetPath,
+          _source: 'error',
+        });
+      }
+      let dmPath;
+      if (assetPath.includes('/adobe/dynamicmedia/deliver/')) {
+        dmPath = assetPath.split('/adobe/dynamicmedia/deliver/')[1].split('?')[0];
+      } else {
+        dmPath = assetPath.replace(/^https?:\/\/[^/]+/, '').replace(/^\//, '');
+      }
+      const dmBase = dmHost.startsWith('http') ? dmHost : `https://${dmHost}`;
       const channelSpecs = {
         instagram: [{ name: 'Instagram Story', width: 1080, height: 1920, format: 'jpeg', quality: 90 }, { name: 'Instagram Post', width: 1080, height: 1080, format: 'jpeg', quality: 90 }],
         facebook: [{ name: 'Facebook Post', width: 1200, height: 630, format: 'jpeg', quality: 85 }],
@@ -3496,7 +3531,7 @@ export async function executeTool(name, input) {
         height: spec.height,
         format: spec.format || 'webp',
         quality: spec.quality || 85,
-        delivery_url: `https://${dmHost}/adobe/dynamicmedia/deliver/${assetName}/${(spec.name || `rendition-${i}`).toLowerCase().replace(/\s+/g, '-')}.${spec.format || 'webp'}?width=${spec.width}&height=${spec.height}&quality=${spec.quality || 85}`,
+        delivery_url: `${dmBase}/adobe/dynamicmedia/deliver/${dmPath}?width=${spec.width}&height=${spec.height}&quality=${spec.quality || 85}&format=${spec.format || 'webp'}`,
       }));
 
       return JSON.stringify({
