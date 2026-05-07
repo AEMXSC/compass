@@ -772,15 +772,15 @@ const AEM_TOOLS = [
 
   {
     name: 'generate_image_variations',
-    description: 'Firefly Agent — Generate images using Adobe Firefly AI from a text prompt. Use for hero images, campaign visuals, background art, or any new image asset. Returns generated image URLs.',
+    description: 'Firefly Agent — Generate images using Adobe Firefly AI (nano-banana-pro model — Google Gemini via Firefly MCP). Use for hero images, campaign visuals, background art, or any new image asset. Write narrative prose prompts — 1000+ char descriptions dramatically outperform short keyword lists with this model.',
     input_schema: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'Detailed description of the image to generate (e.g., "healthcare professional helping a patient in a modern hospital, warm lighting, photorealistic")' },
-        model: { type: 'string', description: 'Firefly model to use. Leave blank for default, or "firefly-image-3" for reliable generation. Do NOT use firefly-image-5.' },
+        prompt: { type: 'string', description: 'Narrative prose description (1000–1800 chars ideal). Full sentences with subject, setting, composition, lighting, color palette, photography style. Example: "A tall slender bottle of tropical coconut vodka with a deep navy label, placed on a weathered teak bar at golden hour..." — NOT "bottle, tropical, sunset, 4K".' },
+        model: { type: 'string', description: 'Default is nano-banana-pro. Only override if explicitly requested.' },
         width: { type: 'number', description: 'Width in pixels. Valid landscape: 1344×756, 1344×768, 2304×1792, 2688×1536. Square: 1024×1024, 2048×2048. Portrait: 896×1152, 1792×2304.' },
         height: { type: 'number', description: 'Height in pixels — must match a supported pair (see width). For landscape hero use 1344 wide × 768 tall.' },
-        numImages: { type: 'number', description: 'Number of images to generate (1-4, default 1)' },
+        numImages: { type: 'number', description: 'Always 1 per call (MCP hard cap). Make sequential calls with varied prompts for multiple options.' },
         seed: { type: 'number', description: 'Random seed for reproducible results (optional)' },
       },
       required: ['prompt'],
@@ -794,7 +794,7 @@ const AEM_TOOLS = [
       properties: {
         prompt: { type: 'string', description: 'Description of the desired changes (e.g., "change background to sunset, keep the person")' },
         imageUrl: { type: 'string', description: 'URL of the source image to edit' },
-        model: { type: 'string', description: 'Firefly model to use (optional)' },
+        model: { type: 'string', description: 'Must be nano-banana-pro (default) — first-party Firefly Image 4/5 are not supported for image-to-image.' },
         width: { type: 'number', description: 'Output image width in pixels' },
         height: { type: 'number', description: 'Output image height in pixels' },
         numImages: { type: 'number', description: 'Number of variations to generate (1-4, default 1)' },
@@ -1911,7 +1911,7 @@ function mcpError(toolName, err) {
  * Firefly REST API fallback — used when Firefly MCP token lacks Firefly API scopes.
  * Calls firefly-api.adobe.io directly with the user's IMS token.
  */
-async function callFireflyApi(prompt, { width = 1344, height = 768, numImages = 1, model = 'firefly-image-3' } = {}) {
+async function callFireflyApi(prompt, { width = 1344, height = 768, model = 'nano-banana-pro' } = {}) {
   // Prefer the Firefly-specific token (from Dev Console → Generate access token)
   // Fall back to the user's IMS session token
   const token = localStorage.getItem('ew-s2s-token') || getToken();
@@ -1928,7 +1928,7 @@ async function callFireflyApi(prompt, { width = 1344, height = 768, numImages = 
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      numVariations: numImages,
+      numVariations: 1,
       prompt,
       size: { width, height },
       model,
@@ -3135,10 +3135,10 @@ export async function executeTool(name, input) {
       try {
         const mcpResult = await fireflyMcp.callTool('firefly_generate_image', {
           prompt: input.prompt,
-          model: input.model || 'firefly-image-3',
+          model: input.model || 'nano-banana-pro',
           ...(input.width && { width: input.width }),
           ...(input.height && { height: input.height }),
-          numImages: input.numImages || input.count || 1,
+          numImages: 1,
           ...(input.seed && { seed: input.seed }),
         });
         // If MCP returns an auth error, fall back to Firefly REST API with IMS token
@@ -3174,10 +3174,10 @@ export async function executeTool(name, input) {
         const mcpResult = await fireflyMcp.callTool('firefly_image_to_image', {
           prompt: input.prompt,
           imageUrl: input.imageUrl,
-          ...(input.model && { model: input.model }),
+          model: input.model || 'nano-banana-pro',
           ...(input.width && { width: input.width }),
           ...(input.height && { height: input.height }),
-          numImages: input.numImages || 1,
+          numImages: 1,
         });
         if (mcpResult?.error && /\btoken\b|oauth/i.test(mcpResult.error)) {
           // image-to-image not in REST API v3 — return the error clearly
@@ -4961,7 +4961,21 @@ These tools write to the real Document Authoring API. The user must be signed in
 - **get_customer_profile** — Look up a real-time customer profile with identity graph, segment memberships, recent events, and consent.
 
 ### Firefly Agent (Generative AI)
-- **generate_image_variations** — Generate image variations using Adobe Firefly AI. Creates alternate versions with style, mood, or composition changes.
+- **generate_image_variations** — Generate images via Adobe Firefly using nano-banana-pro (Google Gemini 3.1 via Firefly MCP). One image per call.
+- **edit_image_with_firefly** — Image-to-image transform. Requires a reference image URL. nano-banana-pro only.
+
+#### Nano Banana 2 Prompting Rules (nano-banana-pro)
+
+ALWAYS write narrative prose (1000–1800 chars). NEVER comma-separated keyword lists.
+- Full sentences with spatial relationships: "a red ball on a blue table behind a green chair"
+- Cinematic terms: focal length, depth of field, camera distance, lighting direction
+- Wrap exact on-image text in double quotes: sign that says "Welcome" in bold sans-serif
+- Restate full color palette in EVERY call when generating multiple images for a campaign
+- Positive framing only: "empty street" not "no cars"
+- Response field is \`imageUrl\` (not \`url\`) — always read \`images[0].imageUrl\` from the MCP result
+- One image per call — make sequential calls with varied prompts for multiple options
+
+Prompt formula: [Subject] + [Action/State] + [Location/Context] + [Composition] + [Lighting] + [Color Palette] + [Photography Style]
 
 ### Development Agent (Cloud Manager)
 - **get_pipeline_status** — Get deployment pipeline status, build history, and environment health. Supports status_filter (e.g., 'failed') and program_name filter.
