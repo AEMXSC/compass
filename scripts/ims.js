@@ -30,6 +30,11 @@ const IMS_REDIRECT_URI = (() => {
   ];
   return knownOrigins.includes(origin) ? `${origin}/` : 'https://eds-migration--compass--aemxsc.aem.page/';
 })();
+// Clear legacy proxy URL so both ims.js and mcp-client.js fall back to the current worker
+try {
+  const _stored = localStorage.getItem('ew-ims-proxy');
+  if (_stored && _stored.includes('compass-luc-crago')) localStorage.removeItem('ew-ims-proxy');
+} catch { /* */ }
 const IMS_WORKER = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
 const IMSLIB_INIT_TIMEOUT_MS = 3000;
 
