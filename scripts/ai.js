@@ -777,9 +777,9 @@ const AEM_TOOLS = [
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'Detailed description of the image to generate (e.g., "healthcare professional helping a patient in a modern hospital, warm lighting, photorealistic")' },
-        model: { type: 'string', description: 'Firefly model to use (optional — leave blank for default)' },
-        width: { type: 'number', description: 'Image width in pixels (e.g., 1792 for landscape hero)' },
-        height: { type: 'number', description: 'Image height in pixels (e.g., 1024 for landscape hero)' },
+        model: { type: 'string', description: 'Firefly model to use. Leave blank for default, or "firefly-image-3" for reliable generation. Do NOT use firefly-image-5.' },
+        width: { type: 'number', description: 'Width in pixels. Valid landscape: 1344×756, 1344×768, 2304×1792, 2688×1536. Square: 1024×1024, 2048×2048. Portrait: 896×1152, 1792×2304.' },
+        height: { type: 'number', description: 'Height in pixels — must match a supported pair (see width). For landscape hero use 1344 wide × 768 tall.' },
         numImages: { type: 'number', description: 'Number of images to generate (1-4, default 1)' },
         seed: { type: 'number', description: 'Random seed for reproducible results (optional)' },
       },
@@ -3141,7 +3141,7 @@ export async function executeTool(name, input) {
           ...(input.seed && { seed: input.seed }),
         });
         // If MCP returns an auth error, fall back to Firefly REST API with IMS token
-        if (mcpResult?.error && /token|auth|oauth/i.test(mcpResult.error)) {
+        if (mcpResult?.error && /\btoken\b|oauth/i.test(mcpResult.error)) {
           console.log('[Firefly] MCP auth failed — trying Firefly REST API with IMS token');
           const restResult = await callFireflyApi(input.prompt, {
             width: input.width,
@@ -5535,7 +5535,7 @@ export async function chat(userMessage, context = {}, _depth = 0) {
         if (mcpClient) {
           console.log(`[MCP call] ${block.name}`, JSON.stringify(block.input, null, 2));
           let mcpResult = await mcpClient.callTool(block.name, block.input);
-          if (block.name === 'firefly_generate_image' && mcpResult?.error && /token|auth|oauth/i.test(mcpResult.error)) {
+          if (block.name === 'firefly_generate_image' && mcpResult?.error && /\btoken\b|oauth/i.test(mcpResult.error)) {
             console.log('[Firefly] MCP auth failed — trying REST API with IMS token');
             try { mcpResult = await callFireflyApi(block.input.prompt, { width: block.input.width, height: block.input.height, numImages: block.input.numImages || 1 }); } catch (e) { mcpResult = { error: e.message }; }
           }
@@ -5790,7 +5790,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
       if (mcpClient) {
         console.log(`[MCP call] ${toolBlock.name}`, JSON.stringify(toolBlock.input, null, 2));
         let mcpResult = await mcpClient.callTool(toolBlock.name, toolBlock.input);
-        if (toolBlock.name === 'firefly_generate_image' && mcpResult?.error && /token|auth|oauth/i.test(mcpResult.error)) {
+        if (toolBlock.name === 'firefly_generate_image' && mcpResult?.error && /\btoken\b|oauth/i.test(mcpResult.error)) {
           console.log('[Firefly] MCP auth failed — trying REST API with IMS token');
           try { mcpResult = await callFireflyApi(toolBlock.input.prompt, { width: toolBlock.input.width, height: toolBlock.input.height, numImages: toolBlock.input.numImages || 1 }); } catch (e) { mcpResult = { error: e.message }; }
         }
