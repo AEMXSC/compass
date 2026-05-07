@@ -37,6 +37,7 @@ const ALLOWED_MCP_HOSTS = [
   'emcee-stage.adobe.io',
   'm-mcp-demo.adobe.io',
   'spacecat.experiencecloud.live',
+  'aemshowcase2.my.workfront.adobe.com',
 ];
 
 const ALLOWED_ORIGINS = [
@@ -440,6 +441,13 @@ async function handleMcpProxy(request, env) {
           && (targetHost.includes('rtcdp-mcp') || targetHost.includes('aep-mcp'))) {
           headers['x-sandbox-name'] = env.AEP_SANDBOX_NAME;
         }
+      }
+      // Workfront uses apiKey header auth, not IMS Bearer
+      const isWorkfront = targetHost.includes('workfront.adobe.com') || targetHost.includes('workfront.com');
+      if (isWorkfront) {
+        delete headers.Authorization;
+        if (env.WORKFRONT_API_KEY) headers.apiKey = env.WORKFRONT_API_KEY;
+        headers['x-forwarded-host'] = targetHost;
       }
     } catch { /* header injection best-effort */ }
 

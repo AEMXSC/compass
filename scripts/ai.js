@@ -14,7 +14,7 @@ import * as da from './da-client.js';
 import { isSignedIn, getToken, signIn } from './ims.js';
 import { hasGitHubToken, readContent as ghReadContent, writeContent as ghWriteContent, triggerPreview as ghTriggerPreview, getRepoInfo, listBranches as ghListBranches } from './github-content.js';
 import * as aemContent from './aem-content-mcp-client.js';
-import { contentMcp, experienceProductionMcp, getMcpRegistry, getAllMcpClaudeTools, initAndRegister, governanceMcp, fireflyMcp, registerMcpTools } from './mcp-client.js';
+import { contentMcp, workfrontMcp, experienceProductionMcp, getMcpRegistry, getAllMcpClaudeTools, initAndRegister, governanceMcp, fireflyMcp, registerMcpTools } from './mcp-client.js';
 import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
@@ -5455,6 +5455,14 @@ Try DA tools first (edit_page_content). If that fails, try search-aem-pages to d
     }
 
     dynamic.push(`\n${toolRouting}`);
+
+    // Workfront — cross-site tools for work management
+    dynamic.push(`\n### Workfront (Work Management)
+Use Workfront tools when the user asks about projects, tasks, briefs, approvals, proofs, or campaign briefs from Workfront.
+- Retrieve tasks, projects, and documents from Workfront to inform content creation
+- When a user says "use the brief from Workfront" or "get the Workfront task", search Workfront before creating content
+- Workfront tools are prefixed with the names discovered at session init — check available tools list
+Key use cases: get brief from Workfront task → extract_brief_content → brief-to-page workflow`);
   }
 
   // Project memory — persistent context across sessions (like da-agent's /.da/ memory)
@@ -5678,6 +5686,14 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
       } catch (e) {
         console.warn('[AI] Content MCP init failed:', e.message);
       }
+    }
+
+    // Workfront: lazy-init on first full-brain request
+    try {
+      await workfrontMcp.initSession();
+      registerMcpTools(workfrontMcp);
+    } catch (e) {
+      console.warn('[AI] Workfront MCP init failed:', e.message);
     }
 
     // Compass tools + ALL registered MCP tools

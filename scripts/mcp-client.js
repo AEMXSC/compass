@@ -388,6 +388,9 @@ export const sitesOptimizerMcp = createMcpClient('https://m-mcp-demo.adobe.io/mc
 // ── External ──
 export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
 
+// ── Workfront — uses apiKey header auth (injected by worker), not IMS Bearer ──
+export const workfrontMcp = createMcpClient('https://aemshowcase2.my.workfront.adobe.com/mcp-api/mcp', 'Workfront');
+
 /**
  * MCP Tool Registry — maps tool names to their client instance.
  * Populated lazily when sessions initialize. Used by ai.js to route tool calls.
