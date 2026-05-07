@@ -113,12 +113,10 @@ export function createMcpClient(endpointPath, label = 'MCP', options = {}) {
 
     const body = {
       jsonrpc: '2.0',
+      id: nextId(),
       method,
       params,
     };
-    if (!isNotification) {
-      body.id = nextId();
-    }
 
     const resp = await fetch(endpoint, {
       method: 'POST',
