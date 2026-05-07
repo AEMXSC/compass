@@ -791,7 +791,7 @@ const AEM_TOOLS = [
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'Narrative prose description (1000–1800 chars ideal). Full sentences with subject, setting, composition, lighting, color palette, photography style. Example: "A tall slender bottle of tropical coconut vodka with a deep navy label, placed on a weathered teak bar at golden hour..." — NOT "bottle, tropical, sunset, 4K".' },
-        model: { type: 'string', description: 'Default: nano-banana-pro (Gemini 3 — best for narrative prompts). Other options: nano-banana (Gemini 2.5), imagen-4, imagen-3, flux-pro, flux-ultra, ideogram, gpt-image, runway, firefly-image-3, firefly-image-4, firefly-image-4-ultra. Avoid firefly-image-5 (entitlement issues).' },
+        model: { type: 'string', description: 'Default: firefly-image-3 (Adobe Firefly 1P — confirmed available). Other 1P: firefly-image-4, firefly-image-4-ultra, firefly-image-5. 3P models (nano-banana-pro, imagen-4, flux-pro, etc.) require org entitlement — only use if explicitly requested by user.' },
         width: { type: 'number', description: 'Width in pixels. MUST be a supported pair — arbitrary sizes are rejected. Landscape hero: 1344×768, 2688×1536, 4032×2304. Square: 1024×1024, 2048×2048. Portrait: 896×1152, 1792×2304. DEFAULT if omitted: 1344×768 for hero/banner, 1024×1024 for other.' },
         height: { type: 'number', description: 'Height in pixels — must match a supported pair (see width). For landscape hero: 768. DO NOT use 800, 1080, or other non-standard values.' },
         numImages: { type: 'number', description: 'Always 1 per call (MCP hard cap). Make sequential calls with varied prompts for multiple options.' },
@@ -1925,7 +1925,7 @@ function mcpError(toolName, err) {
  * Firefly REST API fallback — used when Firefly MCP token lacks Firefly API scopes.
  * Calls firefly-api.adobe.io directly with the user's IMS token.
  */
-async function callFireflyApi(prompt, { width = 1344, height = 768, model = 'nano-banana-pro' } = {}) {
+async function callFireflyApi(prompt, { width = 1344, height = 768, model = 'firefly-image-3' } = {}) {
   // Prefer the Firefly-specific token (from Dev Console → Generate access token)
   // Fall back to the user's IMS session token
   const token = localStorage.getItem('ew-s2s-token') || getToken();
@@ -3150,13 +3150,13 @@ export async function executeTool(name, input) {
         const dims = snapFireflySize(input.width, input.height);
         const mcpResult = await fireflyMcp.callTool('firefly_generate_image', {
           prompt: input.prompt,
-          model: input.model || 'nano-banana-pro',
+          model: input.model || 'firefly-image-3',
           ...dims,
           numImages: 1,
           ...(input.seed && { seed: input.seed }),
         });
         // 3P model unauthorized → retry with first-party model (entitlement issue, not auth bug)
-        const requestedModel = input.model || 'nano-banana-pro';
+        const requestedModel = input.model || 'firefly-image-3';
         if (mcpResult?.error && /unauthorized/i.test(mcpResult.error) && requestedModel !== 'firefly-image-3') {
           console.log(`[Firefly] ${requestedModel} unauthorized — retrying with firefly-image-3`);
           const fallbackResult = await fireflyMcp.callTool('firefly_generate_image', {
@@ -3201,7 +3201,7 @@ export async function executeTool(name, input) {
         const mcpResult = await fireflyMcp.callTool('firefly_image_to_image', {
           prompt: input.prompt,
           imageUrl: input.imageUrl,
-          model: input.model || 'nano-banana-pro',
+          model: input.model || 'firefly-image-3',
           ...(input.width && { width: input.width }),
           ...(input.height && { height: input.height }),
           numImages: 1,
@@ -4994,27 +4994,16 @@ These tools write to the real Document Authoring API. The user must be signed in
 #### Available Models
 | Model | Best for |
 |---|---|
-| nano-banana-pro | **Default.** Long narrative prompts, text rendering, spatial reasoning (Gemini 3) |
-| nano-banana | Shorter prompts, faster (Gemini 2.5) |
-| imagen-4 | Photorealism, fine detail (Google) |
-| imagen-3 | Balanced quality/speed (Google) |
-| flux-pro | Creative/artistic styles |
-| flux-ultra | Max quality creative |
-| ideogram | Strong text-in-image rendering |
-| gpt-image | Instruction-following, editing |
-| runway | Motion-style stills, cinematic |
-| firefly-image-3/4/4-ultra | Adobe first-party (text-to-image only, NOT image-to-image) |
+| firefly-image-3 | **Default.** Adobe Firefly 1P — confirmed available for this org |
+| firefly-image-4 | Higher quality, same 1P entitlement |
+| firefly-image-4-ultra | Max quality 1P |
+| firefly-image-5 | Latest 1P (may have entitlement issues) |
+| nano-banana-pro | 3P (Google Gemini 3) — requires org entitlement, not currently available |
+| nano-banana / imagen-4 / flux-pro / etc. | 3P partner models — require org entitlement |
 
-#### Nano Banana 2 Prompting Rules (nano-banana-pro)
-
-ALWAYS write narrative prose (1000–1800 chars). NEVER comma-separated keyword lists.
-- Full sentences with spatial relationships: "a red ball on a blue table behind a green chair"
-- Cinematic terms: focal length, depth of field, camera distance, lighting direction
-- Wrap exact on-image text in double quotes: sign that says "Welcome" in bold sans-serif
-- Restate full color palette in EVERY call when generating multiple images for a campaign
-- Positive framing only: "empty street" not "no cars"
 - Response field is \`imageUrl\` (not \`url\`) — always read \`images[0].imageUrl\` from the MCP result
 - One image per call — make sequential calls with prompt variations for multiple options
+- Write descriptive narrative prompts (full sentences, 200–800 chars) — Firefly 1P responds well to scene descriptions with lighting, composition, and color palette details
 
 **Valid sizes (MUST use exactly, no arbitrary values):**
 - Landscape hero: 1344×768, 2688×1536, 4032×2304
@@ -5895,7 +5884,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
         let mcpResult = await mcpClient.callTool(toolBlock.name, toolArgs);
         // 3P model unauthorized → retry with firefly-image-3
         if (toolBlock.name === 'firefly_generate_image' && mcpResult?.error && /unauthorized/i.test(mcpResult.error)) {
-          const m = toolArgs.model || 'nano-banana-pro';
+          const m = toolArgs.model || 'firefly-image-3';
           if (m !== 'firefly-image-3') {
             console.log(`[Firefly] ${m} unauthorized — falling back to firefly-image-3`);
             mcpResult = await mcpClient.callTool(toolBlock.name, { ...toolArgs, model: 'firefly-image-3' });
