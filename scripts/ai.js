@@ -31,6 +31,20 @@ const MODEL = 'claude-sonnet-4-20250514';
 const STORAGE_KEY = 'ew-claude-key';
 const HTML_TRUNCATE_THRESHOLD = 15000;
 
+// Firefly — supported (width, height) pairs; arbitrary sizes are rejected by the API
+const FF_VALID_SIZES = [[1024,1024],[2048,2048],[3072,3072],[1344,768],[2304,1792],[2688,1536],[4032,2304],[1152,896],[896,1152],[1792,2304],[720,1280],[1440,2560],[2160,3840],[2688,3456],[3456,2688]];
+function snapFireflySize(w, h) {
+  if (!w && !h) return {};
+  const r = (w || h) / (h || w);
+  let [bw, bh] = [1344, 768];
+  let bd = Infinity;
+  for (const [sw, sh] of FF_VALID_SIZES) {
+    const d = Math.abs(sw / sh - r);
+    if (d < bd) { bd = d; [bw, bh] = [sw, sh]; }
+  }
+  return { width: bw, height: bh };
+}
+
 // Analytics lazy-load — triggered on first analytics/performance query
 const ANALYTICS_TRIGGERS = /traffic|visits|bounce|sessions|pageview|conversion|revenue|orders|24.?h|yesterday|last week|last month|last \d+ day|trend|drop|spike|what happened|how did|how.?s the site|site performance|analytics|report|metric|opportunit|audience|segment|cja\b|adobe analytics/i;
 let analyticsToolsLoaded = false;
@@ -3133,19 +3147,6 @@ export async function executeTool(name, input) {
     case 'generate_image_variations': {
       if (!(await ensureAuth())) return authRequiredError('generate_image_variations');
       try {
-        // Snap to nearest valid Firefly size — arbitrary sizes like 1920×800 are rejected
-        const FF_VALID = [[1024,1024],[2048,2048],[3072,3072],[1344,768],[2304,1792],[2688,1536],[4032,2304],[1152,896],[896,1152],[1792,2304],[720,1280],[1440,2560],[2160,3840],[2688,3456],[3456,2688]];
-        function snapFireflySize(w, h) {
-          if (!w && !h) return {};
-          const r = (w || h) / (h || w);
-          let [bw, bh] = [1344, 768];
-          let bd = Infinity;
-          for (const [sw, sh] of FF_VALID) {
-            const d = Math.abs(sw / sh - r);
-            if (d < bd) { bd = d; [bw, bh] = [sw, sh]; }
-          }
-          return { width: bw, height: bh };
-        }
         const dims = snapFireflySize(input.width, input.height);
         const mcpResult = await fireflyMcp.callTool('firefly_generate_image', {
           prompt: input.prompt,
@@ -5884,11 +5885,25 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
       let result;
       const mcpClient = getMcpRegistry()[toolBlock.name];
       if (mcpClient) {
-        console.log(`[MCP call] ${toolBlock.name}`, JSON.stringify(toolBlock.input, null, 2));
-        let mcpResult = await mcpClient.callTool(toolBlock.name, toolBlock.input);
+        // Normalize Firefly dimensions for direct brain calls (brain bypasses generate_image_variations wrapper)
+        let toolArgs = toolBlock.input;
+        if (toolBlock.name === 'firefly_generate_image' || toolBlock.name === 'firefly_image_to_image') {
+          const snapped = snapFireflySize(toolBlock.input.width, toolBlock.input.height);
+          if (Object.keys(snapped).length) toolArgs = { ...toolBlock.input, ...snapped };
+        }
+        console.log(`[MCP call] ${toolBlock.name}`, JSON.stringify(toolArgs, null, 2));
+        let mcpResult = await mcpClient.callTool(toolBlock.name, toolArgs);
+        // 3P model unauthorized → retry with firefly-image-3
+        if (toolBlock.name === 'firefly_generate_image' && mcpResult?.error && /unauthorized/i.test(mcpResult.error)) {
+          const m = toolArgs.model || 'nano-banana-pro';
+          if (m !== 'firefly-image-3') {
+            console.log(`[Firefly] ${m} unauthorized — falling back to firefly-image-3`);
+            mcpResult = await mcpClient.callTool(toolBlock.name, { ...toolArgs, model: 'firefly-image-3' });
+          }
+        }
         if (toolBlock.name === 'firefly_generate_image' && mcpResult?.error && /\btoken\b|oauth/i.test(mcpResult.error)) {
           console.log('[Firefly] MCP auth failed — trying REST API with IMS token');
-          try { mcpResult = await callFireflyApi(toolBlock.input.prompt, { width: toolBlock.input.width, height: toolBlock.input.height, numImages: toolBlock.input.numImages || 1 }); } catch (e) { mcpResult = { error: e.message }; }
+          try { mcpResult = await callFireflyApi(toolArgs.prompt, { width: toolArgs.width, height: toolArgs.height, numImages: toolArgs.numImages || 1 }); } catch (e) { mcpResult = { error: e.message }; }
         }
         console.log(`[MCP result] ${toolBlock.name}:`, typeof mcpResult === 'string' ? mcpResult.slice(0, 400) : JSON.stringify(mcpResult, null, 2).slice(0, 400));
         result = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
