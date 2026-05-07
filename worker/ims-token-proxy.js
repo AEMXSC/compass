@@ -15,7 +15,7 @@
  */
 
 const IMS_TOKEN_URL = 'https://ims-na1.adobelogin.com/ims/token/v3';
-const IMS_SCOPE = 'aem.frontend.all,openid,AdobeID,read_organizations,additional_info.projectedProductContext';
+const IMS_SCOPE = 'aem.frontend.all,openid,AdobeID,read_organizations,additional_info.projectedProductContext,firefly_api';
 
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
@@ -73,7 +73,7 @@ async function getS2SToken(env) {
     grant_type: 'client_credentials',
     client_id: env.IMS_CLIENT_ID,
     client_secret: env.IMS_CLIENT_SECRET,
-    scope: 'openid,AdobeID,read_organizations,additional_info.projectedProductContext,aem.frontend.all',
+    scope: IMS_SCOPE,
   });
   const resp = await fetch('https://ims-na1.adobelogin.com/ims/token/v3', { method: 'POST', body });
   if (!resp.ok) throw new Error('S2S token fetch failed');
@@ -107,6 +107,7 @@ async function route(request, env) {
     globalThis.GITHUB_CLIENT_ID = env.GITHUB_CLIENT_ID;
     globalThis.GITHUB_CLIENT_SECRET = env.GITHUB_CLIENT_SECRET;
     globalThis.COMPASS_OAUTH_SECRET = env.COMPASS_OAUTH_SECRET;
+    globalThis.OVERRIDE_TOKEN = env.OVERRIDE_TOKEN;
   }
   const url = new URL(request.url);
 
@@ -185,8 +186,20 @@ async function handleAuth(request) {
     return jsonResponse({ error: 'IMS_CLIENT_SECRET not configured' }, 500, origin);
   }
 
-  // Return cached token if still valid (with 5 min buffer)
   const now = Date.now();
+
+  // Return manually-set override token if still valid (5 min buffer)
+  if (typeof OVERRIDE_TOKEN !== 'undefined' && OVERRIDE_TOKEN) {
+    try {
+      const payload = JSON.parse(atob(OVERRIDE_TOKEN.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const expiresAt = Number(payload.created_at) + Number(payload.expires_in);
+      if (expiresAt > now + 300000) {
+        return jsonResponse({ access_token: OVERRIDE_TOKEN, expires_at: expiresAt, cached: true }, 200, origin);
+      }
+    } catch { /* token malformed — fall through */ }
+  }
+
+  // Return in-memory cached token if still valid (with 5 min buffer)
   if (cachedToken && tokenExpiry > now + 300000) {
     return jsonResponse({ access_token: cachedToken, expires_at: tokenExpiry, cached: true }, 200, origin);
   }

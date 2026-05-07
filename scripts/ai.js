@@ -3141,6 +3141,20 @@ export async function executeTool(name, input) {
           numImages: 1,
           ...(input.seed && { seed: input.seed }),
         });
+        // 3P model unauthorized → retry with first-party model (entitlement issue, not auth bug)
+        const requestedModel = input.model || 'nano-banana-pro';
+        if (mcpResult?.error && /unauthorized/i.test(mcpResult.error) && requestedModel !== 'firefly-image-3') {
+          console.log(`[Firefly] ${requestedModel} unauthorized — retrying with firefly-image-3`);
+          const fallbackResult = await fireflyMcp.callTool('firefly_generate_image', {
+            prompt: input.prompt,
+            model: 'firefly-image-3',
+            ...(input.width && { width: input.width }),
+            ...(input.height && { height: input.height }),
+            numImages: 1,
+            ...(input.seed && { seed: input.seed }),
+          });
+          return JSON.stringify({ ...fallbackResult, source: 'Adobe Firefly MCP', fallback_model: 'firefly-image-3', original_model: requestedModel }, null, 2);
+        }
         // If MCP returns an auth error, fall back to Firefly REST API with IMS token
         if (mcpResult?.error && /\btoken\b|oauth/i.test(mcpResult.error)) {
           console.log('[Firefly] MCP auth failed — trying Firefly REST API with IMS token');
