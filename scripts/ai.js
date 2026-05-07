@@ -5235,8 +5235,9 @@ Example:
   → patch jsonPatch: '[{"op":"replace","path":"/items/0/items/0:0/items/0:0:0/properties/text","value":"<h1>New</h1>"}]'
 
 ## Brief-to-page (JCR)
-extract_brief_content → create_aem_page → patch_aem_page_content
+extract_brief_content → create_aem_page → [search_dam_assets if images needed] → patch_aem_page_content
 - Use the pageId returned by create_aem_page directly — do NOT search for the page
+- For any fileReference fields: call search_dam_assets {query: "<description from brief>", folder: "/content/dam"} — use the returned path as the fileReference value
 - Do NOT call get-aem-page-preview-url until AFTER patching (page isn't published yet)
 
 ## Rules
@@ -5388,6 +5389,7 @@ Page-level properties (patch via \`/properties/<key>\`): \`jcr:title\` · \`jcr:
 
 JCR path pattern: \`/content/{site}/{locale}/{page}/jcr:content/root/container/{component-node}\`
 DAM assets always use \`fileReference\` (never inline \`src\`). Template storage: \`/conf/{site}/settings/wcm/templates/\`
+To find an asset path: \`search_dam_assets {query: "natural language description", folder: "/content/dam"}\` → use the returned \`path\` as the \`fileReference\` value.
 
 **Experience Production Agent** — AI-generated content workflow (NOT for direct text edits):
 Use when the user wants: full page rewrites, new pages from templates, content generation from a brief/PDF, translation, or modernization. Never use for targeted text/property changes.
