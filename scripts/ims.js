@@ -107,7 +107,7 @@ export async function initS2SToken() {
   if (existing) {
     try {
       const payload = JSON.parse(atob(existing.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      const expiresAt = (payload.created_at + payload.expires_in) || 0;
+      const expiresAt = ((payload.created_at + payload.expires_in) * 1000) || 0;
       if (expiresAt > Date.now()) return existing;
     } catch { /* invalid token — fall through to refresh */ }
   }
