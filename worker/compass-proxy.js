@@ -1,14 +1,13 @@
 /**
- * Compass Proxy — routes compass.aemxsc.com → eds-migration branch
- * Simple reverse proxy: forwards all requests with path/query intact.
+ * Compass Proxy — routes compass.aemxsc.com → configured origin host
+ * Set ORIGIN_HOSTNAME in Variables to change target without redeploying.
  */
 
-const TARGET = 'eds-migration--compass--aemxsc.aem.live';
-
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
+    const target = env.ORIGIN_HOSTNAME || 'eds-migration--compass--aemxsc.aem.live';
     const url = new URL(request.url);
-    url.hostname = TARGET;
+    url.hostname = target;
     url.port = '';
     url.protocol = 'https:';
 

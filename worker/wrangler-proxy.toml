@@ -2,6 +2,11 @@ name = "compass-proxy"
 main = "compass-proxy.js"
 compatibility_date = "2024-01-01"
 
+[vars]
+ORIGIN_HOSTNAME = "eds-migration--compass--aemxsc.aem.live"
+
+# Routes — add in Cloudflare dashboard or via wrangler:
+#   compass.aemxsc.com/*
+#
 # Deploy:  npx wrangler deploy --config wrangler-proxy.toml
-# Then add compass.aemxsc.com as a custom domain in the Cloudflare dashboard
-# Workers & Pages → compass-proxy → Settings → Domains & Routes → Add Custom Domain
+# Change target without redeploying: update ORIGIN_HOSTNAME in Workers & Pages → compass-proxy → Settings → Variables
