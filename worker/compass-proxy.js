@@ -5,8 +5,15 @@
 
 export default {
   async fetch(request, env) {
-    const target = env.ORIGIN_HOSTNAME || 'eds-migration--compass--aemxsc.aem.live';
     const url = new URL(request.url);
+
+    // Redirect plain HTTP to HTTPS
+    if (url.protocol === 'http:') {
+      url.protocol = 'https:';
+      return Response.redirect(url.toString(), 301);
+    }
+
+    const target = env.ORIGIN_HOSTNAME || 'eds-migration--compass--aemxsc.aem.live';
     url.hostname = target;
     url.port = '';
     url.protocol = 'https:';
