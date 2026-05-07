@@ -817,6 +817,25 @@ const AEM_TOOLS = [
     },
   },
 
+  {
+    name: 'generate_and_insert_image',
+    description: 'Firefly + Experience Production — Generate a Firefly image AND insert it into a page in one call. ALWAYS prefer this over separate generate_image_variations + edit_page_content when the goal is to update a hero or page image. Eliminates the extra LLM round-trip. Fetches current page HTML and generates the image in parallel, then swaps the image and writes back.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Narrative prose description of the image to generate. Full sentences with subject, setting, lighting, color palette, photography style.' },
+        page_path: { type: 'string', description: 'Page path to update (e.g. "/partner-with-us"). Must be a DA-backed EDS page.' },
+        image_selector: { type: 'string', description: 'Which image to replace: "hero" (default — replaces first picture/img in page), "first", or a partial alt text / class hint.' },
+        alt_text: { type: 'string', description: 'Alt text for the new image. Defaults to a short version of the prompt.' },
+        model: { type: 'string', description: 'Firefly model. Default: firefly-image-3.' },
+        width: { type: 'number', description: 'Image width. Use valid pairs: landscape 1344×768, 2688×1536; square 1024×1024. Snapped automatically.' },
+        height: { type: 'number', description: 'Image height — must match a supported pair.' },
+        seed: { type: 'number', description: 'Seed for reproducibility (optional).' },
+      },
+      required: ['prompt', 'page_path'],
+    },
+  },
+
   /* ─── Development Agent (Cloud Manager) ─── */
 
   {
@@ -1658,6 +1677,8 @@ export const TOOL_AGENT_MAP = {
   // ── Content Optimization Agent (variations, images, renditions) ──
   create_content_variant: 'Content Optimization Agent',
   generate_image_variations: 'Content Optimization Agent',
+  edit_image_with_firefly: 'Content Optimization Agent',
+  generate_and_insert_image: 'Experience Production Agent',
   transform_image: 'Content Optimization Agent',
   create_image_renditions: 'Content Optimization Agent',
 
@@ -1751,6 +1772,7 @@ const DA_ONLY_TOOLS = new Set([
   'edit_page_content', 'preview_page', 'publish_page', 'list_site_pages', 'delete_page',
   'unpublish_preview', 'unpublish_live', 'purge_cache', 'sync_code',
   'bulk_preview', 'bulk_publish', 'reindex_page', 'get_page_status',
+  'generate_and_insert_image',
 ]);
 
 const JCR_ONLY_TOOLS = new Set([
@@ -1782,7 +1804,7 @@ const TIER2_KEYWORDS = {
   governance: ['run_governance_check', 'get_brand_guidelines', 'check_asset_expiry', 'audit_content'],
   workfront: ['create_workfront_task', 'list_workfront_projects', 'get_workfront_project', 'list_workfront_tasks', 'update_workfront_task', 'list_workfront_approvals', 'ask_workfront', 'get_project_health', 'check_workfront_connection'],
   assets: ['search_dam_assets', 'browse_dam_folder', 'get_asset_metadata', 'update_asset_metadata', 'upload_asset', 'delete_asset', 'move_asset', 'copy_asset', 'create_dam_folder', 'get_asset_renditions', 'add_to_collection'],
-  images: ['generate_image_variations', 'transform_image', 'create_image_renditions'],
+  images: ['generate_and_insert_image', 'generate_image_variations', 'edit_image_with_firefly', 'transform_image', 'create_image_renditions'],
   journey: ['create_journey', 'generate_journey_content', 'get_journey_status', 'analyze_journey_conflicts'],
   experiment: ['setup_experiment', 'get_experiment_status', 'analyze_experiment', 'create_ab_test', 'get_personalization_offers'],
   audience: ['explore_audiences', 'get_audience_segments', 'get_customer_profile'],
@@ -3213,6 +3235,128 @@ export async function executeTool(name, input) {
         return JSON.stringify({ ...mcpResult, source: 'Adobe Firefly MCP' }, null, 2);
       } catch (err) {
         return mcpError('edit_image_with_firefly', err);
+      }
+    }
+
+    case 'generate_and_insert_image': {
+      if (!(await ensureAuth())) return authRequiredError('generate_and_insert_image');
+      { const noSite = requireDaSite(); if (noSite) return noSite; }
+      try {
+        const pagePath = sanitizePath(input.page_path);
+        const htmlPath = (pagePath === '/' ? '/index' : pagePath) + '.html';
+        const org = da.getOrg();
+        const repo = da.getRepo();
+        const branch = da.getBranch();
+        const previewUrl = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page${pagePath}`;
+
+        const dims = snapFireflySize(input.width, input.height);
+        const requestedModel = input.model || 'firefly-image-3';
+
+        // Parallel: fetch current page HTML + generate image simultaneously
+        let [currentHTML, ffResult] = await Promise.all([
+          da.getPage(htmlPath).catch(() => null),
+          fireflyMcp.callTool('firefly_generate_image', {
+            prompt: input.prompt,
+            model: requestedModel,
+            ...dims,
+            numImages: 1,
+            ...(input.seed && { seed: input.seed }),
+          }),
+        ]);
+
+        // Fallback: 3P model unauthorized → retry with firefly-image-3
+        if (ffResult?.error && /unauthorized/i.test(ffResult.error) && requestedModel !== 'firefly-image-3') {
+          console.log(`[generate_and_insert_image] ${requestedModel} unauthorized — retrying with firefly-image-3`);
+          ffResult = await fireflyMcp.callTool('firefly_generate_image', {
+            prompt: input.prompt,
+            model: 'firefly-image-3',
+            ...dims,
+            numImages: 1,
+            ...(input.seed && { seed: input.seed }),
+          });
+        }
+
+        if (ffResult?.error) {
+          return JSON.stringify({ error: `Firefly generation failed: ${ffResult.error}`, _source: 'error' });
+        }
+
+        const imageUrl = ffResult?.images?.[0]?.imageUrl || ffResult?.images?.[0]?.url;
+        if (!imageUrl) {
+          return JSON.stringify({ error: 'Firefly returned no image URL', raw: ffResult, _source: 'error' });
+        }
+
+        if (!currentHTML) {
+          return JSON.stringify({
+            status: 'partial',
+            error: 'Could not read page HTML — image generated but not inserted',
+            image_url: imageUrl,
+            hint: 'Use edit_page_content with the image_url above to place it on the page.',
+            _source: 'error',
+          });
+        }
+
+        // Swap image in HTML using DOMParser (browser context)
+        const altText = input.alt_text || input.prompt.slice(0, 80).trim();
+        const selector = (input.image_selector || 'hero').toLowerCase();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(currentHTML, 'text/html');
+
+        let targetImg = null;
+        let targetPicture = null;
+
+        if (selector === 'hero' || selector === 'first') {
+          targetPicture = doc.querySelector('picture');
+          targetImg = targetPicture ? targetPicture.querySelector('img') : doc.querySelector('img');
+        } else {
+          const imgs = Array.from(doc.querySelectorAll('img'));
+          targetImg = imgs.find(img =>
+            img.alt?.toLowerCase().includes(selector) ||
+            img.closest('[class]')?.className?.toLowerCase().includes(selector)
+          ) || imgs[0];
+          targetPicture = targetImg?.closest('picture') || null;
+        }
+
+        if (targetImg) {
+          targetImg.src = imageUrl;
+          targetImg.alt = altText;
+          if (targetPicture) {
+            targetPicture.querySelectorAll('source').forEach(s => s.remove());
+          }
+        } else {
+          const main = doc.querySelector('main') || doc.body;
+          const newImg = doc.createElement('img');
+          newImg.src = imageUrl;
+          newImg.alt = altText;
+          main.insertBefore(newImg, main.firstChild);
+        }
+
+        const updatedHTML = doc.body.innerHTML;
+        await da.updatePage(htmlPath, updatedHTML);
+
+        let previewStatus = 'skipped';
+        try {
+          const previewResp = await da.previewPage(pagePath);
+          previewStatus = previewResp.ok ? 'success' : `pending (${previewResp.status})`;
+        } catch (previewErr) {
+          previewStatus = `pending: ${previewErr.message}`;
+        }
+
+        return JSON.stringify({
+          status: 'success',
+          page_path: pagePath,
+          image_url: imageUrl,
+          alt_text: altText,
+          model_used: ffResult?.model || requestedModel,
+          seed: ffResult?.images?.[0]?.seed,
+          preview_url: previewUrl,
+          preview_status: previewStatus,
+          source: 'Firefly MCP + DA Admin API',
+          message: `Image generated and inserted into ${pagePath}. Preview refreshing at ${previewUrl}`,
+          _action: 'refresh_preview',
+          _preview_path: pagePath,
+        }, null, 2);
+      } catch (err) {
+        return mcpError('generate_and_insert_image', err);
       }
     }
 
@@ -4988,7 +5132,8 @@ These tools write to the real Document Authoring API. The user must be signed in
 - **get_customer_profile** — Look up a real-time customer profile with identity graph, segment memberships, recent events, and consent.
 
 ### Firefly Agent (Generative AI)
-- **generate_image_variations** — Generate images via Adobe Firefly MCP. One image per call. Default model: nano-banana-pro.
+- **generate_and_insert_image** — **PREFERRED for image updates.** Generates a Firefly image AND inserts it into the page in one call. Use this whenever the goal is to update a hero or page image — eliminates the extra round-trip.
+- **generate_image_variations** — Generate images via Adobe Firefly MCP when you need just the URL (not immediate insertion). One image per call.
 - **edit_image_with_firefly** — Image-to-image transform with reference URL. 3P models only (not Firefly Image 3/4/5).
 
 #### Available Models
@@ -5062,8 +5207,8 @@ Use these when users ask about:
 **CRITICAL RULES**:
 1. When users mention a site (like "Frescopa", "SecurBank", "WKND"), ALWAYS call get_aem_sites → get_aem_site_pages → get_page_content to fetch real content. Never guess.
 2. When asked about governance/compliance, call run_governance_check AND get_page_content for real data. For brand guidelines, call get_brand_guidelines.
-3. When asked about assets/images, call search_dam_assets. Use date_range, tags, folder, and exclude parameters to filter results. For generating new images, call generate_image_variations. **IMPORTANT — always place generated images on the page immediately, never just return URLs**:
-   - **DA/EDS site** → use the Firefly URL directly as an img src inside edit_page_content HTML. No DAM upload needed — EDS renders any public URL.
+3. When asked about assets/images, call search_dam_assets. For generating new images on a DA/EDS page, **always use generate_and_insert_image** — it generates the Firefly image and inserts it in one call (no extra round-trip). Only use generate_image_variations when you need the URL without immediately placing it. **IMPORTANT — always place generated images on the page immediately, never just return URLs**:
+   - **DA/EDS site** → use generate_and_insert_image (preferred) or the Firefly URL directly as an img src inside edit_page_content HTML. No DAM upload needed — EDS renders any public URL.
    - **JCR site** → call upload_asset first (source_url=firefly URL, folder="/content/dam/compass-generated", file_name="descriptive-name.jpg"), then use the returned DAM path in patch_aem_page_content. JCR hero_image requires a DAM reference.
 4. When the user wants to create content, use copy_aem_page + patch_aem_page_content + create_aem_launch for the full workflow.
 5. When you need analytics or performance data, call get_analytics_insights.
