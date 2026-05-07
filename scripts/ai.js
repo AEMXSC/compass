@@ -1911,7 +1911,7 @@ function mcpError(toolName, err) {
  * Firefly REST API fallback — used when Firefly MCP token lacks Firefly API scopes.
  * Calls firefly-api.adobe.io directly with the user's IMS token.
  */
-async function callFireflyApi(prompt, { width = 1344, height = 768, numImages = 1 } = {}) {
+async function callFireflyApi(prompt, { width = 1344, height = 768, numImages = 1, model = 'firefly-image-3' } = {}) {
   // Prefer the Firefly-specific token (from Dev Console → Generate access token)
   // Fall back to the user's IMS session token
   const token = localStorage.getItem('ew-s2s-token') || getToken();
@@ -1931,6 +1931,7 @@ async function callFireflyApi(prompt, { width = 1344, height = 768, numImages = 
       numVariations: numImages,
       prompt,
       size: { width, height },
+      model,
     }),
   });
 
@@ -3134,7 +3135,7 @@ export async function executeTool(name, input) {
       try {
         const mcpResult = await fireflyMcp.callTool('firefly_generate_image', {
           prompt: input.prompt,
-          ...(input.model && { model: input.model }),
+          model: input.model || 'firefly-image-3',
           ...(input.width && { width: input.width }),
           ...(input.height && { height: input.height }),
           numImages: input.numImages || input.count || 1,
@@ -3178,7 +3179,7 @@ export async function executeTool(name, input) {
           ...(input.height && { height: input.height }),
           numImages: input.numImages || 1,
         });
-        if (mcpResult?.error && /token|auth|oauth/i.test(mcpResult.error)) {
+        if (mcpResult?.error && /\btoken\b|oauth/i.test(mcpResult.error)) {
           // image-to-image not in REST API v3 — return the error clearly
           return JSON.stringify({ error: 'Image editing requires Firefly MCP auth. Generate from prompt works via REST fallback.', _source: 'error' });
         }
