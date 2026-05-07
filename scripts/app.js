@@ -1162,7 +1162,9 @@ const TOOL_RENDERERS = {
 
   /* ─ Content Optimization Agent: Firefly Variations ─ */
   generate_image_variations(result) {
-    const variations = result.variations;
+    // Support MCP response shape (images[].imageUrl) and legacy REST shape (variations[].delivery_url)
+    const variations = result.variations
+      || (result.images || []).map((img) => ({ delivery_url: img.imageUrl, thumbnail_url: img.imageUrl }));
     if (!variations?.length) return null;
     const cards = variations.map((v, i) => {
       const thumbUrl = v.thumbnail_url || v.delivery_url || '';
