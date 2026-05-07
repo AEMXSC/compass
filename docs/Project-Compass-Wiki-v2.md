@@ -107,7 +107,7 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 
 ### MCP Integrations
 
-25 MCP clients are wired in `scripts/mcp-client.js`, all using the user's IMS token. External MCPs (gateway, RT-CDP, AEP, Target, Express, AJO) route through the Cloudflare Worker BFF for CORS handling and product header injection.
+26 MCP clients are wired in `scripts/mcp-client.js`. Adobe MCPs use the user's IMS token. External MCPs route through the Cloudflare Worker BFF for CORS handling and product header injection. Workfront uses apiKey header auth (injected by the worker from a stored secret — no IMS token required).
 
 **AEM Cloud MCPs** (`mcp.adobeaemcloud.com`)
 
@@ -143,6 +143,12 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 | Sites Optimizer | `m-mcp-demo.adobe.io/mcp` | **Working** | SEO, performance audits, AI Content Visibility Checker (scores how well AI agents can read + cite page content) |
 | Spacecat | `spacecat.experiencecloud.live/api/v1/mcp` | **Session Ready** | Site audits |
 
+**Work Management MCPs** (apiKey auth — injected by Worker, no IMS required)
+
+| MCP Server | Endpoint | Status | Capabilities |
+|---|---|---|---|
+| Workfront | `aemshowcase2.my.workfront.adobe.com/mcp-api/mcp` | **Working** | 21 tools: get/create/update projects, tasks, issues; search; field name resolver; convert issue to project |
+
 ---
 
 ## What Works Today (Demo-Ready)
@@ -157,7 +163,8 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 | Generative page creation | **Working** | Experience Production Agent, ~30s async |
 | Analytics Q&A | **Working** | AA/CJA tools lazy-loaded on first analytics question; AA tool sequence: findCompanies → findReportSuites → setSessionDefaults → runReport |
 | AI Content Visibility | **Working** | Sites Optimizer MCP scores how well AI agents can read + cite page content (LLMO readiness) |
-| Cross-product tool execution | **Working** | 25 MCP servers via single IMS sign-in |
+| Workfront integration | **Working** | Pull tasks, projects, and briefs from Workfront to inform content creation; apiKey auth via worker secret |
+| Cross-product tool execution | **Working** | 26 MCP servers — IMS sign-in covers all Adobe MCPs; Workfront uses stored apiKey |
 | Customer-specific context | **Working** | Per-account system prompt + vertical demo flows |
 
 ---
@@ -259,7 +266,6 @@ AI is the layer everyone sells. Governance is the layer nobody wants to rebuild.
 - [ ] UE side panel extension (requires App Builder or UE extension framework)
 - [ ] First-party Adobe hosting (eliminates CORS and auth complexity)
 - [ ] Native MCP client registration (no OAuth workarounds needed)
-- [ ] Integration with Workfront for approval workflows
 - [ ] Reference implementation / starter kit for enterprise BYO orchestration customers
 
 ---
@@ -310,4 +316,4 @@ AI is the layer everyone sells. Governance is the layer nobody wants to rebuild.
 ---
 
 *Accurate as of: May 6, 2026*
-*Based on: production codebase + verified testing session*
+*Based on: production codebase + verified testing session (Workfront MCP: 21 tools confirmed live)*
