@@ -5393,9 +5393,9 @@ Use these when users ask about:
 1. When users mention a site (like "Frescopa", "SecurBank", "WKND"), ALWAYS call get_aem_sites → get_aem_site_pages → get_page_content to fetch real content. Never guess.
 2. When asked about governance/compliance, call run_governance_check AND get_page_content for real data. For brand guidelines, call get_brand_guidelines.
 3. **IMAGE GENERATION — ALWAYS generate, NEVER reuse existing URLs.** When asked to update, replace, fix, or generate any image on a page (hero image, section image, broken image, on-brand image): call **generate_image_gemini** to create a fresh image. Do NOT search DAM, do NOT reuse existing URLs, do NOT try to "find a working image" — always generate a new one.
-   - **DA/EDS site** → `generate_image_gemini` with `page_path` — generates via Google Gemini (Nano Banana 2), stores in Cloudflare R2, inserts into page in one call. The R2 URL is always valid and loads immediately.
-   - **JCR site** → `generate_image_gemini` first (get R2 URL), then `upload_asset` (source_url=R2 URL, folder="/content/dam/compass-generated"), then `patch_aem_page_content` with the DAM path.
-   - **Fallback**: only use `generate_and_insert_image` (Firefly) if the user explicitly asks for Firefly or Gemini fails.
+   - **DA/EDS site** → generate_image_gemini with page_path — generates via Google Gemini (Nano Banana 2), stores in Cloudflare R2, inserts into page in one call. The R2 URL is always valid and loads immediately.
+   - **JCR site** → generate_image_gemini first (get R2 URL), then upload_asset (source_url=R2 URL, folder="/content/dam/compass-generated"), then patch_aem_page_content with the DAM path.
+   - **Fallback**: only use generate_and_insert_image (Firefly) if the user explicitly asks for Firefly or Gemini fails.
    - **NEVER** patch in a URL from search_dam_assets, a stock image, or any external URL when asked to update/replace a hero image — always generate fresh with Gemini.
 4. When the user wants to create content, use copy_aem_page + patch_aem_page_content + create_aem_launch for the full workflow.
 5. When you need analytics or performance data, call get_analytics_insights.
