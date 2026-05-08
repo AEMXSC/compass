@@ -2469,6 +2469,29 @@ export async function executeTool(name, input) {
 
     case 'edit_page_content': {
       const pagePath = sanitizePath(input.page_path);
+
+      // IMAGE SRC GUARDRAIL — intercept attempts to swap image src via find/replace or html
+      // generate_image_gemini must handle ALL image changes; invented URLs always break
+      {
+        const find = input.find || '';
+        const replace = input.replace || '';
+        const html = input.html || '';
+        // detect: find targets an img element or src attribute
+        const findTargetsImg = /src\s*=|<img\b/i.test(find) || /\.(jpg|jpeg|png|webp|gif|svg|avif)/i.test(find);
+        // detect: replace contains a URL (any URL as a replacement for an img is suspect)
+        const replaceIsUrl = /^https?:\/\//i.test(replace.trim()) || /^\/content\/dam\//i.test(replace.trim());
+        // detect: html mode with an invented external image URL (not R2)
+        const htmlHasExternalImg = !find && html && /src=["'][^"']*https?:\/\/(?!pub-)[^"']*\.(jpg|jpeg|png|webp|gif|svg|avif)/i.test(html);
+        if ((findTargetsImg && replaceIsUrl) || htmlHasExternalImg) {
+          return JSON.stringify({
+            error: 'IMAGE_ROUTING_ERROR',
+            message: 'edit_page_content cannot set image src. Call generate_image_gemini with prompt and page_path="' + pagePath + '" — it generates a fresh image and inserts it in one call. Invented URLs always produce broken images.',
+            required_tool: 'generate_image_gemini',
+            required_args: { page_path: pagePath },
+          });
+        }
+      }
+
       // Root path needs /index.html for DA write, but pagePath stays / for preview URLs
       const htmlPath = (pagePath === '/' ? '/index' : pagePath) + '.html';
       const org = da.getOrg();
