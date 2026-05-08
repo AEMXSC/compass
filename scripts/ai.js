@@ -3510,14 +3510,23 @@ export async function executeTool(name, input) {
         });
         const result = await resp.json();
         if (result.error) return JSON.stringify({ error: result.error, _source: 'error' });
+
+        // Cache full result for the Google Search card renderer in app.js
+        // The card reads window._lastGeminiSearch so Claude gets a compact summary
+        window._lastGeminiSearch = { ...result, query: input.query };
+
+        // Return compact result to Claude — prevents the brain from processing
+        // a 1500-word essay and cuts the follow-up messages call by ~60%
+        const answerPreview = result.answer
+          ? result.answer.slice(0, 500) + (result.answer.length > 500 ? '…' : '')
+          : '';
         return JSON.stringify({
-          answer: result.answer,
-          sources: result.sources,
+          answer: answerPreview,
+          sources: (result.sources || []).slice(0, 4).map((s) => s.title),
           searchQueries: result.searchQueries,
-          model: result.model,
-          provider: result.provider,
+          provider: 'gemini',
           _source: 'gemini_search',
-        }, null, 2);
+        });
       } catch (err) {
         return mcpError('gemini_search', err);
       }

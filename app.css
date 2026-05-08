@@ -2952,6 +2952,176 @@ textarea:focus-visible,
   font-weight: 500;
 }
 
+/* ─── Google Search Card ─── */
+.gsearch-card {
+  border-color: rgba(66, 133, 244, 0.25);
+  background: linear-gradient(135deg, rgba(66,133,244,0.04) 0%, var(--bg-card) 40%);
+}
+
+.gsearch-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.gsearch-logo { display: flex; align-items: center; flex-shrink: 0; }
+
+.gsearch-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #4285F4;
+  flex-shrink: 0;
+}
+
+.gsearch-query-chip {
+  background: rgba(66,133,244,0.12);
+  color: #4285F4;
+  border-radius: 20px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.gsearch-answer {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.gsearch-sources { margin-bottom: 10px; }
+
+.gsearch-sources-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.gsearch-source-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  text-decoration: none;
+  margin-bottom: 4px;
+  transition: background .15s;
+}
+.gsearch-source-chip:hover { background: rgba(66,133,244,0.08); border-color: rgba(66,133,244,0.3); }
+
+.gsearch-source-title {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.gsearch-source-domain {
+  font-size: 10px;
+  color: #34A853;
+  flex-shrink: 0;
+}
+
+.gsearch-footer {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.gsearch-powered {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: .7;
+}
+
+/* ─── Gemini Image Card ─── */
+.gemini-image-card {
+  border-color: rgba(234, 67, 53, 0.2);
+  background: linear-gradient(135deg, rgba(234,67,53,0.03) 0%, var(--bg-card) 40%);
+}
+
+.gemini-image-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.gemini-image-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #EA4335;
+  flex: 1;
+}
+
+.gemini-image-model {
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.gemini-img-wrap {
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  background: var(--bg-secondary);
+  max-height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gemini-img-wrap img {
+  width: 100%;
+  height: auto;
+  max-height: 320px;
+  object-fit: cover;
+  display: block;
+}
+
+.gemini-img-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.gemini-img-action-btn {
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background .15s;
+}
+.gemini-img-action-btn:hover { background: rgba(234,67,53,0.08); border-color: rgba(234,67,53,0.3); }
+
 /* ─── Governance Scorecard ─── */
 .gov-card {
   text-align: center;
