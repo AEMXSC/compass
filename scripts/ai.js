@@ -1819,6 +1819,8 @@ const TIER1_CORE = new Set([
   // Content editing (the 90% case)
   'edit_page_content', 'get_page_content', 'list_site_pages', 'preview_page', 'publish_page',
   'copy_aem_page', 'create_aem_page', 'delete_page', 'patch_aem_page_content',
+  // Image generation — always available so brain never falls back to URL patching
+  'generate_image_gemini',
   // AEM MCP direct
   'aem_read', 'aem_write', 'aem_list_environments',
   // Site management
