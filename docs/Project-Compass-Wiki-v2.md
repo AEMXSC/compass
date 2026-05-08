@@ -72,6 +72,10 @@ Neither need is served by what exists today. Compass addresses both.
 | Author page preview | Requires browser tab switch | Inline preview via headless Chrome rendering |
 | DA + JCR unified | Separate tools | Single interface for both authoring backends |
 | BYO orchestration pattern | Not demonstrable | Live working example — MCP + A2A + custom harness |
+| Real-time web search | None | Google Search grounding via Gemini — live trends, competitors, benchmarks, post-cutoff data |
+| Image generation providers | Firefly only | Firefly (Adobe 1P) + Google Gemini (gemini-2.5-flash-image) — both return R2-hosted URLs for EDS insertion |
+| Multi-model AI strategy | Single model | Claude (reasoning + orchestration) + Gemini (search + image gen) — each model used where it excels |
+| Compound tool execution | N/A | generate_and_insert_image: Firefly gen + DA page write in one call — no extra LLM round-trip |
 
 ---
 
@@ -84,10 +88,13 @@ Neither need is served by what exists today. Compass addresses both.
 | UI | Vanilla JS web app on AEM Edge Delivery Services | `compass.aemxsc.com` / `eds-migration--compass--aemxsc.aem.page` |
 | Auth | imslib + `aem-extension-builder` IMS client | Single IMS sign-in covers all 25 MCP servers — no per-product Connect flow |
 | Service Auth | S2S via Cloudflare Worker | Read-only AEM access, JCR page rendering |
-| AI Engine | Claude API (Sonnet) | Reasoning, tool selection, content generation |
+| AI Engine | Claude API (Sonnet) | Reasoning, tool selection, content generation — primary brain |
+| Image Generation | Google Gemini (`gemini-2.5-flash-image`) via Worker | Photorealistic image gen; output stored in R2, served as public URL |
+| Grounded Search | Google Gemini (`gemini-2.5-flash`) + Google Search tool via Worker | Real-time web search with cited sources; triggered by trend/research prompts |
+| Image Storage | Cloudflare R2 (`compass-images` bucket) | Stores all Gemini-generated images; served via Worker `/img/:key` |
 | MCP Connectivity | All external MCPs routed through Cloudflare Worker BFF | CORS handling, product header injection, allowlist security |
 | Preview | Cloudflare Worker + Browser Rendering API | Headless Chrome renders authenticated AEM author pages |
-| Proxy | Cloudflare Worker (`compass-ims-proxy`) | Auth gateway, MCP session management, page rendering, MCP proxy |
+| Proxy | Cloudflare Worker (`compass-ims-proxy`) | Auth gateway, MCP session management, page rendering, MCP proxy, Gemini API proxy |
 
 ### How It Works
 
@@ -149,6 +156,24 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 |---|---|---|---|
 | Workfront | `aemshowcase2.my.workfront.adobe.com/mcp-api/mcp` | **Working** | 21 tools: get/create/update projects, tasks, issues; search; field name resolver; convert issue to project |
 
+**3P Integrations** (Google — direct API via Cloudflare Worker, no MCP)
+
+These are non-Adobe integrations wired directly into the Compass Cloudflare Worker (`compass-ims-proxy`). They bypass MCP entirely — the Worker calls Google APIs server-side, secrets never touch the browser, and responses are returned to the brain as structured JSON.
+
+| Integration | Worker Endpoint | Model | Status | Capabilities |
+|---|---|---|---|---|
+| **Gemini Grounded Search** | `POST /gemini-search` | `gemini-2.5-flash` + Google Search tool | **Working** | Real-time web search with Google Search grounding. Returns synthesized answer + cited sources + search queries used. Use for: current trends, competitor analysis, recent news, industry benchmarks, anything past training cutoff. |
+| **Gemini Image Generation** | `POST /gemini-image` | `gemini-2.5-flash-image` | **Working** | Generates images, stores in Cloudflare R2, returns public URL. Bypasses Firefly 3P entitlement entirely. Use for: photorealistic scenes, lifestyle imagery, text rendered inside images. |
+| **R2 Image Hosting** | `GET /img/:key` | Cloudflare R2 | **Working** | Serves generated images with correct Content-Type + 24h cache. All Gemini-generated images are persisted here and the URL is usable directly in EDS `<img src>`. |
+
+**Secrets required** (set via `npx wrangler secret put` in `worker/`):
+- `GEMINI_API_KEY` — Google AI Studio API key with billing enabled (postpaid or prepaid credits)
+
+**Model selection notes:**
+- `gemini-2.0-flash` and `gemini-2.0-flash-001` are deprecated for new API keys — use `gemini-2.5-flash` for text/search and `gemini-2.5-flash-image` for image gen
+- Run `GET /gemini-models` (CORS-protected) to enumerate available models for a given key
+- Image gen uses `responseModalities: ['IMAGE', 'TEXT']` — `gemini-2.5-flash` is text-only output and will return 400 if used for images
+
 ---
 
 ## What Works Today (Demo-Ready)
@@ -166,6 +191,10 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 | Workfront integration | **Working** | Pull tasks, projects, and briefs from Workfront to inform content creation; apiKey auth via worker secret |
 | Cross-product tool execution | **Working** | 26 MCP servers — IMS sign-in covers all Adobe MCPs; Workfront uses stored apiKey |
 | Customer-specific context | **Working** | Per-account system prompt + vertical demo flows |
+| Firefly image gen + page insert | **Working** | `generate_and_insert_image` — compound tool runs Firefly gen + DA page write in parallel. No extra LLM round-trip. Brain calls this by default for page updates. |
+| Gemini image generation | **Working** | `generate_image_gemini` — `gemini-2.5-flash-image` via Worker → R2 → public URL. Bypasses Firefly 3P entitlement. Use for photorealistic/lifestyle imagery. |
+| Gemini grounded search | **Working** | `gemini_search` — real-time Google Search via `gemini-2.5-flash`. Returns synthesized answer + cited sources. Triggers automatically on prompts containing: "trends", "current", "latest", "competitor", "2025", "search", etc. |
+| Multi-provider image routing | **Working** | Brain selects Firefly vs. Gemini based on prompt context. Force Gemini by saying "use Gemini to generate…". Firefly is default for brand-consistent creative; Gemini for photorealistic/real-world. |
 
 ---
 
@@ -315,5 +344,5 @@ AI is the layer everyone sells. Governance is the layer nobody wants to rebuild.
 
 ---
 
-*Accurate as of: May 6, 2026*
-*Based on: production codebase + verified testing session (Workfront MCP: 21 tools confirmed live)*
+*Accurate as of: May 8, 2026*
+*Based on: production codebase + verified testing session (Workfront MCP: 21 tools confirmed live; Gemini search + image gen: both endpoints verified against live Worker)*
