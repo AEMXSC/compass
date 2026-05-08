@@ -76,6 +76,7 @@ Neither need is served by what exists today. Compass addresses both.
 | Image generation providers | Firefly only | Google Gemini Nano Banana 2 (default) + Firefly (fallback) — both return public URLs for EDS insertion |
 | Multi-model AI strategy | Single model | Claude (reasoning + orchestration) + Gemini (search + image gen) — each model used where it excels |
 | Compound tool execution | N/A | generate_image_gemini: Nano Banana 2 gen + DA page write in one call — no Firefly entitlement needed |
+| Site optimization orchestration | Separate products | Spacecat audit → brain surfaces findings → EPA auto-implements fixes (alt text, meta, structured data, content) — one conversation end-to-end |
 
 ---
 
@@ -104,7 +105,7 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
   -> Compass detects site type (DA-backed EDS or AEM Cloud Service)
   -> For DA: loads .aem.page preview directly
   -> For JCR: renders author page via headless Chrome with S2S Bearer auth
-  -> MCP sessions initialize (Content, Governance, DA, etc.)
+  -> MCP sessions initialize (DA, Discovery, Firefly, ContentGen, ContentQA, SitesOptimizer, Spacecat pre-warmed; others lazy on first use)
   -> Page components pre-fetched in background (enables 1-round edits)
   -> User types a request
   -> If analytics query: AA/CJA tools lazy-loaded on first use
@@ -131,8 +132,8 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 | Cloud Manager (Odin) | `.../odin/prod` | **Session Ready** | Programs, environments, pipelines |
 | Firefly | `.../loki/firefly` | **Working** | 4 tools: text-to-image + image-to-image. Models: nano-banana-pro (default/Gemini 3), nano-banana, imagen-4, imagen-3, flux-pro, flux-ultra, ideogram, gpt-image, runway, firefly-image-3/4/4-ultra. Auth: `ew-s2s-token` via CF Worker `/auth`. |
 | AJO | `.../loki/ajo` | **Session Ready** | Journey orchestration |
-| Content QA Agent | `.../loki/content-qa` | **Session Ready** | Content quality validation |
-| Content Gen Skills | `.../loki/skills` | **Session Ready** | AI writing with brand voice |
+| Content QA Agent | `.../loki/content-qa` | **Pre-warmed on load** | Content quality validation |
+| Content Gen Skills | `.../loki/skills` | **Pre-warmed on load** | AI writing with brand voice |
 | Acrobat | `.../acrobat` | **Session Ready** | PDF operations |
 
 **Experience Cloud MCPs** (via Worker BFF → external gateway)
@@ -147,8 +148,8 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 | AJO Prod | `ajo-mcp.adobe.io/mcp` | **Session Ready** | Journey orchestration (standalone host) |
 | Adobe Express | `express-mcp-service.adobe.io/mcp` | **Session Ready** | Design operations |
 | Marketing Agent | `aep-ai-ama-stage.adobe.io/mcp` | **Stage** | Marketing orchestration |
-| Sites Optimizer | `m-mcp-demo.adobe.io/mcp` | **Working** | SEO, performance audits, AI Content Visibility Checker (scores how well AI agents can read + cite page content) |
-| Spacecat | `spacecat.experiencecloud.live/api/v1/mcp` | **Session Ready** | Site audits |
+| Sites Optimizer | `m-mcp-demo.adobe.io/mcp` | **Pre-warmed on load** | SEO, performance audits, AI Content Visibility Checker (scores how well AI agents can read + cite page content) |
+| Spacecat | `spacecat.experiencecloud.live/api/v1/mcp` | **Pre-warmed on load** | Site audits — site lookup/resolution, opportunities (SEO/CWV/broken backlinks/structured data), Lighthouse scores, audit history. Analysis-only — pairs with EPA to implement fixes. |
 
 **Work Management MCPs** (apiKey auth — injected by Worker, no IMS required)
 
@@ -197,6 +198,7 @@ These are non-Adobe integrations wired directly into the Compass Cloudflare Work
 | Firefly image gen + page insert | **Working — Fallback** | `generate_and_insert_image` — Firefly gen + DA page write in one call. Used only when user explicitly requests Firefly or Gemini fails. |
 | Gemini grounded search | **Working** | `gemini_search` — real-time Google Search via `gemini-2.5-flash`. Returns synthesized answer + cited sources. Triggers automatically on prompts containing: "trends", "current", "latest", "competitor", "2025", "search", etc. |
 | Multi-provider image routing | **Working** | Nano Banana 2 (Gemini) is default. Brain falls back to Firefly only on explicit request or failure. Force Firefly by saying "use Firefly to generate…". |
+| Site optimization flow | **Working** | Two-phase: Spacecat diagnoses (get_site_opportunities / get_site_audit → broken backlinks, SEO gaps, missing structured data, CWV issues, alt text) → EPA implements fixes (edit_page_content, apply_alt_text, batch_aem_update). Brain surfaces top findings before executing. |
 
 ---
 

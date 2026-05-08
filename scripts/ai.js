@@ -1242,25 +1242,25 @@ const AEM_TOOLS = [
 
   {
     name: 'get_site_opportunities',
-    description: 'Sites Optimizer MCP (Spacecat) — Get optimization opportunities for an AEM Edge Delivery site. Returns prioritized recommendations for SEO, performance, accessibility, and content quality with estimated impact scores.',
+    description: 'AEM Sites Optimizer MCP (Spacecat) — Resolve a site and retrieve prioritized optimization opportunities. Use for: site lookup by domain (resolves siteId + metadata), SEO findings, Core Web Vitals issues, broken backlinks, missing/invalid structured data, missing alt text, sitemap issues, accessibility gaps. Each opportunity has an impact score (1-10) and effort level. NOT for page editing, content patching, publishing, or any authoring action — use AEM Content MCP for those.',
     input_schema: {
       type: 'object',
       properties: {
-        site_url: { type: 'string', description: 'Site base URL (e.g., "https://main--repo--org.aem.live")' },
-        category: { type: 'string', enum: ['all', 'seo', 'performance', 'accessibility', 'content', 'broken-backlinks'], description: 'Filter opportunities by category. Default: all.' },
-        priority: { type: 'string', enum: ['all', 'high', 'medium', 'low'], description: 'Filter by priority level. Default: all.' },
+        site_url: { type: 'string', description: 'Site domain or base URL (e.g., "https://www.frescopa.com" or "https://main--repo--org.aem.live"). Used to resolve siteId.' },
+        category: { type: 'string', enum: ['all', 'seo', 'performance', 'accessibility', 'content', 'broken-backlinks', 'structured-data'], description: 'Filter by opportunity category. Default: all.' },
+        priority: { type: 'string', enum: ['all', 'high', 'medium', 'low'], description: 'Filter by priority. Default: all.' },
       },
       required: ['site_url'],
     },
   },
   {
     name: 'get_site_audit',
-    description: 'Sites Optimizer MCP (Spacecat) — Run or retrieve the latest site audit for an AEM Edge Delivery site. Returns scores for Lighthouse performance, SEO, accessibility, best practices, plus broken backlinks, 404s, redirect chains, and CWV metrics.',
+    description: 'AEM Sites Optimizer MCP (Spacecat) — Run or retrieve the latest site audit. Returns: Lighthouse scores (perf/a11y/best-practices/seo), Core Web Vitals (LCP/INP/CLS), broken backlinks with domain authority, 404s, redirect chains, structured-data validation, and scraper/optimization context. Use to answer "what\'s wrong with this site?", "what does ASO know about this domain?", "what audits are enabled?". NOT for page editing or content mutations.',
     input_schema: {
       type: 'object',
       properties: {
-        site_url: { type: 'string', description: 'Site base URL to audit' },
-        audit_type: { type: 'string', enum: ['full', 'lighthouse', 'broken-backlinks', 'cwv', '404'], description: 'Type of audit to run. Default: full.' },
+        site_url: { type: 'string', description: 'Site domain or base URL to audit' },
+        audit_type: { type: 'string', enum: ['full', 'lighthouse', 'broken-backlinks', 'cwv', '404', 'structured-data'], description: 'Type of audit. Default: full.' },
         include_page_details: { type: 'boolean', description: 'Include per-page breakdown (can be verbose). Default: false.' },
       },
       required: ['site_url'],
@@ -5361,15 +5361,20 @@ Use these when users ask about:
 - "What features shipped in AEP last month?" → get_product_release_notes with product=aep
 
 ### AEM Sites Optimizer MCP / Spacecat (site audits, SEO, CWV — spacecat.experiencecloud.live/api/v1/mcp)
-These tools connect to the Spacecat / AEM Sites Optimizer platform for site health monitoring, SEO audits, and optimization recommendations.
-- **get_site_opportunities** — Prioritized optimization opportunities: SEO, performance, accessibility, content quality, broken backlinks. Each opportunity has an impact score (1-10) and effort level.
-- **get_site_audit** — Full site audit: Lighthouse scores (perf/a11y/best-practices/seo), Core Web Vitals (LCP/FID/CLS/INP), broken backlinks with domain authority, 404s, redirect chains.
+Spacecat is the data/audit backbone for AEM Sites Optimizer. Use it for site health monitoring, SEO audits, CWV metrics, and optimization recommendations. **NOT for content authoring** — use AEM Content MCP for page edits, component patches, and publishing.
 
-Use these when users ask about:
-- "How's my site performing?" → get_site_audit
+- **get_site_opportunities** — Resolve a site by domain (returns siteId + metadata), then list prioritized optimization opportunities: SEO, broken backlinks, missing structured data, missing alt text, CWV issues, sitemap problems, accessibility. Impact score (1-10) + effort level per item.
+- **get_site_audit** — Latest audit results: Lighthouse scores, Core Web Vitals (LCP/INP/CLS), broken backlinks, 404s, redirect chains, structured-data validation, scraper/optimization context.
+
+**Use these when users ask:**
+- "What is the siteId for example.com?" / "Find this site in Sites Optimizer" → get_site_opportunities (site lookup)
+- "How's my site performing?" / "Run a Lighthouse check" → get_site_audit
 - "What should I fix first?" → get_site_opportunities with priority=high
 - "Any broken backlinks?" → get_site_audit with audit_type=broken-backlinks or get_site_opportunities with category=broken-backlinks
-- "Run a Lighthouse check" → get_site_audit with audit_type=lighthouse
+- "Check my structured data / schema markup" → get_site_audit with audit_type=structured-data
+- "What does Sites Optimizer know about this domain?" → get_site_audit (full context)
+
+**Do NOT use for:** editing page content, patching components, publishing, DAM operations, content fragment updates → those belong in AEM Content MCP or DA flows.
 
 ### AEP Destinations MCP (destination health & activation — read-only MVP)
 These tools connect to the AEP Destinations MCP Server (Spring AI / Java 21, HTTP + SSE transport, aep-destinations-mcp.adobe.io/mcp).
@@ -5387,9 +5392,9 @@ Use these when users ask about:
 **CRITICAL RULES**:
 1. When users mention a site (like "Frescopa", "SecurBank", "WKND"), ALWAYS call get_aem_sites → get_aem_site_pages → get_page_content to fetch real content. Never guess.
 2. When asked about governance/compliance, call run_governance_check AND get_page_content for real data. For brand guidelines, call get_brand_guidelines.
-3. When asked about assets/images, call search_dam_assets. For generating new images on a DA/EDS page, **always use generate_and_insert_image** — it generates the Firefly image and inserts it in one call (no extra round-trip). Only use generate_image_variations when you need the URL without immediately placing it. **IMPORTANT — always place generated images on the page immediately, never just return URLs**:
-   - **DA/EDS site** → use generate_and_insert_image (preferred) or the Firefly URL directly as an img src inside edit_page_content HTML. No DAM upload needed — EDS renders any public URL.
-   - **JCR site** → call upload_asset first (source_url=firefly URL, folder="/content/dam/compass-generated", file_name="descriptive-name.jpg"), then use the returned DAM path in patch_aem_page_content. JCR hero_image requires a DAM reference.
+3. When asked about assets/images, call search_dam_assets. For generating new images on a DA/EDS page, **always use generate_image_gemini first** — it generates a Google Gemini (Nano Banana 2) image and can insert it into the page in one call if page_path is provided. **IMPORTANT — always place generated images on the page immediately, never just return URLs**:
+   - **DA/EDS site** → use **generate_image_gemini** (DEFAULT — Google Gemini, Cloudflare R2 URL). Only fall back to generate_and_insert_image if the user explicitly asks for Firefly or Gemini image gen fails.
+   - **JCR site** → call upload_asset first (source_url=gemini image URL, folder="/content/dam/compass-generated", file_name="descriptive-name.jpg"), then use the returned DAM path in patch_aem_page_content. JCR hero_image requires a DAM reference.
 4. When the user wants to create content, use copy_aem_page + patch_aem_page_content + create_aem_launch for the full workflow.
 5. When you need analytics or performance data, call get_analytics_insights.
 6. For audience/segment questions, call get_audience_segments. For individual profile lookup, call get_customer_profile.
@@ -5412,8 +5417,12 @@ Use these when users ask about:
 19. **PARALLEL TOOL CALLS**: When you need multiple independent pieces of information, request all tools in a SINGLE response. The system executes them in parallel. Example: if you need both get_page_content AND search_dam_assets, return both tool_use blocks together — they'll run simultaneously instead of sequentially.
 20. **MINIMIZE TOOL CALLS**: Aim for 1 tool call for edits, 1-2 for page creation. The fastest edit is: read context → modify HTML → call edit_page_content. No list, no search, no extra reads.
 21. For documentation questions ("how do I...", "what is...", "show me docs on..."), call search_experience_league. For release notes ("what's new", "latest features"), call get_product_release_notes.
-22. For site health, performance, or SEO questions, call get_site_audit for scores and get_site_opportunities for recommendations. Use Spacecat tools BEFORE giving optimization advice.
-23. When users mention broken backlinks, 404s, or redirect chains, call get_site_audit with audit_type=broken-backlinks or get_site_opportunities with category=broken-backlinks.
+22. **SITE OPTIMIZATION FLOW — two phases, always in order**:
+  - **Phase 1 — Diagnose (Spacecat)**: For "what's wrong?", "how's performance?", "fix my SEO", "broken backlinks", "structured data issues", "CWV" → call get_site_audit and/or get_site_opportunities FIRST. These tools are read-only analysis — they identify what needs fixing.
+  - **Phase 2 — Fix (Experience Production Agent)**: After you have the audit findings, use EPA tools to implement fixes: edit_page_content (DA/EDS pages), patch_aem_page_content (JCR), edit_aem_metadata (metadata fixes), suggest_alt_text → apply_alt_text (alt text), batch_aem_update (bulk fixes). Present the top opportunities to the user, then apply the fixes.
+  - **Full example**: "Optimize my site" → get_site_opportunities(priority=high) → surface top 3 findings → edit_page_content to fix missing H1/meta description → apply_alt_text for missing alt text → edit_page_content to add structured data JSON-LD → confirm with user.
+  - Never give optimization advice without first calling Spacecat. Never use Spacecat to make edits.
+23. When users mention broken backlinks, 404s, redirect chains, or missing structured data → get_site_audit with the relevant audit_type or get_site_opportunities with the matching category. Then fix via EPA tools.
 24. **DA version management**: Before any destructive DA edit (bulk replace, restructure, delete), call da_create_version first to save a restore point. After a version is saved, proceed with the edit.
 25. **DA media upload**: To upload an image into DA (e.g. a Firefly-generated image or external URL), call da_upload_media with the source URL. Returns a DA media path you can reference in page HTML.
 26. **DA media/fragment lookup**: To find an existing image or media file in DA by name, call da_lookup_media. To find a content fragment by name or path, call da_lookup_fragment. Use these BEFORE uploading to avoid duplicates.
