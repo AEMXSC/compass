@@ -156,6 +156,9 @@ async function route(request, env) {
   if (url.pathname === '/gemini-image' && request.method === 'POST') {
     return handleGeminiImage(request, env);
   }
+  if (url.pathname === '/gemini-search' && request.method === 'POST') {
+    return handleGeminiSearch(request, env);
+  }
   if (url.pathname.startsWith('/img/') && request.method === 'GET') {
     return handleImageServe(request, env);
   }
@@ -1349,6 +1352,78 @@ async function handleGeminiImage(request, env) {
     mimeType: imageData.mimeType,
     text,
     model: 'gemini-2.0-flash-preview-image-generation',
+    provider: 'gemini',
+  }), {
+    headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+  });
+}
+
+/* ─── POST /gemini-search — Grounded search via Gemini + Google Search tool ─── */
+
+async function handleGeminiSearch(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+  if (!env.GEMINI_API_KEY) {
+    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY not configured' }), {
+      status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+
+  let query, context;
+  try {
+    ({ query, context } = await request.json());
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+      status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+  if (!query) {
+    return new Response(JSON.stringify({ error: 'Missing query' }), {
+      status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+
+  const prompt = context ? `Context: ${context}\n\nSearch query: ${query}` : query;
+
+  const geminiResp = await fetch(
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': env.GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+      }),
+    },
+  );
+
+  if (!geminiResp.ok) {
+    const errText = await geminiResp.text();
+    return new Response(JSON.stringify({ error: `Gemini ${geminiResp.status}`, detail: errText }), {
+      status: 502, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+
+  const result = await geminiResp.json();
+  const candidate = result.candidates?.[0];
+  const answer = candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('') || '';
+  const groundingMeta = candidate?.groundingMetadata || {};
+  const sources = (groundingMeta.groundingChunks || [])
+    .map((c) => c.web)
+    .filter(Boolean)
+    .map((w) => ({ title: w.title, uri: w.uri }));
+  const searchQueries = groundingMeta.webSearchQueries || [];
+
+  return new Response(JSON.stringify({
+    answer,
+    sources,
+    searchQueries,
+    model: 'gemini-2.0-flash',
     provider: 'gemini',
   }), {
     headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },

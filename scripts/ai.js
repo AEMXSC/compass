@@ -851,6 +851,19 @@ const AEM_TOOLS = [
     },
   },
 
+  {
+    name: 'gemini_search',
+    description: 'Gemini Grounded Search — Real-time web search powered by Google Search + Gemini synthesis. Use when you need current information: trending topics, competitor analysis, recent news, industry benchmarks, or any query that requires data beyond your training cutoff. Returns a synthesized answer with cited sources. Ideal for: campaign research, trend analysis, competitive landscape, keyword research, and fact-checking live data.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The search query. Be specific — treat this like a Google Search query. Examples: "summer 2025 healthcare marketing trends", "Adobe Experience Manager vs Contentful pricing", "CTA button copy best practices 2025".' },
+        context: { type: 'string', description: 'Optional framing context to help Gemini interpret the results — e.g., "We\'re building a landing page for healthcare professionals" or "This is for a B2B SaaS campaign targeting mid-market."' },
+      },
+      required: ['query'],
+    },
+  },
+
   /* ─── Development Agent (Cloud Manager) ─── */
 
   {
@@ -1695,6 +1708,7 @@ export const TOOL_AGENT_MAP = {
   edit_image_with_firefly: 'Content Optimization Agent',
   generate_and_insert_image: 'Experience Production Agent',
   generate_image_gemini: 'Experience Production Agent',
+  gemini_search: 'Discovery Agent',
   transform_image: 'Content Optimization Agent',
   create_image_renditions: 'Content Optimization Agent',
 
@@ -1821,6 +1835,7 @@ const TIER2_KEYWORDS = {
   workfront: ['create_workfront_task', 'list_workfront_projects', 'get_workfront_project', 'list_workfront_tasks', 'update_workfront_task', 'list_workfront_approvals', 'ask_workfront', 'get_project_health', 'check_workfront_connection'],
   assets: ['search_dam_assets', 'browse_dam_folder', 'get_asset_metadata', 'update_asset_metadata', 'upload_asset', 'delete_asset', 'move_asset', 'copy_asset', 'create_dam_folder', 'get_asset_renditions', 'add_to_collection'],
   images: ['generate_and_insert_image', 'generate_image_gemini', 'generate_image_variations', 'edit_image_with_firefly', 'transform_image', 'create_image_renditions'],
+  research: ['gemini_search'],
   journey: ['create_journey', 'generate_journey_content', 'get_journey_status', 'analyze_journey_conflicts'],
   experiment: ['setup_experiment', 'get_experiment_status', 'analyze_experiment', 'create_ab_test', 'get_personalization_offers'],
   audience: ['explore_audiences', 'get_audience_segments', 'get_customer_profile'],
@@ -1851,6 +1866,7 @@ const INTENT_PATTERNS = {
   forms: /\b(form|input|submit|field|dropdown)/i,
   pdf: /\b(pdf|brief|document|extract)/i,
   admin: /\b(unpublish|purge|cache|bulk|reindex|status)/i,
+  research: /\b(search|research|trend|current|latest|news|competitor|benchmark|2025|today|recent|real.?time|google)/i,
 };
 
 function classifyIntent(prompt) {
@@ -3481,6 +3497,29 @@ export async function executeTool(name, input) {
         }, null, 2);
       } catch (err) {
         return mcpError('generate_image_gemini', err);
+      }
+    }
+
+    case 'gemini_search': {
+      try {
+        const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+        const resp = await fetch(`${workerBase}/gemini-search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: input.query, context: input.context }),
+        });
+        const result = await resp.json();
+        if (result.error) return JSON.stringify({ error: result.error, _source: 'error' });
+        return JSON.stringify({
+          answer: result.answer,
+          sources: result.sources,
+          searchQueries: result.searchQueries,
+          model: result.model,
+          provider: result.provider,
+          _source: 'gemini_search',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('gemini_search', err);
       }
     }
 
@@ -5263,6 +5302,10 @@ These tools write to the real Document Authoring API. The user must be signed in
 - **generate_image_gemini** — **Google Gemini (gemini-2.0-flash-preview-image-generation).** Use for: photorealistic scenes, text rendered inside images, lifestyle/real-world imagery. Also supports `page_path` for direct insertion. Hosted on Compass Worker — no 3P entitlement needed.
 - **generate_image_variations** — Firefly only, returns URL without inserting.
 - **edit_image_with_firefly** — Image-to-image transform with reference URL. 3P models only.
+
+### Real-Time Search (Gemini Grounded Search)
+
+- **gemini_search** — **Live web search via Google Search + Gemini synthesis.** Use whenever the user asks about current trends, recent news, competitors, benchmarks, or anything requiring data past your training cutoff. Returns a synthesized answer with cited sources. Examples: "What are the top summer 2025 healthcare marketing trends?", "How does Adobe compare to Contentful?", "Best CTA copy for financial services landing pages right now."
 
 #### Available Models
 | Model | Best for |
