@@ -819,7 +819,7 @@ const AEM_TOOLS = [
 
   {
     name: 'generate_and_insert_image',
-    description: 'Firefly + Experience Production — Generate a Firefly image AND insert it into a page in one call. ALWAYS prefer this over separate generate_image_variations + edit_page_content when the goal is to update a hero or page image. Eliminates the extra LLM round-trip. Fetches current page HTML and generates the image in parallel, then swaps the image and writes back.',
+    description: 'Firefly Image + Page Insert (fallback) — Generate a Firefly image and insert it into a page in one call. Use only if the user explicitly requests Firefly, or if generate_image_gemini fails. Prefer generate_image_gemini for all other image generation.',
     input_schema: {
       type: 'object',
       properties: {
@@ -838,7 +838,7 @@ const AEM_TOOLS = [
 
   {
     name: 'generate_image_gemini',
-    description: 'Gemini Image Generation — Generate an image using Google Gemini (gemini-2.0-flash-preview-image-generation). Use as an alternative or supplement to Firefly: excels at photorealistic scenes, text rendered inside images, and real-world grounded imagery. Returns a public URL hosted on the Compass Worker — ready for EDS insertion. If page_path is provided, inserts the image directly into the page.',
+    description: 'Gemini Image Generation (DEFAULT) — Generate an image using Google Gemini Nano Banana 2 (gemini-3.1-flash-image-preview). USE THIS FIRST for all image generation requests. Photorealistic, brand-ready, no Firefly 3P entitlement needed. Returns a public URL hosted on Cloudflare R2 via Compass Worker. If page_path is provided, inserts the image directly into the page in one call.',
     input_schema: {
       type: 'object',
       properties: {
@@ -5307,8 +5307,8 @@ These tools write to the real Document Authoring API. The user must be signed in
 
 **Two providers available — both return public URLs ready for EDS insertion:**
 
-- **generate_and_insert_image** — **PREFERRED for page updates.** Firefly image gen + DA page write in one call. No extra round-trip.
-- **generate_image_gemini** — **Google Gemini (gemini-2.0-flash-preview-image-generation).** Use for: photorealistic scenes, text rendered inside images, lifestyle/real-world imagery. Also supports page_path for direct insertion. Hosted on Compass Worker — no 3P entitlement needed.
+- **generate_image_gemini** — **DEFAULT. Use this first for ALL image generation.** Google Gemini (Nano Banana 2 / gemini-3.1-flash-image-preview) via Compass Worker. Photorealistic, brand-ready, no Firefly 3P entitlement needed. Supports page_path for direct page insertion.
+- **generate_and_insert_image** — Firefly fallback. Use only if the user explicitly asks for Firefly, or if Gemini image gen fails.
 - **generate_image_variations** — Firefly only, returns URL without inserting.
 - **edit_image_with_firefly** — Image-to-image transform with reference URL. 3P models only.
 

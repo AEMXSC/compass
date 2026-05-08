@@ -1303,7 +1303,7 @@ async function handleGeminiImage(request, env) {
   }
 
   const geminiResp = await fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent',
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent',
     {
       method: 'POST',
       headers: {
@@ -1451,7 +1451,7 @@ async function handleGeminiSearch(request, env) {
     answer,
     sources,
     searchQueries,
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.1-flash-image-preview',
     provider: 'gemini',
   }), {
     headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },

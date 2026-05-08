@@ -14,8 +14,8 @@
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
 import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken, initS2SToken } from './ims.js';
-import * as ai from './ai.js?v=104';
-import { TOOL_AGENT_MAP } from './ai.js?v=104';
+import * as ai from './ai.js?v=105';
+import { TOOL_AGENT_MAP } from './ai.js?v=105';
 import * as da from './da-client.js';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
@@ -1706,8 +1706,8 @@ const TOOL_RENDERERS = {
       <div class="result-card gemini-image-card">
         <div class="gemini-image-header">
           <span class="gsearch-logo">${googleG}</span>
-          <span class="gemini-image-title">Gemini Image Generation</span>
-          <span class="gemini-image-model">${escapeHtml(model)}</span>
+          <span class="gemini-image-title">Nano Banana 2</span>
+          <span class="gemini-image-model">${escapeHtml(model.replace('gemini-3.1-flash-image-preview', 'gemini-3.1-flash-image-preview'))}</span>
         </div>
         <div class="gemini-img-wrap">
           <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(prompt.slice(0, 80))}" loading="lazy">
