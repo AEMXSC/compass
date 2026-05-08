@@ -836,6 +836,21 @@ const AEM_TOOLS = [
     },
   },
 
+  {
+    name: 'generate_image_gemini',
+    description: 'Gemini Image Generation — Generate an image using Google Gemini (gemini-2.0-flash-preview-image-generation). Use as an alternative or supplement to Firefly: excels at photorealistic scenes, text rendered inside images, and real-world grounded imagery. Returns a public URL hosted on the Compass Worker — ready for EDS insertion. If page_path is provided, inserts the image directly into the page.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Narrative prose description. Full sentences with subject, setting, lighting, color palette, photography style. 200–800 chars ideal.' },
+        page_path: { type: 'string', description: 'Optional: DA page path to insert the image into (e.g. "/partner-with-us"). Skips the extra round-trip — generates and inserts in one call.' },
+        image_selector: { type: 'string', description: 'Which image to replace: "hero" (default), "first", or partial alt text hint.' },
+        alt_text: { type: 'string', description: 'Alt text for the inserted image. Defaults to first 80 chars of prompt.' },
+      },
+      required: ['prompt'],
+    },
+  },
+
   /* ─── Development Agent (Cloud Manager) ─── */
 
   {
@@ -1679,6 +1694,7 @@ export const TOOL_AGENT_MAP = {
   generate_image_variations: 'Content Optimization Agent',
   edit_image_with_firefly: 'Content Optimization Agent',
   generate_and_insert_image: 'Experience Production Agent',
+  generate_image_gemini: 'Experience Production Agent',
   transform_image: 'Content Optimization Agent',
   create_image_renditions: 'Content Optimization Agent',
 
@@ -1804,7 +1820,7 @@ const TIER2_KEYWORDS = {
   governance: ['run_governance_check', 'get_brand_guidelines', 'check_asset_expiry', 'audit_content'],
   workfront: ['create_workfront_task', 'list_workfront_projects', 'get_workfront_project', 'list_workfront_tasks', 'update_workfront_task', 'list_workfront_approvals', 'ask_workfront', 'get_project_health', 'check_workfront_connection'],
   assets: ['search_dam_assets', 'browse_dam_folder', 'get_asset_metadata', 'update_asset_metadata', 'upload_asset', 'delete_asset', 'move_asset', 'copy_asset', 'create_dam_folder', 'get_asset_renditions', 'add_to_collection'],
-  images: ['generate_and_insert_image', 'generate_image_variations', 'edit_image_with_firefly', 'transform_image', 'create_image_renditions'],
+  images: ['generate_and_insert_image', 'generate_image_gemini', 'generate_image_variations', 'edit_image_with_firefly', 'transform_image', 'create_image_renditions'],
   journey: ['create_journey', 'generate_journey_content', 'get_journey_status', 'analyze_journey_conflicts'],
   experiment: ['setup_experiment', 'get_experiment_status', 'analyze_experiment', 'create_ab_test', 'get_personalization_offers'],
   audience: ['explore_audiences', 'get_audience_segments', 'get_customer_profile'],
@@ -3357,6 +3373,114 @@ export async function executeTool(name, input) {
         }, null, 2);
       } catch (err) {
         return mcpError('generate_and_insert_image', err);
+      }
+    }
+
+    case 'generate_image_gemini': {
+      if (!(await ensureAuth())) return authRequiredError('generate_image_gemini');
+      try {
+        const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+        const resp = await fetch(`${workerBase}/gemini-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: input.prompt }),
+        });
+        const result = await resp.json();
+        if (result.error) {
+          return JSON.stringify({ error: result.error, detail: result.detail, _source: 'error' });
+        }
+
+        const imageUrl = result.imageUrl;
+        if (!imageUrl) {
+          return JSON.stringify({ error: 'Gemini returned no image URL', raw: result, _source: 'error' });
+        }
+
+        // If page_path provided, insert directly into the page
+        if (input.page_path) {
+          const pagePath = sanitizePath(input.page_path);
+          const htmlPath = (pagePath === '/' ? '/index' : pagePath) + '.html';
+          const org = da.getOrg();
+          const repo = da.getRepo();
+          const branch = da.getBranch();
+          const previewUrl = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page${pagePath}`;
+
+          const currentHTML = await da.getPage(htmlPath).catch(() => null);
+          if (!currentHTML) {
+            return JSON.stringify({
+              status: 'partial',
+              image_url: imageUrl,
+              model: result.model,
+              provider: 'gemini',
+              hint: 'Image generated but page not found. Use edit_page_content to place it.',
+              _source: 'connected',
+            });
+          }
+
+          const altText = input.alt_text || input.prompt.slice(0, 80).trim();
+          const selector = (input.image_selector || 'hero').toLowerCase();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(currentHTML, 'text/html');
+
+          let targetImg = null;
+          let targetPicture = null;
+          if (selector === 'hero' || selector === 'first') {
+            targetPicture = doc.querySelector('picture');
+            targetImg = targetPicture ? targetPicture.querySelector('img') : doc.querySelector('img');
+          } else {
+            const imgs = Array.from(doc.querySelectorAll('img'));
+            targetImg = imgs.find((img) =>
+              img.alt?.toLowerCase().includes(selector) ||
+              img.closest('[class]')?.className?.toLowerCase().includes(selector)
+            ) || imgs[0];
+            targetPicture = targetImg?.closest('picture') || null;
+          }
+
+          if (targetImg) {
+            targetImg.src = imageUrl;
+            targetImg.alt = altText;
+            if (targetPicture) targetPicture.querySelectorAll('source').forEach((s) => s.remove());
+          } else {
+            const main = doc.querySelector('main') || doc.body;
+            const newImg = doc.createElement('img');
+            newImg.src = imageUrl;
+            newImg.alt = altText;
+            main.insertBefore(newImg, main.firstChild);
+          }
+
+          await da.updatePage(htmlPath, doc.body.innerHTML);
+          let previewStatus = 'skipped';
+          try {
+            const pr = await da.previewPage(pagePath);
+            previewStatus = pr.ok ? 'success' : `pending (${pr.status})`;
+          } catch (pe) { previewStatus = `pending: ${pe.message}`; }
+
+          return JSON.stringify({
+            status: 'success',
+            page_path: pagePath,
+            image_url: imageUrl,
+            alt_text: altText,
+            model: result.model,
+            provider: 'gemini',
+            preview_url: previewUrl,
+            preview_status: previewStatus,
+            source: 'Google Gemini + DA Admin API',
+            message: `Gemini image generated and inserted into ${pagePath}. Preview refreshing.`,
+            _action: 'refresh_preview',
+            _preview_path: pagePath,
+          }, null, 2);
+        }
+
+        return JSON.stringify({
+          status: 'success',
+          image_url: imageUrl,
+          model: result.model,
+          provider: 'gemini',
+          text: result.text,
+          source: 'Google Gemini via Compass Worker',
+          message: `Image generated. URL: ${imageUrl}`,
+        }, null, 2);
+      } catch (err) {
+        return mcpError('generate_image_gemini', err);
       }
     }
 
@@ -5131,10 +5255,14 @@ These tools write to the real Document Authoring API. The user must be signed in
 ### AEP Agent (Real-time Customer Profiles)
 - **get_customer_profile** — Look up a real-time customer profile with identity graph, segment memberships, recent events, and consent.
 
-### Firefly Agent (Generative AI)
-- **generate_and_insert_image** — **PREFERRED for image updates.** Generates a Firefly image AND inserts it into the page in one call. Use this whenever the goal is to update a hero or page image — eliminates the extra round-trip.
-- **generate_image_variations** — Generate images via Adobe Firefly MCP when you need just the URL (not immediate insertion). One image per call.
-- **edit_image_with_firefly** — Image-to-image transform with reference URL. 3P models only (not Firefly Image 3/4/5).
+### Image Generation
+
+**Two providers available — both return public URLs ready for EDS insertion:**
+
+- **generate_and_insert_image** — **PREFERRED for page updates.** Firefly image gen + DA page write in one call. No extra round-trip.
+- **generate_image_gemini** — **Google Gemini (gemini-2.0-flash-preview-image-generation).** Use for: photorealistic scenes, text rendered inside images, lifestyle/real-world imagery. Also supports `page_path` for direct insertion. Hosted on Compass Worker — no 3P entitlement needed.
+- **generate_image_variations** — Firefly only, returns URL without inserting.
+- **edit_image_with_firefly** — Image-to-image transform with reference URL. 3P models only.
 
 #### Available Models
 | Model | Best for |

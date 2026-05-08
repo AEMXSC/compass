@@ -49,7 +49,7 @@ async function bootstrap() {
     // Load the Compass app module
     const appScript = document.createElement('script');
     appScript.type = 'module';
-    appScript.src = '/scripts/app.js?v=100';
+    appScript.src = '/scripts/app.js?v=101';
     document.body.appendChild(appScript);
 
   } catch (err) {

@@ -153,6 +153,12 @@ async function route(request, env) {
   if (url.pathname === '/mcp-oauth/register' && request.method === 'POST') {
     return handleMcpOAuthRegister(request);
   }
+  if (url.pathname === '/gemini-image' && request.method === 'POST') {
+    return handleGeminiImage(request, env);
+  }
+  if (url.pathname.startsWith('/img/') && request.method === 'GET') {
+    return handleImageServe(request, env);
+  }
   if (url.pathname === '/asset' && request.method === 'GET') {
     return handleAssetProxy(request);
   }
@@ -1261,6 +1267,110 @@ async function handleAuthorProxy(request) {
   } catch (err) {
     return jsonResponse({ error: err.message }, 502, origin);
   }
+}
+
+/* ─── POST /gemini-image — Generate image via Gemini, store in R2, return public URL ─── */
+
+async function handleGeminiImage(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+  if (!env.GEMINI_API_KEY) {
+    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY not configured — run: npx wrangler secret put GEMINI_API_KEY' }), {
+      status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+
+  let prompt;
+  try {
+    ({ prompt } = await request.json());
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+      status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+  if (!prompt) {
+    return new Response(JSON.stringify({ error: 'Missing prompt' }), {
+      status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+
+  const geminiResp = await fetch(
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': env.GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+      }),
+    },
+  );
+
+  if (!geminiResp.ok) {
+    const errText = await geminiResp.text();
+    console.error('[Gemini] Generation failed:', geminiResp.status, errText);
+    return new Response(JSON.stringify({ error: `Gemini ${geminiResp.status}`, detail: errText }), {
+      status: 502, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+
+  const result = await geminiResp.json();
+  const parts = result.candidates?.[0]?.content?.parts || [];
+  const imageData = parts.find((p) => p.inlineData)?.inlineData;
+  const text = parts.find((p) => p.text)?.text || '';
+
+  if (!imageData?.data) {
+    return new Response(JSON.stringify({ error: 'No image in Gemini response', raw: result }), {
+      status: 502, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+
+  // Decode base64 and upload to R2
+  const ext = (imageData.mimeType || 'image/png').split('/')[1] || 'png';
+  const imageKey = `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const imageBytes = Uint8Array.from(atob(imageData.data), (c) => c.charCodeAt(0));
+
+  await env.IMAGES.put(imageKey, imageBytes, {
+    httpMetadata: { contentType: imageData.mimeType || 'image/png' },
+  });
+
+  const workerOrigin = new URL(request.url).origin;
+  const imageUrl = `${workerOrigin}/img/${imageKey}`;
+
+  console.log(`[Gemini] Generated image → R2 key: ${imageKey}`);
+
+  return new Response(JSON.stringify({
+    imageUrl,
+    mimeType: imageData.mimeType,
+    text,
+    model: 'gemini-2.0-flash-preview-image-generation',
+    provider: 'gemini',
+  }), {
+    headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+  });
+}
+
+/* ─── GET /img/:key — Serve images from R2 ─── */
+
+async function handleImageServe(request, env) {
+  const key = new URL(request.url).pathname.replace(/^\/img\//, '');
+  if (!key) return new Response('Not found', { status: 404 });
+
+  const obj = await env.IMAGES.get(key);
+  if (!obj) return new Response('Not found', { status: 404 });
+
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': obj.httpMetadata?.contentType || 'image/png',
+      'Cache-Control': 'public, max-age=86400',
+      'Access-Control-Allow-Origin': '*',
+    },
+  });
 }
 
 /* ─── CORS ─── */

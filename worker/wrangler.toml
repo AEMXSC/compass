@@ -7,6 +7,11 @@ compatibility_flags = ["nodejs_compat"]
 [browser]
 binding = "BROWSER"
 
+# R2 — stores Gemini-generated images (public via /img/:key)
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "compass-images"
+
 # Deploy:  npx wrangler deploy
 #
 # Adobe IMS Secrets (same OAuth credential for S2S + user auth):
@@ -20,6 +25,9 @@ binding = "BROWSER"
 #
 # Workfront MCP Secret:
 #   npx wrangler secret put WORKFRONT_API_KEY         — Workfront API key for MCP auth
+#
+# Google Gemini (image generation — Nano Banana 2):
+#   npx wrangler secret put GEMINI_API_KEY
 #
 # Callback URLs (register in respective developer consoles):
 #   GitHub:  https://compass-ims-proxy.compass-xsc.workers.dev/github/callback
