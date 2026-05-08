@@ -105,7 +105,7 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
   -> Compass detects site type (DA-backed EDS or AEM Cloud Service)
   -> For DA: loads .aem.page preview directly
   -> For JCR: renders author page via headless Chrome with S2S Bearer auth
-  -> MCP sessions initialize (DA, Discovery, Firefly, ContentGen, ContentQA, SitesOptimizer, Spacecat pre-warmed; others lazy on first use)
+  -> MCP sessions initialize (DA, Discovery, Firefly, ContentGen pre-warmed on load; all others lazy — self-init on first tool call)
   -> Page components pre-fetched in background (enables 1-round edits)
   -> User types a request
   -> If analytics query: AA/CJA tools lazy-loaded on first use
@@ -116,6 +116,8 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 ### MCP Integrations
 
 26 MCP clients are wired in `scripts/mcp-client.js`. Adobe MCPs use the user's IMS token. External MCPs route through the Cloudflare Worker BFF for CORS handling and product header injection. Workfront uses apiKey header auth (injected by the worker from a stored secret — no IMS token required).
+
+**Session init model:** MCP clients self-initialize on first `callTool()` — no manual wiring needed for lazy clients. Pre-warmed clients (DA, Discovery, Firefly, ContentGen) connect on load so their tools are registered before the first prompt. All other clients connect the moment the brain first calls one of their tools. Status column reflects whether a client has been validated as working in demos.
 
 **AEM Cloud MCPs** (`mcp.adobeaemcloud.com`)
 
@@ -132,7 +134,7 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 | Cloud Manager (Odin) | `.../odin/prod` | **Session Ready** | Programs, environments, pipelines |
 | Firefly | `.../loki/firefly` | **Working** | 4 tools: text-to-image + image-to-image. Models: nano-banana-pro (default/Gemini 3), nano-banana, imagen-4, imagen-3, flux-pro, flux-ultra, ideogram, gpt-image, runway, firefly-image-3/4/4-ultra. Auth: `ew-s2s-token` via CF Worker `/auth`. |
 | AJO | `.../loki/ajo` | **Session Ready** | Journey orchestration |
-| Content QA Agent | `.../loki/content-qa` | **Pre-warmed on load** | Content quality validation |
+| Content QA Agent | `.../loki/content-qa` | **Lazy-init** ⚠️ | Content quality validation. 403 on load — restricted to @adobe.com identities with specific internal entitlement. Self-inits on first tool call if user has access. |
 | Content Gen Skills | `.../loki/skills` | **Pre-warmed on load** | AI writing with brand voice |
 | Acrobat | `.../acrobat` | **Session Ready** | PDF operations |
 
@@ -148,8 +150,8 @@ User signs in (IMS — one sign-in covers all 25 MCP servers)
 | AJO Prod | `ajo-mcp.adobe.io/mcp` | **Session Ready** | Journey orchestration (standalone host) |
 | Adobe Express | `express-mcp-service.adobe.io/mcp` | **Session Ready** | Design operations |
 | Marketing Agent | `aep-ai-ama-stage.adobe.io/mcp` | **Stage** | Marketing orchestration |
-| Sites Optimizer | `m-mcp-demo.adobe.io/mcp` | **Pre-warmed on load** | SEO, performance audits, AI Content Visibility Checker (scores how well AI agents can read + cite page content) |
-| Spacecat | `spacecat.experiencecloud.live/api/v1/mcp` | **Pre-warmed on load** | Site audits — site lookup/resolution, opportunities (SEO/CWV/broken backlinks/structured data), Lighthouse scores, audit history. Analysis-only — pairs with EPA to implement fixes. |
+| Sites Optimizer | `m-mcp-demo.adobe.io/mcp` | **Lazy-init** ⚠️ | SEO, performance audits, AI Content Visibility Checker. 401 on load — requires different OAuth or API key than standard IMS token. Self-inits on first tool call if credentials are present. |
+| Spacecat | `spacecat.experiencecloud.live/api/v1/mcp` | **Lazy-init** ⚠️ | Site audits — site lookup/resolution, opportunities (SEO/CWV/broken backlinks/structured data), Lighthouse scores. 401 on load — no IMS auth, needs API key. Self-inits on first tool call if key is configured. Analysis-only — pairs with EPA to implement fixes. |
 
 **Work Management MCPs** (apiKey auth — injected by Worker, no IMS required)
 
