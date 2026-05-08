@@ -73,9 +73,9 @@ Neither need is served by what exists today. Compass addresses both.
 | DA + JCR unified | Separate tools | Single interface for both authoring backends |
 | BYO orchestration pattern | Not demonstrable | Live working example — MCP + A2A + custom harness |
 | Real-time web search | None | Google Search grounding via Gemini — live trends, competitors, benchmarks, post-cutoff data |
-| Image generation providers | Firefly only | Firefly (Adobe 1P) + Google Gemini (gemini-2.5-flash-image) — both return R2-hosted URLs for EDS insertion |
+| Image generation providers | Firefly only | Google Gemini Nano Banana 2 (default) + Firefly (fallback) — both return public URLs for EDS insertion |
 | Multi-model AI strategy | Single model | Claude (reasoning + orchestration) + Gemini (search + image gen) — each model used where it excels |
-| Compound tool execution | N/A | generate_and_insert_image: Firefly gen + DA page write in one call — no extra LLM round-trip |
+| Compound tool execution | N/A | generate_image_gemini: Nano Banana 2 gen + DA page write in one call — no Firefly entitlement needed |
 
 ---
 
@@ -163,16 +163,18 @@ These are non-Adobe integrations wired directly into the Compass Cloudflare Work
 | Integration | Worker Endpoint | Model | Status | Capabilities |
 |---|---|---|---|---|
 | **Gemini Grounded Search** | `POST /gemini-search` | `gemini-2.5-flash` + Google Search tool | **Working** | Real-time web search with Google Search grounding. Returns synthesized answer + cited sources + search queries used. Use for: current trends, competitor analysis, recent news, industry benchmarks, anything past training cutoff. |
-| **Gemini Image Generation** | `POST /gemini-image` | `gemini-2.5-flash-image` | **Working** | Generates images, stores in Cloudflare R2, returns public URL. Bypasses Firefly 3P entitlement entirely. Use for: photorealistic scenes, lifestyle imagery, text rendered inside images. |
+| **Gemini Image Generation** | `POST /gemini-image` | `gemini-3.1-flash-image-preview` (Nano Banana 2) | **Working — DEFAULT** | Generates images, stores in Cloudflare R2, returns public URL. Default image provider — called first for all image generation. Bypasses Firefly 3P entitlement entirely. |
 | **R2 Image Hosting** | `GET /img/:key` | Cloudflare R2 | **Working** | Serves generated images with correct Content-Type + 24h cache. All Gemini-generated images are persisted here and the URL is usable directly in EDS `<img src>`. |
 
 **Secrets required** (set via `npx wrangler secret put` in `worker/`):
 - `GEMINI_API_KEY` — Google AI Studio API key with billing enabled (postpaid or prepaid credits)
 
 **Model selection notes:**
-- `gemini-2.0-flash` and `gemini-2.0-flash-001` are deprecated for new API keys — use `gemini-2.5-flash` for text/search and `gemini-2.5-flash-image` for image gen
-- Run `GET /gemini-models` (CORS-protected) to enumerate available models for a given key
-- Image gen uses `responseModalities: ['IMAGE', 'TEXT']` — `gemini-2.5-flash` is text-only output and will return 400 if used for images
+- Image gen: `gemini-3.1-flash-image-preview` (Nano Banana 2) — current default. Also available: `nano-banana-pro-preview`, `gemini-3-pro-image-preview`, `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`
+- Search: `gemini-2.5-flash` with `tools: [{ google_search: {} }]`
+- `gemini-2.0-flash` and `gemini-2.0-flash-001` are deprecated for new API keys
+- Run `GET /gemini-models` (CORS-protected, requires valid Origin header) to enumerate all available models for a given key
+- Image gen uses `responseModalities: ['IMAGE', 'TEXT']` via `generateContent` — text-only models return 400
 
 ---
 
@@ -191,10 +193,10 @@ These are non-Adobe integrations wired directly into the Compass Cloudflare Work
 | Workfront integration | **Working** | Pull tasks, projects, and briefs from Workfront to inform content creation; apiKey auth via worker secret |
 | Cross-product tool execution | **Working** | 26 MCP servers — IMS sign-in covers all Adobe MCPs; Workfront uses stored apiKey |
 | Customer-specific context | **Working** | Per-account system prompt + vertical demo flows |
-| Firefly image gen + page insert | **Working** | `generate_and_insert_image` — compound tool runs Firefly gen + DA page write in parallel. No extra LLM round-trip. Brain calls this by default for page updates. |
-| Gemini image generation | **Working** | `generate_image_gemini` — `gemini-2.5-flash-image` via Worker → R2 → public URL. Bypasses Firefly 3P entitlement. Use for photorealistic/lifestyle imagery. |
+| Gemini image generation | **Working — DEFAULT** | `generate_image_gemini` — Nano Banana 2 (`gemini-3.1-flash-image-preview`) via Worker → R2 → public URL. Default for all image generation. No Firefly 3P entitlement needed. |
+| Firefly image gen + page insert | **Working — Fallback** | `generate_and_insert_image` — Firefly gen + DA page write in one call. Used only when user explicitly requests Firefly or Gemini fails. |
 | Gemini grounded search | **Working** | `gemini_search` — real-time Google Search via `gemini-2.5-flash`. Returns synthesized answer + cited sources. Triggers automatically on prompts containing: "trends", "current", "latest", "competitor", "2025", "search", etc. |
-| Multi-provider image routing | **Working** | Brain selects Firefly vs. Gemini based on prompt context. Force Gemini by saying "use Gemini to generate…". Firefly is default for brand-consistent creative; Gemini for photorealistic/real-world. |
+| Multi-provider image routing | **Working** | Nano Banana 2 (Gemini) is default. Brain falls back to Firefly only on explicit request or failure. Force Firefly by saying "use Firefly to generate…". |
 
 ---
 
@@ -345,4 +347,4 @@ AI is the layer everyone sells. Governance is the layer nobody wants to rebuild.
 ---
 
 *Accurate as of: May 8, 2026*
-*Based on: production codebase + verified testing session (Workfront MCP: 21 tools confirmed live; Gemini search + image gen: both endpoints verified against live Worker)*
+*Based on: production codebase + verified testing session (Workfront MCP: 21 tools confirmed live; Gemini search + Nano Banana 2 image gen: both endpoints verified; Nano Banana 2 confirmed as default image provider)*
