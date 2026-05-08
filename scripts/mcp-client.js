@@ -453,10 +453,11 @@ export const ALL_MCP_CLIENTS = [
 export async function prewarmSessions() {
   // Critical = clients that work with the general MCP OAuth token on load.
   // contentMcp, governanceMcp, experienceProductionMcp need JCR/site-specific auth (Connect AEM).
-  // Those are lazy-init (triggered on first use after auth).
+  // contentQaMcp: restricted to @adobe.com identities with specific entitlement — lazy-init.
+  // sitesOptimizerMcp: requires different OAuth or API key — lazy-init.
+  // spacecatMcp: no IMS auth, needs API key — lazy-init.
   const critical = [
     discoveryMcp, fireflyMcp, daMcp, contentGenMcp,
-    contentQaMcp, sitesOptimizerMcp, spacecatMcp,
   ];
   const results = await Promise.allSettled(critical.map(async (c) => {
     await c.initSession();
