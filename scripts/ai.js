@@ -197,15 +197,18 @@ const AEM_TOOLS = [
 
   {
     name: 'edit_page_content',
-    description: 'DA Editing Agent — Edit TEXT content on an AEM page. Two modes: (1) find_replace for quick text swaps — PREFERRED, 10x faster, (2) full html for page creation/rewrite. Use for: headline, body copy, CTA text, metadata, block content, structural HTML. Do NOT use to change or set image src attributes — use generate_image_gemini instead.',
+    description: 'DA Editing Agent — Edit content on an AEM page. For IMAGE updates: pass image_prompt with a description of the image — the handler generates a fresh Gemini image and inserts it directly. Do NOT pass image URLs in find, replace, or html. For TEXT: use find/replace (fastest, 10x) or full html for rewrites.',
     input_schema: {
       type: 'object',
       properties: {
         page_path: { type: 'string', description: 'Page path (e.g., "/coffee", "/about").' },
-        html: { type: 'string', description: 'Complete HTML content. Only use for full page creation/rewrite. Omit if using find_replace.' },
-        find: { type: 'string', description: 'Text to find in the current page HTML (exact match). Use with replace for quick edits.' },
+        html: { type: 'string', description: 'Complete HTML content. Only use for full page creation/rewrite. Omit if using find_replace or image_prompt.' },
+        find: { type: 'string', description: 'Text to find in the current page HTML (exact match). Use with replace for quick text edits.' },
         replace: { type: 'string', description: 'Replacement text. Used with find.' },
         trigger_preview: { type: 'boolean', description: 'Trigger AEM preview after writing (default: true).' },
+        image_prompt: { type: 'string', description: 'Image to generate and insert on the page. Narrative prose: subject, setting, lighting, color palette, style. 200-800 chars ideal. When set, generates via Gemini and replaces the target image in one call. Never pass image URLs — always describe what you want.' },
+        image_selector: { type: 'string', description: 'Which image to replace when using image_prompt: "hero" (default), "first", or partial alt text hint.' },
+        alt_text: { type: 'string', description: 'Alt text for the generated image. Defaults to first 80 chars of image_prompt.' },
       },
       required: ['page_path'],
     },
@@ -838,7 +841,7 @@ const AEM_TOOLS = [
 
   {
     name: 'generate_image_gemini',
-    description: 'Gemini Image Generation — This is the ONLY tool that may change or set an image src attribute on a page. Call for any request to update, replace, generate, or insert any image. With page_path: generates and inserts in one call, no second edit_page_content needed. Without page_path: returns a public Cloudflare R2 URL for manual placement. Google Gemini (Nano Banana 2 / gemini-3.1-flash-image-preview) — photorealistic, brand-ready, no Firefly 3P entitlement required.',
+    description: 'Gemini Image Generation — Generates a fresh image via Gemini (Nano Banana / gemini-3.1-flash-image-preview) and returns a public Cloudflare R2 URL. Use for standalone generation requests (no page insertion needed). For inserting into a DA page, prefer edit_page_content with image_prompt instead. With page_path: still works as a direct insert for non-OPS contexts. Photorealistic, brand-ready, no Firefly 3P entitlement required.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1819,8 +1822,6 @@ const TIER1_CORE = new Set([
   // Content editing (the 90% case)
   'edit_page_content', 'get_page_content', 'list_site_pages', 'preview_page', 'publish_page',
   'copy_aem_page', 'create_aem_page', 'delete_page', 'patch_aem_page_content',
-  // Image generation — always available so brain never falls back to URL patching
-  'generate_image_gemini',
   // AEM MCP direct
   'aem_read', 'aem_write', 'aem_list_environments',
   // Site management
@@ -2470,25 +2471,80 @@ export async function executeTool(name, input) {
     case 'edit_page_content': {
       const pagePath = sanitizePath(input.page_path);
 
-      // IMAGE SRC GUARDRAIL — intercept attempts to swap image src via find/replace or html
-      // generate_image_gemini must handle ALL image changes; invented URLs always break
-      {
-        const find = input.find || '';
-        const replace = input.replace || '';
-        const html = input.html || '';
-        // detect: find targets an img element or src attribute
-        const findTargetsImg = /src\s*=|<img\b/i.test(find) || /\.(jpg|jpeg|png|webp|gif|svg|avif)/i.test(find);
-        // detect: replace contains a URL (any URL as a replacement for an img is suspect)
-        const replaceIsUrl = /^https?:\/\//i.test(replace.trim()) || /^\/content\/dam\//i.test(replace.trim());
-        // detect: html mode with an invented external image URL (not R2)
-        const htmlHasExternalImg = !find && html && /src=["'][^"']*https?:\/\/(?!pub-)[^"']*\.(jpg|jpeg|png|webp|gif|svg|avif)/i.test(html);
-        if ((findTargetsImg && replaceIsUrl) || htmlHasExternalImg) {
-          return JSON.stringify({
-            error: 'IMAGE_ROUTING_ERROR',
-            message: 'edit_page_content cannot set image src. Call generate_image_gemini with prompt and page_path="' + pagePath + '" — it generates a fresh image and inserts it in one call. Invented URLs always produce broken images.',
-            required_tool: 'generate_image_gemini',
-            required_args: { page_path: pagePath },
+      // ── image_prompt mode: generate via Gemini and insert ──
+      if (input.image_prompt) {
+        if (!(await ensureAuth())) return authRequiredError('edit_page_content');
+        try {
+          const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+          const imgResp = await fetch(`${workerBase}/gemini-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: input.image_prompt }),
           });
+          const imgResult = await imgResp.json();
+          if (imgResult.error) return JSON.stringify({ error: imgResult.error, detail: imgResult.detail, _source: 'error' });
+          const imageUrl = imgResult.imageUrl;
+          if (!imageUrl) return JSON.stringify({ error: 'Gemini returned no image URL', raw: imgResult });
+
+          const htmlPath = (pagePath === '/' ? '/index' : pagePath) + '.html';
+          const org = da.getOrg(); const repo = da.getRepo(); const branch = da.getBranch();
+          const previewUrl = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page${pagePath}`;
+          const daUrl = `https://da.live/edit#/${org}/${repo}${pagePath === '/' ? '/index' : pagePath}`;
+
+          const currentHTML = await da.getPage(htmlPath).catch(() => null);
+          if (!currentHTML) return JSON.stringify({ status: 'partial', image_url: imageUrl, hint: 'Image generated but page not found. Check org/repo/branch.' });
+
+          const altText = input.alt_text || input.image_prompt.slice(0, 80).trim();
+          const selector = (input.image_selector || 'hero').toLowerCase();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(currentHTML, 'text/html');
+
+          let targetImg = null;
+          let targetPicture = null;
+          if (selector === 'hero' || selector === 'first') {
+            targetPicture = doc.querySelector('picture');
+            targetImg = targetPicture ? targetPicture.querySelector('img') : doc.querySelector('img');
+          } else {
+            const imgs = Array.from(doc.querySelectorAll('img'));
+            targetImg = imgs.find((img) =>
+              img.alt?.toLowerCase().includes(selector) ||
+              img.closest('[class]')?.className?.toLowerCase().includes(selector)
+            ) || imgs[0];
+            targetPicture = targetImg?.closest('picture') || null;
+          }
+
+          if (targetImg) {
+            targetImg.src = imageUrl;
+            targetImg.alt = altText;
+            if (targetPicture) targetPicture.querySelectorAll('source').forEach((s) => s.remove());
+          } else {
+            const main = doc.querySelector('main') || doc.body;
+            const newImg = doc.createElement('img');
+            newImg.src = imageUrl; newImg.alt = altText;
+            main.insertBefore(newImg, main.firstChild);
+          }
+
+          await da.updatePage(htmlPath, doc.body.innerHTML);
+          let previewStatus = 'skipped';
+          if (input.trigger_preview !== false) {
+            try {
+              const pr = await da.previewPage(pagePath);
+              previewStatus = pr.ok ? 'success' : `pending (${pr.status})`;
+            } catch (pe) { previewStatus = `pending: ${pe.message}`; }
+          }
+
+          return JSON.stringify({
+            status: 'success', page_path: pagePath,
+            image_url: imageUrl, alt_text: altText,
+            model: imgResult.model, provider: 'gemini',
+            preview_url: previewUrl, da_edit_url: daUrl,
+            preview_status: previewStatus,
+            source: 'Google Gemini + DA Admin API',
+            message: `Gemini image generated and inserted into ${pagePath}. Preview refreshing.`,
+            _action: 'refresh_preview', _preview_path: pagePath,
+          }, null, 2);
+        } catch (err) {
+          return mcpError('edit_page_content:image_prompt', err);
         }
       }
 
@@ -5429,9 +5485,8 @@ Read the user's request and identify which domain applies before selecting any t
 ---
 
 **ABSOLUTE NEVER — these override every other instruction:**
-- NEVER use \`edit_page_content\` to change or set an image src attribute — \`generate_image_gemini\` is the ONLY tool that may set image src
-- NEVER invent, reuse, or search for an image URL when asked to update/replace/generate an image — always call \`generate_image_gemini\` to generate fresh
-- NEVER batch an image src change into an HTML text edit or find/replace string
+- NEVER pass an image URL in \`edit_page_content\` find, replace, or html — use image_prompt instead to generate fresh
+- NEVER invent or reuse image URLs — use image_prompt for page insertion, \`generate_image_gemini\` for standalone generation
 - NEVER call \`get_page_content\` when page HTML is already in context — it is always present for the current page
 - NEVER call \`batch_aem_update\` without confirmed=false preview and explicit user confirmation first
 - NEVER use Spacecat tools (\`get_site_audit\`, \`get_site_opportunities\`) to make edits — they are read-only analysis
@@ -5444,9 +5499,8 @@ Read the user's request and identify which domain applies before selecting any t
 When the user wants to update, replace, generate, or fix any image on a page:
 
 **DA/EDS site:**
-1. Call \`generate_image_gemini\`(prompt=..., page_path=...) — generates AND inserts in one call
-2. If text also needs changing: call \`edit_page_content\` AFTER for text-only changes
-3. Total: 1 call for image only, 2 calls for image + text. Never fewer.
+1. Call \`edit_page_content\`(page_path=..., image_prompt=...) — generates via Gemini and inserts in one call
+2. For combined text + image: add image_prompt to the same call, or chain a second \`edit_page_content\` for text-only changes after
 
 **JCR/AEM CS site:**
 1. Call \`generate_image_gemini\`(prompt=...) — get R2 URL from result
@@ -5472,7 +5526,7 @@ Total: 1 tool call.
 ### PAGE_CREATE_WORKFLOW
 
 1. \`copy_aem_page\` from a template, OR \`edit_page_content\` with full html for net-new pages
-2. If images needed: IMAGE_WORKFLOW
+2. If images needed: \`edit_page_content\` with image_prompt
 3. \`run_governance_check\` before publishing
 4. \`publish_page\` only after governance approval
 5. Always share the Universal Editor and DA edit links
@@ -5738,6 +5792,7 @@ Every MCP tool returns live data. Always base your next call on what the previou
 
 ## DA/EDS sites (Type: da or eds)
 - edit_page_content with {find, replace} for targeted text changes
+- edit_page_content with {image_prompt} for any image update, replace, or generate — generates via Gemini and inserts in one call. Never pass image URLs.
 - edit_page_content with {html} for full page rewrites or new pages
 - After any write: preview refreshes automatically
 
