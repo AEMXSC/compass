@@ -5299,7 +5299,7 @@ These tools write to the real Document Authoring API. The user must be signed in
 **Two providers available — both return public URLs ready for EDS insertion:**
 
 - **generate_and_insert_image** — **PREFERRED for page updates.** Firefly image gen + DA page write in one call. No extra round-trip.
-- **generate_image_gemini** — **Google Gemini (gemini-2.0-flash-preview-image-generation).** Use for: photorealistic scenes, text rendered inside images, lifestyle/real-world imagery. Also supports `page_path` for direct insertion. Hosted on Compass Worker — no 3P entitlement needed.
+- **generate_image_gemini** — **Google Gemini (gemini-2.0-flash-preview-image-generation).** Use for: photorealistic scenes, text rendered inside images, lifestyle/real-world imagery. Also supports page_path for direct insertion. Hosted on Compass Worker — no 3P entitlement needed.
 - **generate_image_variations** — Firefly only, returns URL without inserting.
 - **edit_image_with_firefly** — Image-to-image transform with reference URL. 3P models only.
 
