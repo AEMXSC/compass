@@ -159,7 +159,10 @@ async function route(request, env) {
   if (url.pathname === '/gemini-search' && request.method === 'POST') {
     return handleGeminiSearch(request, env);
   }
-  if (url.pathname.startsWith('/img/') && request.method === 'GET') {
+  if (url.pathname === '/gemini-models' && request.method === 'GET') {
+    return handleGeminiModels(request, env);
+  }
+  if (url.pathname.startsWith('/img/') && (request.method === 'GET' || request.method === 'HEAD')) {
     return handleImageServe(request, env);
   }
   if (url.pathname === '/asset' && request.method === 'GET') {
@@ -1300,7 +1303,7 @@ async function handleGeminiImage(request, env) {
   }
 
   const geminiResp = await fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent',
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent',
     {
       method: 'POST',
       headers: {
@@ -1316,7 +1319,7 @@ async function handleGeminiImage(request, env) {
 
   if (!geminiResp.ok) {
     const errText = await geminiResp.text();
-    console.error('[Gemini] Generation failed:', geminiResp.status, errText);
+    console.error('[Gemini Image] Generation failed:', geminiResp.status, errText);
     return new Response(JSON.stringify({ error: `Gemini ${geminiResp.status}`, detail: errText }), {
       status: 502, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
     });
@@ -1333,27 +1336,52 @@ async function handleGeminiImage(request, env) {
     });
   }
 
-  // Decode base64 and upload to R2
-  const ext = (imageData.mimeType || 'image/png').split('/')[1] || 'png';
+  const mimeType = imageData.mimeType || 'image/jpeg';
+  const ext = mimeType.split('/')[1] || 'jpg';
   const imageKey = `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const imageBytes = Uint8Array.from(atob(imageData.data), (c) => c.charCodeAt(0));
 
   await env.IMAGES.put(imageKey, imageBytes, {
-    httpMetadata: { contentType: imageData.mimeType || 'image/png' },
+    httpMetadata: { contentType: mimeType },
   });
 
   const workerOrigin = new URL(request.url).origin;
   const imageUrl = `${workerOrigin}/img/${imageKey}`;
 
-  console.log(`[Gemini] Generated image → R2 key: ${imageKey}`);
+  console.log(`[Gemini Image] Generated → R2 key: ${imageKey}`);
 
   return new Response(JSON.stringify({
     imageUrl,
-    mimeType: imageData.mimeType,
+    mimeType,
     text,
-    model: 'gemini-2.0-flash-preview-image-generation',
+    model: 'gemini-2.5-flash-image',
     provider: 'gemini',
   }), {
+    headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+  });
+}
+
+/* ─── GET /gemini-models — List available Gemini models for the configured API key ─── */
+
+async function handleGeminiModels(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+  if (!env.GEMINI_API_KEY) {
+    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY not configured' }), {
+      status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&key=${env.GEMINI_API_KEY}`,
+  );
+  const data = await resp.json();
+  const models = (data.models || []).map((m) => ({
+    name: m.name,
+    methods: m.supportedGenerationMethods,
+  }));
+  return new Response(JSON.stringify(models, null, 2), {
     headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
   });
 }
@@ -1388,7 +1416,7 @@ async function handleGeminiSearch(request, env) {
   const prompt = context ? `Context: ${context}\n\nSearch query: ${query}` : query;
 
   const geminiResp = await fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
     {
       method: 'POST',
       headers: {
@@ -1423,7 +1451,7 @@ async function handleGeminiSearch(request, env) {
     answer,
     sources,
     searchQueries,
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     provider: 'gemini',
   }), {
     headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
