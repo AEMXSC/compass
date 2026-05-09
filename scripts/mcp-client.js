@@ -148,17 +148,21 @@ export function createMcpClient(endpointPath, label = 'MCP', options = {}) {
       // parallel prewarm clients that haven't sent their request yet).
       if (resp.status === 401 && !_isRetry) {
         if (options.tokenKey) {
-          // Product-specific token is stale — clear it and fall back to IMS on retry
+          // Product-specific token is stale — clear token + session, retry with IMS token
           localStorage.removeItem(options.tokenKey);
+          resetSession();
+          return mcpRequest(method, params, { isNotification, _isRetry: true });
         } else {
           try {
             const fresh = await signInMcpOAuth();
             if (fresh) {
               localStorage.setItem('ew-mcp-token', fresh);
+              resetSession();
               return mcpRequest(method, params, { isNotification, _isRetry: true });
             }
           } catch { /* fall through to error below */ }
           localStorage.removeItem('ew-mcp-token');
+          resetSession();
         }
       }
       const errorText = await resp.text().catch(() => '');

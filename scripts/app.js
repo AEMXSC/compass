@@ -14,8 +14,8 @@
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
 import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken, initS2SToken } from './ims.js';
-import * as ai from './ai.js?v=115';
-import { TOOL_AGENT_MAP } from './ai.js?v=115';
+import * as ai from './ai.js?v=116';
+import { TOOL_AGENT_MAP } from './ai.js?v=116';
 import * as da from './da-client.js';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
@@ -742,6 +742,46 @@ if (fireflyTokenBtn && fireflyTokenInput) {
     if (fireflyTokenStatus) {
       fireflyTokenStatus.textContent = 'Token saved — covers all APIs in your Developer Console project.';
       fireflyTokenStatus.className = 'settings-token-status success';
+    }
+  });
+}
+
+/* ── Figma Token ── */
+const figmaTokenBtn = document.getElementById('figmaTokenBtn');
+const figmaTokenInput = document.getElementById('figmaTokenInput');
+const figmaTokenStatus = document.getElementById('figmaTokenStatus');
+
+if (figmaTokenBtn && figmaTokenInput) {
+  const savedFigma = localStorage.getItem('compass-figma-token');
+  if (savedFigma && figmaTokenStatus) {
+    figmaTokenInput.value = savedFigma.slice(0, 8) + '...';
+    figmaTokenStatus.textContent = 'Figma token set — design ingestion enabled.';
+    figmaTokenStatus.className = 'settings-token-status success';
+  }
+
+  figmaTokenBtn.addEventListener('click', () => {
+    const val = figmaTokenInput.value.trim();
+    if (!val || val.endsWith('...')) {
+      if (figmaTokenStatus) {
+        figmaTokenStatus.textContent = 'Paste your Figma Personal Access Token (Figma Settings → Security).';
+        figmaTokenStatus.className = 'settings-token-status error';
+      }
+      return;
+    }
+    if (val === 'clear') {
+      localStorage.removeItem('compass-figma-token');
+      figmaTokenInput.value = '';
+      if (figmaTokenStatus) {
+        figmaTokenStatus.textContent = 'Figma token cleared.';
+        figmaTokenStatus.className = 'settings-token-status';
+      }
+      return;
+    }
+    localStorage.setItem('compass-figma-token', val);
+    figmaTokenInput.value = val.slice(0, 8) + '...';
+    if (figmaTokenStatus) {
+      figmaTokenStatus.textContent = 'Figma token saved — paste a Figma share URL to ingest designs into AEM.';
+      figmaTokenStatus.className = 'settings-token-status success';
     }
   });
 }
@@ -1841,13 +1881,14 @@ const TOOL_SUGGESTIONS = {
     { icon: '📊', label: 'View all tasks', prompt: 'Show all open tasks and their current status' },
   ],
   edit_page_content: [
-    { icon: '🛡️', label: 'Run governance', prompt: 'Run a full governance check on the page I just edited' },
+    { icon: '🛡️', label: 'Brand check', prompt: 'Run a brand governance check on the page I just edited' },
+    { icon: '✅', label: 'Content QA', prompt: 'Run a content quality check on the page I just edited' },
     { icon: '🌐', label: 'Publish live', prompt: 'Publish this page to the live .aem.live URL' },
-    { icon: '✏️', label: 'Edit more', prompt: 'Show me the current page content so I can make more changes' },
   ],
   preview_page: [
+    { icon: '🛡️', label: 'Brand check', prompt: 'Run a brand governance check on this page' },
+    { icon: '✅', label: 'Content QA', prompt: 'Run a content quality check on this page' },
     { icon: '🌐', label: 'Publish live', prompt: 'Publish this page live now' },
-    { icon: '🛡️', label: 'Run governance', prompt: 'Run governance and compliance checks before publishing' },
   ],
   publish_page: [
     { icon: '📊', label: 'Check analytics', prompt: 'Show me analytics for this published page' },

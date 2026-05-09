@@ -162,6 +162,9 @@ async function route(request, env) {
   if (url.pathname === '/gemini-models' && request.method === 'GET') {
     return handleGeminiModels(request, env);
   }
+  if (url.pathname === '/figma-file' && request.method === 'GET') {
+    return handleFigmaFile(request, env);
+  }
   if (url.pathname.startsWith('/img/') && (request.method === 'GET' || request.method === 'HEAD')) {
     return handleImageServe(request, env);
   }
@@ -1456,6 +1459,57 @@ async function handleGeminiSearch(request, env) {
   }), {
     headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
   });
+}
+
+/* ─── GET /figma-file — Proxy Figma REST API (CORS + token relay) ─── */
+/* User supplies X-Figma-Token header (from localStorage); Worker falls back to env.FIGMA_TOKEN. */
+
+async function handleFigmaFile(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const figmaUrl = searchParams.get('url');
+
+  const figmaToken = request.headers.get('X-Figma-Token') || env.FIGMA_TOKEN || '';
+  if (!figmaToken) {
+    return new Response(JSON.stringify({ error: 'No Figma token. Add your Figma Personal Access Token in Compass settings (Settings → Figma Token).' }), {
+      status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+
+  const fileKeyMatch = figmaUrl?.match(/figma\.com\/(?:design|file)\/([a-zA-Z0-9]+)/);
+  if (!fileKeyMatch) {
+    return new Response(JSON.stringify({ error: 'Invalid Figma URL. Expected a figma.com/design/... or figma.com/file/... share link.' }), {
+      status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
+
+  const fileKey = fileKeyMatch[1];
+  try {
+    const resp = await fetch(`https://api.figma.com/v1/files/${fileKey}?depth=3`, {
+      headers: { 'X-Figma-Token': figmaToken },
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return new Response(JSON.stringify({ error: `Figma API ${resp.status}`, detail: errText }), {
+        status: resp.status === 403 ? 403 : 502,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+      });
+    }
+
+    const data = await resp.json();
+    return new Response(JSON.stringify(data), {
+      headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 502, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
+  }
 }
 
 /* ─── GET /img/:key — Serve images from R2 ─── */

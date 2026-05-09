@@ -19,7 +19,7 @@ import * as govMcp from './governance-mcp-client.js';
 import * as discoveryMcp from './discovery-mcp-client.js';
 import * as spacecatMcp from './spacecat-mcp-client.js';
 import * as aemAssets from './aem-assets-client.js';
-import { contentUpdaterMcp, developmentMcp, cjaMcp, aaMcp, acrobatMcp, marketingMcp, targetMcp, rtcdpMcp, aemUnifiedMcp } from './mcp-client.js';
+import { contentUpdaterMcp, developmentMcp, cjaMcp, aaMcp, acrobatMcp, marketingMcp, targetMcp, rtcdpMcp, aemUnifiedMcp, contentQaMcp } from './mcp-client.js';
 import * as wf from './workfront.js';
 import { getSiteType } from './site-detect.js';
 import { buildPlaybookPrompt } from './xsc-playbook.js';
@@ -523,19 +523,81 @@ const AEM_TOOLS = [
 
   {
     name: 'run_governance_check',
-    description: 'Governance Agent — Run brand compliance, metadata enforcement, accessibility (WCAG 2.1 AA), and DRM checks on a page or content. Returns pass/fail with detailed findings. Use before publishing.',
+    description: 'Brand governance check — first checks if brand rules are configured for this page domain (bga_get_checks_by_url), then evaluates the page if rules exist (bga_evaluate_page). Covers tone, terminology, CTA compliance, visual style. Returns no_rules status with setup guidance if domain not configured. Do NOT use for DRM, audit, DLP, or regulatory checks — those are not available.',
     input_schema: {
       type: 'object',
       properties: {
-        page_path: { type: 'string', description: 'Page path to check' },
-        site_id: { type: 'string', description: 'Site to check' },
-        checks: {
-          type: 'array',
-          items: { type: 'string', enum: ['brand', 'accessibility', 'metadata', 'legal', 'seo', 'drm'] },
-          description: 'Which checks to run (default: all)',
-        },
+        page_path: { type: 'string', description: 'Page path, e.g. /frescopa/en/home' },
+        preview_url: { type: 'string', description: 'Full preview URL. Derived from page_path + org/repo/branch if omitted.' },
       },
       required: ['page_path'],
+    },
+  },
+
+  {
+    name: 'run_content_qa',
+    description: 'Content quality check — evaluates a page for SEO, readability, missing meta tags, and broken links via Content QA MCP. Requires @adobe.com entitlement. Returns skipped status gracefully if unavailable.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_path: { type: 'string', description: 'Page path, e.g. /frescopa/en/home' },
+        preview_url: { type: 'string', description: 'Full preview URL. Derived from page_path if omitted.' },
+      },
+      required: ['page_path'],
+    },
+  },
+
+  {
+    name: 'search_content_fragments',
+    description: 'Discovery Agent — Search AEM Content Fragments by natural language. Returns CF paths, titles, and model types. Use instead of search_dam_assets when the user asks for structured content, article fragments, or model-based content.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Natural language query, e.g. "Frescopa product descriptions in English"' },
+        path: { type: 'string', description: 'Optional DAM folder path to scope, e.g. /content/dam/frescopa' },
+        limit: { type: 'number', description: 'Max results. Default 10.' },
+      },
+      required: ['query'],
+    },
+  },
+
+  {
+    name: 'search_forms',
+    description: 'Discovery Agent — Search Adaptive Forms in AEM by natural language. Returns form paths, titles, and submission targets. Use when the user asks to find or list existing forms.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Natural language query, e.g. "contact forms in Spanish"' },
+        limit: { type: 'number', description: 'Max results. Default 10.' },
+      },
+      required: ['query'],
+    },
+  },
+
+  {
+    name: 'create_da_page',
+    description: 'Create a new page on a DA (Document Authoring) / EDS site. Use when the page does not exist yet. For EDS block-based pages, pass EDS block table HTML in the html parameter. After creation, use edit_page_content for updates or preview_page to trigger preview.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_path: { type: 'string', description: 'Path for the new page, e.g. /en/new-campaign' },
+        html: { type: 'string', description: 'Initial page HTML using EDS block table format. Defaults to empty page if omitted.' },
+        title: { type: 'string', description: 'Page title.' },
+      },
+      required: ['page_path'],
+    },
+  },
+
+  {
+    name: 'ingest_figma_design',
+    description: 'Fetch a Figma design file and convert it to AEM EDS block table HTML. Pass a Figma share URL. Returns the design structure for you to map to EDS block tables (hero, cards, columns, text). Use create_da_page or edit_page_content to write the result to AEM. Requires a Figma Personal Access Token in Compass settings.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        figma_url: { type: 'string', description: 'Figma share URL, e.g. https://www.figma.com/design/AbC123/MyDesign' },
+        target_page_path: { type: 'string', description: 'Optional: page path to write the generated blocks to immediately.' },
+      },
+      required: ['figma_url'],
     },
   },
 
@@ -841,7 +903,7 @@ const AEM_TOOLS = [
 
   {
     name: 'generate_image_gemini',
-    description: 'Gemini Image Generation — Generates a fresh image via Gemini (Nano Banana / gemini-3.1-flash-image-preview) and returns a public Cloudflare R2 URL. Use for standalone generation requests (no page insertion needed). For inserting into a DA page, prefer edit_page_content with image_prompt instead. With page_path: still works as a direct insert for non-OPS contexts. Photorealistic, brand-ready, no Firefly 3P entitlement required.',
+    description: 'Gemini Image Generation — Generates a fresh image via Gemini and returns a public Cloudflare R2 URL. Use when no source asset exists yet. For channel variants of an existing DAM asset, use create_image_renditions instead. For inserting into a DA page, prefer edit_page_content with image_prompt. Photorealistic, brand-ready, no Firefly entitlement required.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1010,7 +1072,7 @@ const AEM_TOOLS = [
   },
   {
     name: 'create_image_renditions',
-    description: 'Content Optimization Agent — Generate multiple image renditions for different channels and formats in batch. IMPORTANT: asset_path must be an AEM DAM path (e.g. /content/dam/project/image.jpg) or an existing DM delivery URL — external URLs cannot be used.',
+    description: 'Content Optimization Agent — Generate channel-specific image renditions from an existing DAM asset. Use when the asset already exists in AEM DAM. For channel variants, use CHANNEL_PROFILES dimensions (e.g. TikTok/Instagram Story: 1080×1920, LinkedIn Banner: 1128×191). Do NOT use to generate new images — use generate_image_gemini or firefly_generate_image for that. asset_path must be an AEM DAM path or existing DM delivery URL.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1834,9 +1896,9 @@ const TIER1_CORE = new Set([
 
 const TIER2_KEYWORDS = {
   analytics: ['cja_visualize', 'cja_kpi_pulse', 'cja_executive_briefing', 'cja_anomaly_triage', 'get_analytics_insights'],
-  governance: ['run_governance_check', 'get_brand_guidelines', 'check_asset_expiry', 'audit_content'],
+  governance: ['run_governance_check', 'run_content_qa', 'get_brand_guidelines', 'check_asset_expiry', 'audit_content'],
   workfront: ['create_workfront_task', 'list_workfront_projects', 'get_workfront_project', 'list_workfront_tasks', 'update_workfront_task', 'list_workfront_approvals', 'ask_workfront', 'get_project_health', 'check_workfront_connection'],
-  assets: ['search_dam_assets', 'browse_dam_folder', 'get_asset_metadata', 'update_asset_metadata', 'upload_asset', 'delete_asset', 'move_asset', 'copy_asset', 'create_dam_folder', 'get_asset_renditions', 'add_to_collection', 'generate_image_gemini', 'generate_and_insert_image'],
+  assets: ['search_dam_assets', 'search_content_fragments', 'browse_dam_folder', 'get_asset_metadata', 'update_asset_metadata', 'upload_asset', 'delete_asset', 'move_asset', 'copy_asset', 'create_dam_folder', 'get_asset_renditions', 'add_to_collection', 'generate_image_gemini', 'generate_and_insert_image'],
   images: ['generate_and_insert_image', 'generate_image_gemini', 'generate_image_variations', 'edit_image_with_firefly', 'transform_image', 'create_image_renditions'],
   research: ['gemini_search'],
   journey: ['create_journey', 'generate_journey_content', 'get_journey_status', 'analyze_journey_conflicts'],
@@ -1847,7 +1909,8 @@ const TIER2_KEYWORDS = {
   destinations: ['list_destinations', 'list_destination_flow_runs', 'get_destination_health'],
   support: ['create_support_ticket', 'get_ticket_status', 'search_experience_league', 'get_product_release_notes'],
   optimizer: ['get_site_opportunities', 'get_site_audit'],
-  forms: ['generate_form'],
+  forms: ['generate_form', 'search_forms'],
+  design: ['ingest_figma_design', 'create_da_page'],
   pdf: ['extract_pdf_content', 'extract_brief_content'],
   admin: ['unpublish_preview', 'unpublish_live', 'purge_cache', 'bulk_preview', 'bulk_publish', 'reindex_page', 'get_page_status'],
 };
@@ -1870,6 +1933,7 @@ const INTENT_PATTERNS = {
   pdf: /\b(pdf|brief|document|extract)/i,
   admin: /\b(unpublish|purge|cache|bulk|reindex|status)/i,
   research: /\b(search|research|trend|current|latest|news|competitor|benchmark|2025|today|recent|real.?time|google)/i,
+  design: /\b(figma|design|mockup|wireframe|layout|import.{0,10}design|design.{0,10}import|create.{0,10}page|new.{0,10}page)\b/i,
 };
 
 function classifyIntent(prompt) {
@@ -3001,17 +3065,133 @@ export async function executeTool(name, input) {
 
     case 'run_governance_check': {
       if (!(await ensureAuth())) return authRequiredError('run_governance_check');
+      const pagePath = sanitizePath(input.page_path);
+      const org = da.getOrg(); const repo = da.getRepo(); const branch = da.getBranch();
+      const previewUrl = input.preview_url ||
+        `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page${pagePath}`;
       try {
-        const host = window.__EW_AEM_HOST || null;
-        const result = await govMcp.checkPagePolicy(host, input.page_path);
+        await governanceMcp.initSession();
+        let checksResult = null;
+        try {
+          checksResult = await governanceMcp.callTool('bga_get_checks_by_url', { url: previewUrl });
+        } catch (_e) { /* domain not configured */ }
+        const hasRules = checksResult && checksResult.checks && checksResult.checks.length > 0;
+        if (!hasRules) {
+          return JSON.stringify({
+            status: 'no_rules', page_path: pagePath, preview_url: previewUrl,
+            message: 'No brand governance rules configured for this domain. Add this domain in AEM Governance Context to enable brand checks.',
+            governance_ui: 'https://experience.adobe.com/governance',
+            _source: 'governance_check',
+          }, null, 2);
+        }
+        const brand = checksResult.brand?.name || 'configured brand';
+        const result = await governanceMcp.callTool('bga_evaluate_page', { url: previewUrl });
         return JSON.stringify({
-          page_path: input.page_path,
-          ...result,
-          _source: 'connected',
+          status: 'complete', page_path: pagePath, preview_url: previewUrl,
+          brand, checks_applied: checksResult.checks.length,
+          governance: result, _source: 'governance_check',
           source: 'AEM Experience Governance MCP',
         }, null, 2);
       } catch (err) {
         return mcpError('run_governance_check', err);
+      }
+    }
+
+    case 'run_content_qa': {
+      if (!(await ensureAuth())) return authRequiredError('run_content_qa');
+      const pagePath = sanitizePath(input.page_path);
+      const org = da.getOrg(); const repo = da.getRepo(); const branch = da.getBranch();
+      const previewUrl = input.preview_url ||
+        `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page${pagePath}`;
+      try {
+        await contentQaMcp.initSession();
+        const qaSchemas = await contentQaMcp.getToolSchemas();
+        const firstTool = Object.keys(qaSchemas || {})[0];
+        if (!firstTool) return JSON.stringify({ status: 'skipped', reason: 'No content QA tools available', _source: 'content_qa' });
+        const result = await contentQaMcp.callTool(firstTool, { url: previewUrl });
+        return JSON.stringify({
+          status: 'complete', page_path: pagePath, preview_url: previewUrl,
+          content_qa: result, _source: 'content_qa',
+          source: 'AEM Content QA MCP',
+        }, null, 2);
+      } catch (err) {
+        if (err.message?.includes('401') || err.message?.includes('403')) {
+          return JSON.stringify({ status: 'skipped', reason: 'Content QA entitlement not available for this account', _source: 'content_qa' });
+        }
+        return mcpError('run_content_qa', err);
+      }
+    }
+
+    case 'search_content_fragments': {
+      if (!(await ensureAuth())) return authRequiredError('search_content_fragments');
+      try {
+        const result = await discoveryMcp.searchFragments({ query: input.query, path: input.path, limit: input.limit || 10 });
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Discovery MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('search_content_fragments', err);
+      }
+    }
+
+    case 'search_forms': {
+      if (!(await ensureAuth())) return authRequiredError('search_forms');
+      try {
+        const result = await discoveryMcp.searchForms({ query: input.query, limit: input.limit || 10 });
+        return JSON.stringify({ ...result, _source: 'connected', source: 'AEM Discovery MCP' }, null, 2);
+      } catch (err) {
+        return mcpError('search_forms', err);
+      }
+    }
+
+    case 'create_da_page': {
+      if (!(await ensureAuth())) return authRequiredError('create_da_page');
+      const pagePath = sanitizePath(input.page_path);
+      const html = input.html || `<h1>${input.title || 'New Page'}</h1>`;
+      const htmlPath = (pagePath === '/' ? '/index' : pagePath) + '.html';
+      try {
+        await da.updatePage(htmlPath, html);
+        const org = da.getOrg(); const repo = da.getRepo(); const branch = da.getBranch();
+        const previewUrl = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page${pagePath}`;
+        const daUrl = `https://da.live/edit#/${org}/${repo}${pagePath === '/' ? '/index' : pagePath}`;
+        return JSON.stringify({
+          status: 'created', page_path: pagePath,
+          preview_url: previewUrl, da_edit_url: daUrl,
+          message: `Page created at ${pagePath}. Use edit_page_content to add content or preview_page to trigger preview.`,
+          _action: 'refresh_preview', _preview_path: pagePath,
+          _source: 'connected',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('create_da_page', err);
+      }
+    }
+
+    case 'ingest_figma_design': {
+      if (!(await ensureAuth())) return authRequiredError('ingest_figma_design');
+      try {
+        const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
+        const figmaToken = localStorage.getItem('compass-figma-token') || '';
+        const headers = { 'Content-Type': 'application/json' };
+        if (figmaToken) headers['X-Figma-Token'] = figmaToken;
+        const resp = await fetch(`${workerBase}/figma-file?url=${encodeURIComponent(input.figma_url)}`, { headers });
+        if (resp.status === 401) return JSON.stringify({ error: 'No Figma token configured. Add your Figma Personal Access Token in Compass settings (gear icon).' });
+        const data = await resp.json();
+        if (data.error) return JSON.stringify({ error: data.error });
+        // Return simplified structure for brain to map to EDS blocks
+        const frames = [];
+        const walk = (node) => {
+          if (!node) return;
+          if (node.type === 'FRAME' || node.type === 'COMPONENT') frames.push({ name: node.name, type: node.type, children: node.children?.map((c) => ({ name: c.name, type: c.type, text: c.characters })).filter(Boolean) });
+          if (node.children) node.children.forEach(walk);
+        };
+        const pages = data.document?.children || [];
+        pages.forEach((page) => page.children?.forEach(walk));
+        return JSON.stringify({
+          status: 'success', file_name: data.name,
+          frames: frames.slice(0, 20),
+          instruction: 'Map each frame to an EDS block table. Hero frame → <table><tr><td>hero</td></tr>...</table>. Cards → cards table. Write to AEM via create_da_page or edit_page_content.',
+          _source: 'figma',
+        }, null, 2);
+      } catch (err) {
+        return mcpError('ingest_figma_design', err);
       }
     }
 
@@ -5525,7 +5705,8 @@ Total: 1 tool call.
 
 ### PAGE_CREATE_WORKFLOW
 
-1. \`copy_aem_page\` from a template, OR \`edit_page_content\` with full html for net-new pages
+**DA/EDS site (new page):** \`create_da_page\`(page_path=..., html=...) — DA Admin API upsert, creates if path doesn't exist. Pass EDS block table HTML.
+**AEM CS/JCR site (new page):** \`copy_aem_page\` from a template, OR \`create_aem_page\` for blank.
 2. If images needed: \`edit_page_content\` with image_prompt
 3. \`run_governance_check\` before publishing
 4. \`publish_page\` only after governance approval
@@ -5550,10 +5731,47 @@ Rules: never give optimization advice without Spacecat first. Spacecat is read-o
 
 ### GOVERNANCE_WORKFLOW
 
-1. Call \`run_governance_check\` AND \`get_page_content\` together (parallel — both in one response)
-2. Surface violations with severity. Propose specific fixes.
-3. Apply fixes via TEXT_EDIT_WORKFLOW or IMAGE_WORKFLOW
-4. Re-run \`run_governance_check\` to confirm clean before publishing
+1. Call \`run_governance_check\`(page_path) — lookup-first: checks if brand rules are configured for this domain first, then evaluates if they exist. Returns no_rules status with setup guidance if domain not configured.
+2. \`run_content_qa\`(page_path) — technical quality check (SEO, readability, meta). Gracefully skips if @adobe.com entitlement not present.
+3. Surface violations with severity. Propose specific fixes.
+4. Apply fixes via TEXT_EDIT_WORKFLOW or IMAGE_WORKFLOW
+5. Re-run \`run_governance_check\` to confirm clean before publishing
+
+---
+
+### DESIGN_TO_AEM_WORKFLOW
+
+When a user provides a Figma URL or uploads a design screenshot/mockup:
+
+1. **Figma URL** → call \`ingest_figma_design\`(figma_url=...) to fetch design structure
+2. **Image upload** → analyze the visual layout using vision directly
+3. Map sections to EDS block table HTML:
+   - Hero: \`<table><tr><td>hero</td></tr><tr><td><h1>Headline</h1><p>Sub</p><a href="#">CTA</a></td></tr></table>\`
+   - Cards: \`<table><tr><td>cards</td></tr><tr><td>Image</td><td>Title + body</td></tr></table>\`
+   - Columns: \`<table><tr><td>columns</td></tr><tr><td>Left</td><td>Right</td></tr></table>\`
+   - Text/body: plain \`<p>\`, \`<h2>\`, \`<ul>\` outside tables
+4. Write to AEM: new page → \`create_da_page\`(page_path=..., html=...) / existing → \`edit_page_content\`(html=...)
+5. Always trigger_preview: true
+
+Do NOT output raw CSS or inline styles. All EDS blocks are tables. No arbitrary HTML.
+
+---
+
+### CHANNEL_PROFILES
+
+When generating or resizing assets for a specific platform, use these exact dimensions:
+
+**TikTok:** Feed/Spark Ad 1080×1920 · Profile 200×200
+**Instagram:** Story/Reel 1080×1920 · Feed square 1080×1080 · Feed portrait 1080×1350 · Feed landscape 1080×566
+**Facebook:** Feed/Ad 1200×628 · Story 1080×1920 · Cover 820×312 · Event cover 1920×1005
+**LinkedIn:** Feed post 1200×627 · Story 1080×1920 · Company cover 1128×191 · Profile banner 1584×396
+**X/Twitter:** Feed image 1200×675 · Header 1500×500
+**YouTube:** Thumbnail 1280×720 · Shorts 1080×1920 · Channel art 2560×1440
+**Pinterest:** Standard Pin 1000×1500 · Story Pin 1080×1920
+**Email:** Header banner 600×200 · Hero 600×400
+**Web:** Full-width hero 1440×810 · Card/thumbnail 400×300
+
+**Routing:** Existing DAM asset + channel variants → \`create_image_renditions\` or \`transform_image\` (DM delivery URLs, no generation). No existing asset yet → \`generate_image_gemini\` or \`firefly_generate_image\` with the channel dimensions.
 
 ---
 
@@ -6256,7 +6474,7 @@ export async function streamChat(userMessage, context, onChunk, onToolCall, onTo
     }
   } else if (isOps) {
     // DA OPS: use Compass's tools
-    const OPS_TOOLS = ['edit_page_content', 'preview_page', 'publish_page'];
+    const OPS_TOOLS = ['edit_page_content', 'preview_page', 'publish_page', 'create_da_page', 'run_governance_check', 'run_content_qa'];
     tools = getToolsForPrompt(promptText).filter(t => OPS_TOOLS.includes(t.name));
   } else {
     // Thinking Brain: lazy-init analytics MCPs on first analytics/performance query
