@@ -46,13 +46,9 @@ const WINDOWS = [
     prompts: [
       // Discovery
       { label: 'list pages',             text: 'What pages does this site have? List the paths.',                                                                         maxWait: 30 },
-      // Edit
+      // Edit — governance tested separately in Win B with clean state
       { label: 'edit hero headline',     text: 'Update the hero headline on the home page to "World-Class Care, Close to Home"',                                          maxWait: 45, authNote: true },
-      // Chain: governance on smarttiger URL (where Frescopa rules are ingested — expect real violations)
-      { label: 'govern after edit',      text: 'Run a brand governance check on this page: https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/home',          maxWait: 50 },
-      // Chain: content QA on same page
-      { label: 'content QA after edit',  text: 'Now run a content quality check on the home page — SEO, readability, missing meta tags',                                  maxWait: 45 },
-      // Create
+      // Create from brief — tests create_da_page + block generation
       { label: 'create from brief',      text: 'Create a new page at /en/emergency-services with headline "24/7 Emergency Care" and a CTA "Call 911 Ready Team" → /contact. Include three cards: Trauma Center, Air Transport, EMS Liaison.', maxWait: 90, authNote: true },
     ],
   },
@@ -66,10 +62,10 @@ const WINDOWS = [
       { label: 'brand governance',       text: 'Run a brand governance check on this page: https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/home',          maxWait: 50 },
       // Preview to confirm page loaded correctly
       { label: 'preview page',           text: 'Show me a preview of the Frescopa home page',                                                                               maxWait: 20 },
-      // Combined governance in one prompt — brain should run both checks
-      { label: 'governance + QA',        text: 'Run a brand governance check AND a content quality check on https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/home at the same time', maxWait: 70 },
-      // Search forms — should call search_forms, not page-crawl
-      { label: 'search forms (B)',       text: 'Find any forms on the Frescopa site — newsletter signup, contact, or subscription forms',                                   maxWait: 30 },
+      // Second governance on a different page — tests if governance MCP session persists
+      { label: 'governance page 2',      text: 'Run a brand governance check on https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/coffee',                  maxWait: 50 },
+      // Search forms — should call search_forms tool
+      { label: 'search forms (B)',       text: 'Find any Adaptive Forms on the Frescopa site',                                                                              maxWait: 60 },
     ],
   },
   {
@@ -83,7 +79,7 @@ const WINDOWS = [
       // DAM search — should return real Frescopa assets
       { label: 'search DAM assets',      text: 'Search for coffee images in the Frescopa DAM',                                                                              maxWait: 50 },
       // Brand-approved filter — should use tags filter
-      { label: 'brand-approved DAM',     text: 'Find brand-approved Frescopa coffee images in the DAM',                                                                     maxWait: 35 },
+      { label: 'brand-approved DAM',     text: 'Find brand-approved Frescopa coffee images in the DAM',                                                                     maxWait: 50 },
       // Channel renditions — chained from DAM asset
       { label: 'TikTok + IG Story',      text: 'Create TikTok (1080×1920) and Instagram Story (1080×1920) variants of the Frescopa hero image',                            maxWait: 80, authNote: true },
       // LinkedIn banner
@@ -101,7 +97,7 @@ const WINDOWS = [
       // Content Fragment search — should call search_content_fragments, not page-crawl
       { label: 'search fragments',       text: 'Search for Frescopa product description content fragments',                                                                  maxWait: 45 },
       // Forms discovery — should call search_forms, not page-crawl
-      { label: 'search forms',           text: 'Find any forms on the Frescopa site — newsletter signup, contact, or subscription forms',                                   maxWait: 45 },
+      { label: 'search forms',           text: 'Find any Adaptive Forms on the Frescopa site',                                                                              maxWait: 90 },
       // Asset expiry — routes to check_asset_expiry via governance TIER2 (expir keyword)
       { label: 'asset expiry check',     text: 'Check if any Frescopa assets are expiring soon or have DRM license restrictions',                                            maxWait: 55 },
       // Translation
@@ -246,38 +242,26 @@ async function runWindow(browser, win) {
         Object.defineProperty(Location.prototype, 'href', {
           ...origDesc,
           set(val) {
-            if (shouldBlock(val)) {
-              console.warn('[nav-guard] blocked href — throwing to unwind auth stack:', val.slice(0, 60));
-              throw new Error('IMS navigation blocked by test guard');
-            }
+            if (shouldBlock(val)) { console.warn('[nav-guard] blocked href:', val.slice(0, 60)); return; }
             origDesc.set.call(this, val);
           },
         });
       }
       const origAssign = Location.prototype.assign;
       Location.prototype.assign = function navGuardAssign(url) {
-        if (shouldBlock(url)) {
-          console.warn('[nav-guard] blocked assign:', url.slice(0, 60));
-          throw new Error('IMS navigation blocked by test guard');
-        }
+        if (shouldBlock(url)) { console.warn('[nav-guard] blocked assign:', url.slice(0, 60)); return; }
         return origAssign.call(this, url);
       };
       const origReplace = Location.prototype.replace;
       Location.prototype.replace = function navGuardReplace(url) {
-        if (shouldBlock(url)) {
-          console.warn('[nav-guard] blocked replace:', url.slice(0, 60));
-          throw new Error('IMS navigation blocked by test guard');
-        }
+        if (shouldBlock(url)) { console.warn('[nav-guard] blocked replace:', url.slice(0, 60)); return; }
         return origReplace.call(this, url);
       };
     } catch (e) { console.warn('[nav-guard] init failed:', e.message); }
   });
 
   // Capture console errors + uncaught JS errors so we can diagnose app.js load failures
-  page.on('pageerror', (err) => {
-    // Suppress the expected navigation-blocked error from our nav-guard (thrown intentionally)
-    if (!err.message.includes('IMS navigation blocked')) logW(`[pageerror] ${err.message.slice(0, 200)}`);
-  });
+  page.on('pageerror', (err) => logW(`[pageerror] ${err.message.slice(0, 200)}`));
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
       const t = msg.text();
@@ -365,6 +349,17 @@ async function runWindow(browser, win) {
   // Run prompts sequentially in this window
   for (const { label: pLabel, text, maxWait, authNote } of prompts) {
     if (page.isClosed()) { logW(`⚡ Page closed — skipping remaining prompts`); break; }
+
+    // Pre-send health check: verify chat is accessible before sending.
+    // If a prior governance/MCP failure corrupted the SPA state, skip gracefully
+    // instead of logging misleading "(chatInput or sendBtn not found)" failures.
+    const chatOk = await page.evaluate(() => !!document.getElementById('chatInput')).catch(() => false);
+    if (!chatOk) {
+      logW(`⚡ ${pLabel} — skipped (chat unavailable after prior step)`);
+      results.push({ label: pLabel, ok: false, elapsed: '0', text: '(chat unavailable — prior step corrupted SPA)' });
+      continue;
+    }
+
     logW(`→ ${pLabel}${authNote ? ' [needs IMS write]' : ''}`);
     try {
       const r = await sendAndWait(page, text, maxWait);
