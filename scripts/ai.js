@@ -57,6 +57,18 @@ async function ensureAnalyticsTools() {
   }));
 }
 
+// Quality MCP pre-warm — called fire-and-forget after any page edit/preview so that
+// governance and content QA sessions are already established when the user clicks a chip
+let qualityMcpsWarmed = false;
+export function warmQualityMcps() {
+  if (qualityMcpsWarmed) return;
+  qualityMcpsWarmed = true;
+  Promise.allSettled([
+    governanceMcp.initSession().catch(() => {}),
+    contentQaMcp.initSession().catch(() => {}),
+  ]);
+}
+
 /** Build the correct Universal Editor URL for an AEM CS page. */
 function buildUeUrl(aemHost, pagePath, orgCtx = {}) {
   const host = aemHost.replace(/^https?:\/\//, '');
@@ -3064,13 +3076,14 @@ export async function executeTool(name, input) {
     /* ─── Governance Agent ─── */
 
     case 'run_governance_check': {
-      if (!(await ensureAuth())) return authRequiredError('run_governance_check');
       const pagePath = sanitizePath(input.page_path);
       const org = da.getOrg(); const repo = da.getRepo(); const branch = da.getBranch();
       const previewUrl = input.preview_url ||
         `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page${pagePath}`;
+      // Auth check and session init are independent — run in parallel
+      const [authed] = await Promise.all([ensureAuth(), governanceMcp.initSession().catch(() => {})]);
+      if (!authed) return authRequiredError('run_governance_check');
       try {
-        await governanceMcp.initSession();
         let checksResult = null;
         try {
           checksResult = await governanceMcp.callTool('bga_get_checks_by_url', { url: previewUrl });
@@ -3098,13 +3111,14 @@ export async function executeTool(name, input) {
     }
 
     case 'run_content_qa': {
-      if (!(await ensureAuth())) return authRequiredError('run_content_qa');
       const pagePath = sanitizePath(input.page_path);
       const org = da.getOrg(); const repo = da.getRepo(); const branch = da.getBranch();
       const previewUrl = input.preview_url ||
         `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page${pagePath}`;
+      // Auth check and session init are independent — run in parallel
+      const [authed] = await Promise.all([ensureAuth(), contentQaMcp.initSession().catch(() => {})]);
+      if (!authed) return authRequiredError('run_content_qa');
       try {
-        await contentQaMcp.initSession();
         const qaSchemas = await contentQaMcp.getToolSchemas();
         const firstTool = Object.keys(qaSchemas || {})[0];
         if (!firstTool) return JSON.stringify({ status: 'skipped', reason: 'No content QA tools available', _source: 'content_qa' });
@@ -3171,20 +3185,20 @@ export async function executeTool(name, input) {
         const figmaToken = localStorage.getItem('compass-figma-token') || '';
         const headers = { 'Content-Type': 'application/json' };
         if (figmaToken) headers['X-Figma-Token'] = figmaToken;
-        const resp = await fetch(`${workerBase}/figma-file?url=${encodeURIComponent(input.figma_url)}`, { headers });
+        // Figma API fetch and block inventory are fully independent — run in parallel
+        const [resp, blockItemsRaw] = await Promise.all([
+          fetch(`${workerBase}/figma-file?url=${encodeURIComponent(input.figma_url)}`, { headers }),
+          da.listPages('/blocks').catch(() => null),
+        ]);
         if (resp.status === 401) return JSON.stringify({ error: 'No Figma token configured. Add your Figma Personal Access Token in Compass settings (gear icon).' });
         const data = await resp.json();
         if (data.error) return JSON.stringify({ error: data.error });
 
         // Discover blocks already on this site — prefer reuse over creating new ones
-        let availableBlocks = [];
-        try {
-          const blockItems = await da.listPages('/blocks');
-          availableBlocks = (blockItems || [])
-            .map((b) => (b.name || b.path?.split('/').pop() || '').replace(/\.html?$/, ''))
-            .filter(Boolean)
-            .sort();
-        } catch { /* /blocks not accessible — will fall back to generic block names */ }
+        const availableBlocks = (blockItemsRaw || [])
+          .map((b) => (b.name || b.path?.split('/').pop() || '').replace(/\.html?$/, ''))
+          .filter(Boolean)
+          .sort();
 
         // Return simplified Figma structure for brain to map to EDS blocks
         const frames = [];

@@ -14,8 +14,8 @@
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
 import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken, initS2SToken } from './ims.js';
-import * as ai from './ai.js?v=117';
-import { TOOL_AGENT_MAP } from './ai.js?v=117';
+import * as ai from './ai.js?v=118';
+import { TOOL_AGENT_MAP } from './ai.js?v=118';
 import * as da from './da-client.js';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
@@ -2396,6 +2396,10 @@ async function handleRealChat(text, file) {
 
     // ── Contextual Suggestion Chips ──
     // Show smart follow-up actions based on which tools were called
+    // Pre-warm quality MCPs in the background so Brand check / Content QA chips are instant
+    if (toolsCalled.has('edit_page_content') || toolsCalled.has('preview_page')) {
+      ai.warmQualityMcps?.();
+    }
     if (toolsCalled.size > 0) {
       const suggestions = getContextualSuggestions(toolsCalled);
       if (suggestions.length > 0) {
