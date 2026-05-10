@@ -1908,7 +1908,8 @@ const TIER1_CORE = new Set([
 
 const TIER2_KEYWORDS = {
   analytics: ['cja_visualize', 'cja_kpi_pulse', 'cja_executive_briefing', 'cja_anomaly_triage', 'get_analytics_insights'],
-  governance: ['run_governance_check', 'run_content_qa', 'get_brand_guidelines', 'check_asset_expiry', 'audit_content'],
+  governance: ['run_governance_check', 'get_brand_guidelines', 'check_asset_expiry', 'audit_content'],
+  contentqa:  ['run_content_qa', 'audit_content'],
   workfront: ['create_workfront_task', 'list_workfront_projects', 'get_workfront_project', 'list_workfront_tasks', 'update_workfront_task', 'list_workfront_approvals', 'ask_workfront', 'get_project_health', 'check_workfront_connection'],
   assets: ['search_dam_assets', 'search_content_fragments', 'browse_dam_folder', 'get_asset_metadata', 'update_asset_metadata', 'upload_asset', 'delete_asset', 'move_asset', 'copy_asset', 'create_dam_folder', 'get_asset_renditions', 'add_to_collection', 'generate_image_gemini', 'generate_and_insert_image'],
   images: ['generate_and_insert_image', 'generate_image_gemini', 'generate_image_variations', 'edit_image_with_firefly', 'transform_image', 'create_image_renditions'],
@@ -1929,7 +1930,8 @@ const TIER2_KEYWORDS = {
 
 const INTENT_PATTERNS = {
   analytics: /\b(analytics?|cja|metric|kpi|dashboard|report|insight|data|trend|anomal)/i,
-  governance: /\b(governance|brand|compliance|audit|policy|check)\b/i,
+  governance: /\b(governance|brand.{0,10}(check|compliance|guideline|policy)|compliance|audit|policy)\b/i,
+  contentqa:  /\b(content.{0,10}(quality|qa|check)|seo|readab|meta.?tag|broken.?link|technical.?check)\b/i,
   workfront: /\b(workfront|project|task|approval|assign|deadline)/i,
   assets: /\b(asset|dam|image|photo|media|upload|folder|rendition|collection)/i,
   images: /\b(variation|transform|rendition|resize|crop|channel|social|generat.{0,10}image|new image|replace.{0,10}image|update.{0,10}image|hero image|image.{0,10}generat|firefly|nano.?banana)/i,
@@ -5855,6 +5857,11 @@ Variations only (no test): \`generate_page_variations\` → review with user →
 - \`run_governance_check\` + \`run_content_qa\` (both check the same page independently)
 - \`get_page_content\` + \`search_dam_assets\` (reading page + finding assets simultaneously)
 - \`edit_page_content\` + \`run_governance_check\` (edit + check in same turn if user requests both)
+
+**Governance vs Content QA routing:**
+- "Brand check", "brand compliance", "governance check" → `run_governance_check` (brand policy, tone, CTA rules)
+- "Content quality check", "SEO check", "readability", "meta tags", "broken links" → `run_content_qa` (technical content quality)
+- Both requested in same turn → call both in parallel
 
 **After any edit:** Share the Universal Editor and DA edit links so the user can open and edit visually.
 
