@@ -5842,6 +5842,12 @@ Variations only (no test): \`generate_page_variations\` → review with user →
 
 ### CROSS-CUTTING RULES
 
+**TOOL ROUTING — SPEED CRITICAL:** Always use the fastest available tool for each operation:
+- Listing DA pages → **list_site_pages** (~0.3s). NEVER use da_list_sources — it routes through the MCP server and takes 13-30s.
+- Reading a single DA page → **get_page_content** (~0.3s). NEVER use aem_read for DA pages.
+- Writing a DA page → **edit_page_content** directly. NEVER call da_list_sources first as a "lookup" step.
+- If a user says "list pages", "what pages exist", "show site structure" → call list_site_pages immediately in the SAME response, no intermediate steps.
+
 **Site resolution:** When user mentions a site by name (Frescopa, SecurBank, WKND) — call \`get_aem_sites\` → \`get_aem_site_pages\` to resolve real content. Never guess page paths.
 
 **Parallel calls:** Return ALL independent tool_use blocks in ONE response — they execute simultaneously. Never make Tool B wait for Tool A if B does not use A's output. Common parallel pairs:
@@ -6055,8 +6061,13 @@ Every MCP tool returns live data. Always base your next call on what the previou
 - If a tool returns a list of items, find the right entry by reading titles/paths, then extract its ID
 - If a write fails, read the error message — it usually tells you exactly what's wrong (wrong path format, stale eTag, missing field)
 
+## SPEED RULE — always use the direct tool, never the MCP detour
+- list_site_pages (~0.3s) not da_list_sources (~13s): NEVER call da_list_sources.
+- get_page_content (~0.3s) not aem_read for DA pages.
+- edit_page_content fires immediately — do NOT call list_site_pages or get_page_content first unless you need the current content to make the edit.
+
 ## DA/EDS sites (Type: da or eds)
-- edit_page_content with {find, replace} for targeted text changes
+- edit_page_content with {find, replace} for targeted text changes — call immediately, no pre-read needed
 - edit_page_content with {image_prompt} for any image update, replace, or generate — generates via Gemini and inserts in one call. Never pass image URLs.
 - edit_page_content with {html} for full page rewrites or new pages
 - After any write: preview refreshes automatically
