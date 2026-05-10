@@ -1933,7 +1933,7 @@ const INTENT_PATTERNS = {
   governance: /\b(governance|brand.{0,10}(check|compliance|guideline|policy)|compliance|audit|policy|expir|drm|licens|rights)\b/i,
   contentqa:  /\b(content.{0,10}(quality|qa|check)|seo|readab|meta.?tag|broken.?link|technical.?check)\b/i,
   workfront: /\b(workfront|project|task|approval|assign|deadline)/i,
-  assets: /\b(asset|dam|image|photo|media|upload|folder|rendition|collection)/i,
+  assets: /\b(asset|dam|image|photo|media|upload|folder|rendition|collection|fragment)/i,
   images: /\b(variation|transform|rendition|resize|crop|channel|social|generat.{0,10}image|new image|replace.{0,10}image|update.{0,10}image|hero image|image.{0,10}generat|firefly|nano.?banana)/i,
   journey: /\b(journey|campaign|orchestrat|ajo)/i,
   experiment: /\b(experiment|a\/b|test|personali|target|offer)/i,
@@ -5850,8 +5850,19 @@ Variations only (no test): \`generate_page_variations\` → review with user →
 - Writing a DA page → **edit_page_content** directly. NEVER call da_list_sources or get_aem_site_pages first as a "lookup" step.
 - For brief-to-page: call **create_da_page** directly with the generated HTML — do NOT call extract_brief_content when the brief text is already in the message.
 - If a user says "list pages", "what pages exist", "show site structure" → call list_site_pages immediately in the SAME response, no intermediate steps.
+- Finding content fragments → **search_content_fragments** immediately. NEVER crawl pages with get_page_content to find fragments.
+- Finding existing forms → **search_forms** immediately. NEVER crawl pages with get_page_content to find forms.
 
-**Named CS/JCR site resolution:** When user mentions a CS-authored site by name (Frescopa, SecurBank, WKND) — call \`get_aem_sites\` → \`get_aem_site_pages\` (Content MCP / JCR). This is ONLY for pre-registered AEM CS sites. For the currently connected DA site (e.g. Lifepoint), always use \`list_site_pages\` — never \`get_aem_site_pages\`.
+**ABSOLUTE RULE — DA sites (siteType === 'da'):**
+The currently connected DA site uses these tools ONLY:
+- Discovery: \`list_site_pages\` — NOT \`get_aem_sites\` or \`get_aem_site_pages\` (those are for named CS sites only)
+- Read: \`get_page_content\`
+- Write: \`edit_page_content\` — NOT any JCR/CS tools
+- Create: \`create_da_page\`
+The home page path is always \`/index\` — do NOT call any lookup tool to find it.
+Even if the site has a recognizable name (Lifepoint, Helix, etc.), if siteType is 'da', treat it as a DA site and use ONLY the above tools.
+
+**Named CS/JCR site resolution:** When user mentions a CS-authored site by name (Frescopa, SecurBank, WKND) AND it is NOT the currently connected site — call \`get_aem_sites\` → \`get_aem_site_pages\` (Content MCP / JCR). This is ONLY for pre-registered AEM CS sites that are named explicitly in a request while a different DA site is connected.
 
 **Parallel calls:** Return ALL independent tool_use blocks in ONE response — they execute simultaneously. Never make Tool B wait for Tool A if B does not use A's output. Common parallel pairs:
 - \`create_aem_page\` + \`search_dam_assets\` (brief-to-page — both needed for patch, neither waits)
@@ -6074,6 +6085,8 @@ Every MCP tool returns live data. Always base your next call on what the previou
 - **get_page_content** (~0.3s) for reading a DA page. NEVER use aem_read for DA pages.
 - **edit_page_content** fires immediately — no pre-read unless you need current content to make the edit.
 - get_aem_site_pages is Content MCP (JCR). Only use it for named CS sites like Frescopa or SecurBank — never for the currently connected DA site.
+- **search_content_fragments** for finding/searching content fragments. NEVER crawl pages with get_page_content to discover fragments.
+- **search_forms** for finding/discovering existing forms. NEVER crawl pages to find forms.
 
 ## DA/EDS sites (Type: da or eds)
 - edit_page_content with {find, replace} for targeted text changes — call immediately, no pre-read needed

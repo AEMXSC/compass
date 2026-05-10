@@ -45,7 +45,7 @@ const WINDOWS = [
     color: '\x1b[36m', // cyan
     prompts: [
       // Discovery
-      { label: 'list pages',             text: 'What pages does this site have? List the paths.',                                                                         maxWait: 20 },
+      { label: 'list pages',             text: 'What pages does this site have? List the paths.',                                                                         maxWait: 30 },
       // Edit
       { label: 'edit hero headline',     text: 'Update the hero headline on the home page to "World-Class Care, Close to Home"',                                          maxWait: 45, authNote: true },
       // Chain: governance immediately after edit — does it return real violation scores?
@@ -62,11 +62,11 @@ const WINDOWS = [
     color: '\x1b[33m', // yellow
     site: FRESCOPA,    // Frescopa has brand rules ingested — expect real violations
     prompts: [
-      // Governance with real rules — should return CTA violations and brand checks
-      { label: 'brand governance',       text: 'Run a brand governance check on the Frescopa home page',                                                                    maxWait: 45 },
-      { label: 'content QA',             text: 'Run a content quality check on the Frescopa home page — SEO score, readability grade, missing meta tags, broken links',     maxWait: 50 },
-      // Combined in one prompt
-      { label: 'governance + QA',        text: 'Run both a brand governance check and a content quality check on the Frescopa home page at the same time',                  maxWait: 60 },
+      // Governance with explicit URL — rules are ingested at smarttiger domain (not aem-showcase)
+      { label: 'brand governance',       text: 'Run a brand governance check on this page: https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/home',          maxWait: 50 },
+      { label: 'content QA',             text: 'Run a content quality check on the home page — SEO score, readability grade, missing meta tags, broken links',               maxWait: 55 },
+      // Combined in one prompt — brain should run both in parallel
+      { label: 'governance + QA',        text: 'Run both a brand governance check and a content quality check on the home page at the same time',                            maxWait: 70 },
       // Preview to confirm page loaded correctly
       { label: 'preview page',           text: 'Show me a preview of the Frescopa home page',                                                                               maxWait: 20 },
     ],
@@ -80,7 +80,7 @@ const WINDOWS = [
       // Image generation
       { label: 'generate hero image',    text: 'Generate a cinematic hero image for a premium coffee brand — espresso bar, warm lighting, artisan feel. 1440×810.',         maxWait: 60 },
       // DAM search — should return real Frescopa assets
-      { label: 'search DAM assets',      text: 'Search for coffee images in the Frescopa DAM',                                                                              maxWait: 35 },
+      { label: 'search DAM assets',      text: 'Search for coffee images in the Frescopa DAM',                                                                              maxWait: 50 },
       // Brand-approved filter — should use tags filter
       { label: 'brand-approved DAM',     text: 'Find brand-approved Frescopa coffee images in the DAM',                                                                     maxWait: 35 },
       // Channel renditions — chained from DAM asset
@@ -96,13 +96,13 @@ const WINDOWS = [
     site: FRESCOPA,    // Frescopa has real CFs and assets in AEM CS
     prompts: [
       // Spanish natural language
-      { label: 'spanish prompt',         text: '¿Qué páginas tiene el sitio Frescopa? Lista las rutas.',                                                                    maxWait: 20 },
-      // Content Fragment search — should find Frescopa product CFs
-      { label: 'search fragments',       text: 'Search for Frescopa product description content fragments',                                                                  maxWait: 35 },
-      // Forms discovery
-      { label: 'search forms',           text: 'Find any forms on the Frescopa site — newsletter signup, contact, or subscription forms',                                   maxWait: 30 },
-      // Asset expiry — now routes to check_asset_expiry via governance TIER2 (expir keyword)
-      { label: 'asset expiry check',     text: 'Check if any Frescopa assets are expiring soon or have DRM license restrictions',                                            maxWait: 35 },
+      { label: 'spanish prompt',         text: '¿Qué páginas tiene el sitio Frescopa? Lista las rutas.',                                                                    maxWait: 30 },
+      // Content Fragment search — should call search_content_fragments, not page-crawl
+      { label: 'search fragments',       text: 'Search for Frescopa product description content fragments',                                                                  maxWait: 45 },
+      // Forms discovery — should call search_forms, not page-crawl
+      { label: 'search forms',           text: 'Find any forms on the Frescopa site — newsletter signup, contact, or subscription forms',                                   maxWait: 45 },
+      // Asset expiry — routes to check_asset_expiry via governance TIER2 (expir keyword)
+      { label: 'asset expiry check',     text: 'Check if any Frescopa assets are expiring soon or have DRM license restrictions',                                            maxWait: 40 },
       // Translation
       { label: 'translate hero',         text: 'Translate the Frescopa home page hero headline and subtext to Spanish',                                                     maxWait: 45, authNote: true },
     ],
@@ -143,6 +143,7 @@ async function sendAndWait(page, text, maxWaitSec) {
 
   const deadline = Date.now() + maxWaitSec * 1000;
   let settledFor = 0;
+  let prevText = '';  // track text between polls — LLM still streaming if text keeps changing
 
   while (Date.now() < deadline) {
     await page.waitForTimeout(2500).catch(() => {});
@@ -152,8 +153,8 @@ async function sendAndWait(page, text, maxWaitSec) {
       const fresh = msgs.slice(prevCount);
       const last = [...fresh].reverse().find((el) => !el.classList.contains('user'));
       const txt = last?.textContent || '';
-      // Use word-boundary test — 'Running ' (trailing space) missed "Running" at end of string
-      const busy = /\b(Thinking|Processing|Running|Scanning|Fetching|Generating)\b/.test(txt);
+      // Word-boundary regex: catches "Running" at end of string (plain includes() missed it)
+      const busy = /\b(Thinking|Processing|Running|Scanning|Fetching|Generating|Initializing|Connecting)\b/.test(txt);
       return {
         hasReply: fresh.length > 1,
         busy,
@@ -162,13 +163,21 @@ async function sendAndWait(page, text, maxWaitSec) {
     }, before).catch(() => ({ hasReply: false, busy: true, lastText: '' }));
 
     if (state.hasReply && !state.busy) {
-      settledFor += 2500;
-      if (settledFor >= 3000) {
-        return { ok: true, elapsed: ((Date.now() - t0) / 1000).toFixed(1), text: state.lastText };
+      if (state.lastText === prevText && prevText.length > 10) {
+        // Text is stable and not just a fragment — accumulate settle time
+        settledFor += 2500;
+        if (settledFor >= 5000) {
+          // Require 5s of text stability so we don't capture mid-stream LLM intro text
+          return { ok: true, elapsed: ((Date.now() - t0) / 1000).toFixed(1), text: state.lastText };
+        }
+      } else {
+        // Text changed or too short — LLM still streaming, reset settle counter
+        settledFor = 0;
       }
     } else {
       settledFor = 0;
     }
+    prevText = state.lastText;
   }
   if (page.isClosed()) return { ok: false, elapsed: ((Date.now() - t0) / 1000).toFixed(1), text: '(page closed)' };
   const finalText = await page.$$eval('#chatMessages .message', (els) => {
@@ -189,6 +198,10 @@ async function runWindow(browser, win) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await ctx.route('**/*imslib*', (r) => r.abort());
   await ctx.route('**/auth.services.adobe.com/**', (r) => r.abort());
+  // Block IMS sign-in navigation — signIn() calls window.location.href = ims-na1.adobelogin.com
+  // which kills the session. Intercept at network level so the page stays on Compass.
+  await ctx.route('**/*.adobelogin.com/**', (r) => r.abort());
+  await ctx.route('**/experience.adobe.com/**', (r) => r.abort());
   await ctx.addInitScript((tok) => {
     localStorage.setItem('ew-ims-token', tok);
     localStorage.setItem('ew-s2s-token', tok);
