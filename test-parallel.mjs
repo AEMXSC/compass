@@ -58,13 +58,13 @@ const WINDOWS = [
     color: '\x1b[33m', // yellow
     site: FRESCOPA,    // Frescopa has brand rules ingested — expect real violations
     prompts: [
-      // Governance with explicit URL — rules are ingested at smarttiger domain (not aem-showcase)
+      // Governance with explicit URL — rules ingested at smarttiger domain (not aem-showcase)
       { label: 'brand governance',       text: 'Run a brand governance check on this page: https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/home',          maxWait: 50 },
       // Preview to confirm page loaded correctly
       { label: 'preview page',           text: 'Show me a preview of the Frescopa home page',                                                                               maxWait: 20 },
-      // Second governance on a different page — tests if governance MCP session persists
-      { label: 'governance page 2',      text: 'Run a brand governance check on https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/coffee',                  maxWait: 50 },
-      // Search forms — should call search_forms tool
+      // Browse DAM to find campaign assets — tests Discovery MCP after governance
+      { label: 'browse DAM folder',      text: 'Browse the Frescopa DAM folder at /content/dam/frescopa and show what asset categories exist',                              maxWait: 30 },
+      // Search for forms — tests search_forms tool (note: Frescopa may have limited Adaptive Forms)
       { label: 'search forms (B)',       text: 'Find any Adaptive Forms on the Frescopa site',                                                                              maxWait: 60 },
     ],
   },
@@ -96,8 +96,8 @@ const WINDOWS = [
       { label: 'spanish prompt',         text: '¿Qué páginas tiene el sitio Frescopa? Lista las rutas.',                                                                    maxWait: 30 },
       // Content Fragment search — should call search_content_fragments, not page-crawl
       { label: 'search fragments',       text: 'Search for Frescopa product description content fragments',                                                                  maxWait: 45 },
-      // Forms discovery — should call search_forms, not page-crawl
-      { label: 'search forms',           text: 'Find any Adaptive Forms on the Frescopa site',                                                                              maxWait: 90 },
+      // CF expiry check — tests check_asset_expiry for CFs via governance TIER2
+      { label: 'cf rights check',        text: 'Are there any Frescopa content fragments with licensing restrictions or expiry dates?',                                     maxWait: 45 },
       // Asset expiry — routes to check_asset_expiry via governance TIER2 (expir keyword)
       { label: 'asset expiry check',     text: 'Check if any Frescopa assets are expiring soon or have DRM license restrictions',                                            maxWait: 55 },
       // Translation
