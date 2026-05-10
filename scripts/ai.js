@@ -5845,12 +5845,13 @@ Variations only (no test): \`generate_page_variations\` → review with user →
 ### CROSS-CUTTING RULES
 
 **TOOL ROUTING — SPEED CRITICAL:** Always use the fastest available tool for each operation:
-- Listing DA pages → **list_site_pages** (~0.3s). NEVER use da_list_sources — it routes through the MCP server and takes 13-30s.
+- Listing DA pages → **list_site_pages** (~0.3s). NEVER use da_list_sources or get_aem_site_pages — both route through MCP and take 13-30s.
 - Reading a single DA page → **get_page_content** (~0.3s). NEVER use aem_read for DA pages.
-- Writing a DA page → **edit_page_content** directly. NEVER call da_list_sources first as a "lookup" step.
+- Writing a DA page → **edit_page_content** directly. NEVER call da_list_sources or get_aem_site_pages first as a "lookup" step.
+- For brief-to-page: call **create_da_page** directly with the generated HTML — do NOT call extract_brief_content when the brief text is already in the message.
 - If a user says "list pages", "what pages exist", "show site structure" → call list_site_pages immediately in the SAME response, no intermediate steps.
 
-**Site resolution:** When user mentions a site by name (Frescopa, SecurBank, WKND) — call \`get_aem_sites\` → \`get_aem_site_pages\` to resolve real content. Never guess page paths.
+**Named CS/JCR site resolution:** When user mentions a CS-authored site by name (Frescopa, SecurBank, WKND) — call \`get_aem_sites\` → \`get_aem_site_pages\` (Content MCP / JCR). This is ONLY for pre-registered AEM CS sites. For the currently connected DA site (e.g. Lifepoint), always use \`list_site_pages\` — never \`get_aem_site_pages\`.
 
 **Parallel calls:** Return ALL independent tool_use blocks in ONE response — they execute simultaneously. Never make Tool B wait for Tool A if B does not use A's output. Common parallel pairs:
 - \`create_aem_page\` + \`search_dam_assets\` (brief-to-page — both needed for patch, neither waits)
@@ -6068,10 +6069,11 @@ Every MCP tool returns live data. Always base your next call on what the previou
 - If a tool returns a list of items, find the right entry by reading titles/paths, then extract its ID
 - If a write fails, read the error message — it usually tells you exactly what's wrong (wrong path format, stale eTag, missing field)
 
-## SPEED RULE — always use the direct tool, never the MCP detour
-- list_site_pages (~0.3s) not da_list_sources (~13s): NEVER call da_list_sources.
-- get_page_content (~0.3s) not aem_read for DA pages.
-- edit_page_content fires immediately — do NOT call list_site_pages or get_page_content first unless you need the current content to make the edit.
+## SPEED RULE — direct DA tools only, never MCP detours
+- **list_site_pages** (~0.3s) for all DA site page listing. NEVER use da_list_sources (DA MCP, 13s+) or get_aem_site_pages (Content MCP / JCR, wrong for DA sites).
+- **get_page_content** (~0.3s) for reading a DA page. NEVER use aem_read for DA pages.
+- **edit_page_content** fires immediately — no pre-read unless you need current content to make the edit.
+- get_aem_site_pages is Content MCP (JCR). Only use it for named CS sites like Frescopa or SecurBank — never for the currently connected DA site.
 
 ## DA/EDS sites (Type: da or eds)
 - edit_page_content with {find, replace} for targeted text changes — call immediately, no pre-read needed
