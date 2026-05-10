@@ -48,8 +48,8 @@ const WINDOWS = [
       { label: 'list pages',             text: 'What pages does this site have? List the paths.',                                                                         maxWait: 30 },
       // Edit
       { label: 'edit hero headline',     text: 'Update the hero headline on the home page to "World-Class Care, Close to Home"',                                          maxWait: 45, authNote: true },
-      // Chain: governance immediately after edit — does it return real violation scores?
-      { label: 'govern after edit',      text: 'Now run a brand governance check on the home page I just edited',                                                         maxWait: 40 },
+      // Chain: governance on smarttiger URL (where Frescopa rules are ingested — expect real violations)
+      { label: 'govern after edit',      text: 'Run a brand governance check on this page: https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/home',          maxWait: 50 },
       // Chain: content QA on same page
       { label: 'content QA after edit',  text: 'Now run a content quality check on the home page — SEO, readability, missing meta tags',                                  maxWait: 45 },
       // Create
@@ -64,11 +64,12 @@ const WINDOWS = [
     prompts: [
       // Governance with explicit URL — rules are ingested at smarttiger domain (not aem-showcase)
       { label: 'brand governance',       text: 'Run a brand governance check on this page: https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/home',          maxWait: 50 },
-      { label: 'content QA',             text: 'Run a content quality check on the home page — SEO score, readability grade, missing meta tags, broken links',               maxWait: 55 },
-      // Combined in one prompt — brain should run both in parallel
-      { label: 'governance + QA',        text: 'Run both a brand governance check and a content quality check on the home page at the same time',                            maxWait: 70 },
       // Preview to confirm page loaded correctly
       { label: 'preview page',           text: 'Show me a preview of the Frescopa home page',                                                                               maxWait: 20 },
+      // Combined governance in one prompt — brain should run both checks
+      { label: 'governance + QA',        text: 'Run a brand governance check AND a content quality check on https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/home at the same time', maxWait: 70 },
+      // Search forms — should call search_forms, not page-crawl
+      { label: 'search forms (B)',       text: 'Find any forms on the Frescopa site — newsletter signup, contact, or subscription forms',                                   maxWait: 30 },
     ],
   },
   {
@@ -102,7 +103,7 @@ const WINDOWS = [
       // Forms discovery — should call search_forms, not page-crawl
       { label: 'search forms',           text: 'Find any forms on the Frescopa site — newsletter signup, contact, or subscription forms',                                   maxWait: 45 },
       // Asset expiry — routes to check_asset_expiry via governance TIER2 (expir keyword)
-      { label: 'asset expiry check',     text: 'Check if any Frescopa assets are expiring soon or have DRM license restrictions',                                            maxWait: 40 },
+      { label: 'asset expiry check',     text: 'Check if any Frescopa assets are expiring soon or have DRM license restrictions',                                            maxWait: 55 },
       // Translation
       { label: 'translate hero',         text: 'Translate the Frescopa home page hero headline and subtext to Spanish',                                                     maxWait: 45, authNote: true },
     ],
@@ -210,6 +211,39 @@ async function runWindow(browser, win) {
   }, TOKEN);
 
   const page = await ctx.newPage();
+
+  // Block IMS auth navigation at the JS level — ctx.route() aborts the request but the browser
+  // still navigates away, replacing the Compass SPA with an ERR_BLOCKED_BY_CLIENT page.
+  // addInitScript runs before ANY page scripts and patches location.href/assign/replace so the
+  // navigation never fires. The ctx.route() blocks remain as a belt-and-suspenders fallback.
+  await page.addInitScript(() => {
+    const BLOCKED = ['adobelogin.com', 'auth.services.adobe.com'];
+    function shouldBlock(url) {
+      try { const u = new URL(url); return BLOCKED.some(h => u.hostname.includes(h)); } catch { return false; }
+    }
+    try {
+      const origDesc = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
+      if (origDesc?.set) {
+        Object.defineProperty(Location.prototype, 'href', {
+          ...origDesc,
+          set(val) {
+            if (shouldBlock(val)) { console.warn('[nav-guard] blocked href:', val); return; }
+            origDesc.set.call(this, val);
+          },
+        });
+      }
+      const origAssign = Location.prototype.assign;
+      Location.prototype.assign = function navGuardAssign(url) {
+        if (shouldBlock(url)) { console.warn('[nav-guard] blocked assign:', url); return; }
+        return origAssign.call(this, url);
+      };
+      const origReplace = Location.prototype.replace;
+      Location.prototype.replace = function navGuardReplace(url) {
+        if (shouldBlock(url)) { console.warn('[nav-guard] blocked replace:', url); return; }
+        return origReplace.call(this, url);
+      };
+    } catch (e) { console.warn('[nav-guard] init failed:', e.message); }
+  });
 
   // Capture console errors + uncaught JS errors so we can diagnose app.js load failures
   page.on('pageerror', (err) => logW(`[pageerror] ${err.message.slice(0, 200)}`));

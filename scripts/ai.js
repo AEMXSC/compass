@@ -5851,7 +5851,7 @@ Variations only (no test): \`generate_page_variations\` → review with user →
 - For brief-to-page: call **create_da_page** directly with the generated HTML — do NOT call extract_brief_content when the brief text is already in the message.
 - If a user says "list pages", "what pages exist", "show site structure" → call list_site_pages immediately in the SAME response, no intermediate steps.
 - Finding content fragments → **search_content_fragments** immediately. NEVER crawl pages with get_page_content to find fragments.
-- Finding existing forms → **search_forms** immediately. NEVER crawl pages with get_page_content to find forms.
+- Finding existing forms → **search_forms** IMMEDIATELY. Do NOT call get_aem_site_pages, get_aem_sites, list_site_pages, browse_dam_folder, or get_page_content to find forms. search_forms queries the AEM Forms registry directly and returns results in one call.
 
 **ABSOLUTE RULE — DA sites (siteType === 'da'):**
 The currently connected DA site uses these tools ONLY:
@@ -6086,7 +6086,7 @@ Every MCP tool returns live data. Always base your next call on what the previou
 - **edit_page_content** fires immediately — no pre-read unless you need current content to make the edit.
 - get_aem_site_pages is Content MCP (JCR). Only use it for named CS sites like Frescopa or SecurBank — never for the currently connected DA site.
 - **search_content_fragments** for finding/searching content fragments. NEVER crawl pages with get_page_content to discover fragments.
-- **search_forms** for finding/discovering existing forms. NEVER crawl pages to find forms.
+- **search_forms** ONLY for finding/discovering existing forms. Do NOT call get_aem_site_pages, get_aem_sites, list_site_pages, browse_dam_folder, or get_page_content to find forms. Forms live in the AEM Forms registry — search_forms queries it directly.
 
 ## DA/EDS sites (Type: da or eds)
 - edit_page_content with {find, replace} for targeted text changes — call immediately, no pre-read needed
