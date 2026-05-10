@@ -2552,22 +2552,24 @@ export async function executeTool(name, input) {
         if (!(await ensureAuth())) return authRequiredError('edit_page_content');
         try {
           const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
-          const imgResp = await fetch(`${workerBase}/gemini-image`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: input.image_prompt }),
-          });
-          const imgResult = await imgResp.json();
-          if (imgResult.error) return JSON.stringify({ error: imgResult.error, detail: imgResult.detail, _source: 'error' });
-          const imageUrl = imgResult.imageUrl;
-          if (!imageUrl) return JSON.stringify({ error: 'Gemini returned no image URL', raw: imgResult });
-
           const htmlPath = (pagePath === '/' ? '/index' : pagePath) + '.html';
           const org = da.getOrg(); const repo = da.getRepo(); const branch = da.getBranch();
           const previewUrl = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page${pagePath}`;
           const daUrl = `https://da.live/edit#/${org}/${repo}${pagePath === '/' ? '/index' : pagePath}`;
 
-          const currentHTML = await da.getPage(htmlPath).catch(() => null);
+          // Gemini image generation and page HTML fetch are independent — run in parallel
+          // Saves ~300-400ms dead wait during the 2-5s Gemini call
+          const [imgResult, currentHTML] = await Promise.all([
+            fetch(`${workerBase}/gemini-image`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ prompt: input.image_prompt }),
+            }).then((r) => r.json()),
+            da.getPage(htmlPath).catch(() => null),
+          ]);
+          if (imgResult.error) return JSON.stringify({ error: imgResult.error, detail: imgResult.detail, _source: 'error' });
+          const imageUrl = imgResult.imageUrl;
+          if (!imageUrl) return JSON.stringify({ error: 'Gemini returned no image URL', raw: imgResult });
           if (!currentHTML) return JSON.stringify({ status: 'partial', image_url: imageUrl, hint: 'Image generated but page not found. Check org/repo/branch.' });
 
           const altText = input.alt_text || input.image_prompt.slice(0, 80).trim();
@@ -5842,7 +5844,11 @@ Variations only (no test): \`generate_page_variations\` → review with user →
 
 **Site resolution:** When user mentions a site by name (Frescopa, SecurBank, WKND) — call \`get_aem_sites\` → \`get_aem_site_pages\` to resolve real content. Never guess page paths.
 
-**Parallel calls:** When two or more independent reads are needed, return ALL tool_use blocks in ONE response. They execute simultaneously. Text read + image search, governance + page fetch, audit + profile — all parallel.
+**Parallel calls:** Return ALL independent tool_use blocks in ONE response — they execute simultaneously. Never make Tool B wait for Tool A if B does not use A's output. Common parallel pairs:
+- \`create_aem_page\` + \`search_dam_assets\` (brief-to-page — both needed for patch, neither waits)
+- \`run_governance_check\` + \`run_content_qa\` (both check the same page independently)
+- \`get_page_content\` + \`search_dam_assets\` (reading page + finding assets simultaneously)
+- \`edit_page_content\` + \`run_governance_check\` (edit + check in same turn if user requests both)
 
 **After any edit:** Share the Universal Editor and DA edit links so the user can open and edit visually.
 
@@ -6078,10 +6084,24 @@ Example:
   → patch jsonPatch: '[{"op":"replace","path":"/items/0/items/0:0/items/0:0:0/properties/text","value":"<h1>New</h1>"}]'
 
 ## Brief-to-page (JCR)
-extract_brief_content → create_aem_page → [search_dam_assets if images needed] → patch_aem_page_content
-- Use the pageId returned by create_aem_page directly — do NOT search for the page
-- For any fileReference fields: call search_dam_assets {query: "<description from brief>", folder: "/content/dam"} — use the returned path as the fileReference value
-- Do NOT call get-aem-page-preview-url until AFTER patching (page isn't published yet)
+extract_brief_content is instant — the next step is page creation + DAM search, which run in parallel:
+- Return create_aem_page AND search_dam_assets in the SAME response (parallel tool_use blocks)
+- Use the pageId from create_aem_page in the subsequent patch — do NOT search for the page again
+- patch_aem_page_content fires after both results arrive (depends on both)
+- Do NOT call get-aem-page-preview-url until AFTER patching
+
+## Brief-to-page (DA/EDS)
+extract_brief_content → return create_da_page(page_path, html) in ONE call — write full page HTML including all blocks
+- If brief mentions images: return create_da_page AND search_dam_assets in the same response
+- Use image paths from search_dam_assets result in the page HTML — no second write needed
+
+## Parallel tool rules (speed-critical for demos)
+Return multiple tool_use blocks in a SINGLE response whenever the calls are independent:
+- create_aem_page + search_dam_assets → always parallel (both needed for patch, neither depends on the other)
+- edit_page_content + run_governance_check → parallel if user asks to edit AND check in same turn
+- search_dam_assets + get_page_content → parallel (reading two different resources)
+- run_governance_check + run_content_qa → parallel (both check the same page independently)
+Never make Tool B wait for Tool A if B does not use A's output.
 
 ## Rules
 - NEVER say what you are about to do — just call the tool immediately
