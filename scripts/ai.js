@@ -3175,19 +3175,42 @@ export async function executeTool(name, input) {
         if (resp.status === 401) return JSON.stringify({ error: 'No Figma token configured. Add your Figma Personal Access Token in Compass settings (gear icon).' });
         const data = await resp.json();
         if (data.error) return JSON.stringify({ error: data.error });
-        // Return simplified structure for brain to map to EDS blocks
+
+        // Discover blocks already on this site — prefer reuse over creating new ones
+        let availableBlocks = [];
+        try {
+          const blockItems = await da.listPages('/blocks');
+          availableBlocks = (blockItems || [])
+            .map((b) => (b.name || b.path?.split('/').pop() || '').replace(/\.html?$/, ''))
+            .filter(Boolean)
+            .sort();
+        } catch { /* /blocks not accessible — will fall back to generic block names */ }
+
+        // Return simplified Figma structure for brain to map to EDS blocks
         const frames = [];
         const walk = (node) => {
           if (!node) return;
-          if (node.type === 'FRAME' || node.type === 'COMPONENT') frames.push({ name: node.name, type: node.type, children: node.children?.map((c) => ({ name: c.name, type: c.type, text: c.characters })).filter(Boolean) });
+          if (node.type === 'FRAME' || node.type === 'COMPONENT') {
+            frames.push({
+              name: node.name, type: node.type,
+              children: node.children?.map((c) => ({ name: c.name, type: c.type, text: c.characters })).filter(Boolean),
+            });
+          }
           if (node.children) node.children.forEach(walk);
         };
         const pages = data.document?.children || [];
         pages.forEach((page) => page.children?.forEach(walk));
+
+        const blockNote = availableBlocks.length
+          ? `This site already has these blocks: [${availableBlocks.join(', ')}]. Match Figma frames to these existing block names first — only use generic hero/cards/columns if no existing block fits.`
+          : 'No existing blocks discovered. Use standard EDS blocks: hero, cards, columns, text.';
+
         return JSON.stringify({
-          status: 'success', file_name: data.name,
+          status: 'success',
+          file_name: data.name,
           frames: frames.slice(0, 20),
-          instruction: 'Map each frame to an EDS block table. Hero frame → <table><tr><td>hero</td></tr>...</table>. Cards → cards table. Write to AEM via create_da_page or edit_page_content.',
+          available_blocks: availableBlocks,
+          instruction: `Map each Figma frame to an EDS block table. ${blockNote} Write to AEM via create_da_page or edit_page_content with trigger_preview: true.`,
           _source: 'figma',
         }, null, 2);
       } catch (err) {
@@ -5745,13 +5768,17 @@ When a user provides a Figma URL or uploads a design screenshot/mockup:
 
 1. **Figma URL** → call \`ingest_figma_design\`(figma_url=...) to fetch design structure
 2. **Image upload** → analyze the visual layout using vision directly
-3. Map sections to EDS block table HTML:
-   - Hero: \`<table><tr><td>hero</td></tr><tr><td><h1>Headline</h1><p>Sub</p><a href="#">CTA</a></td></tr></table>\`
-   - Cards: \`<table><tr><td>cards</td></tr><tr><td>Image</td><td>Title + body</td></tr></table>\`
-   - Columns: \`<table><tr><td>columns</td></tr><tr><td>Left</td><td>Right</td></tr></table>\`
+3. **Block mapping — reuse first:**
+   - The tool response includes \`available_blocks\` — the actual blocks already on this site
+   - Always match Figma frames to an existing block name before inventing a new one
+   - Example: if the site has \`banner\`, \`feature-grid\`, \`testimonial\` — use those instead of generic \`hero\`/\`cards\`
+   - Use name-similarity matching: a Figma frame called "Top Banner" → \`banner\` block; "Team Grid" → \`cards\` or \`feature-grid\`
+   - Only fall back to generic EDS defaults (hero/cards/columns/text) when \`available_blocks\` is empty or no existing block fits
+4. Generate EDS block table HTML for each section:
+   - \`<table><tr><td>BLOCK-NAME</td></tr><tr><td>content</td></tr></table>\`
    - Text/body: plain \`<p>\`, \`<h2>\`, \`<ul>\` outside tables
-4. Write to AEM: new page → \`create_da_page\`(page_path=..., html=...) / existing → \`edit_page_content\`(html=...)
-5. Always trigger_preview: true
+5. Write to AEM: new page → \`create_da_page\`(page_path=..., html=...) / existing → \`edit_page_content\`(html=...)
+6. Always trigger_preview: true
 
 Do NOT output raw CSS or inline styles. All EDS blocks are tables. No arbitrary HTML.
 
