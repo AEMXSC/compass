@@ -17,6 +17,9 @@ import { mkdirSync } from 'fs';
 const COMPASS_URL = 'https://eds-migration--compass--aemxsc.aem.page/';
 const WORKER      = 'https://compass-ims-proxy.compass-xsc.workers.dev';
 const LIFEPOINT   = 'https://main--lifepoint--aemxsc.aem.page/';
+// Frescopa — xwalk/JCR on AEM CS. Real DAM assets + CFs + governance rules ingested.
+// Win B (governance), Win C (assets), Win D (fragments/expiry) connect here.
+const FRESCOPA    = 'https://main--frescopa--aem-showcase.aem.page/';
 const SHOTS_DIR   = 'c:/Users/remekie/Documents/compass/test-screenshots';
 
 mkdirSync(SHOTS_DIR, { recursive: true });
@@ -55,50 +58,53 @@ const WINDOWS = [
   },
   {
     id: 'B',
-    label: 'Governance + Content QA Agents',
+    label: 'Governance + Content QA Agents (Frescopa)',
     color: '\x1b[33m', // yellow
+    site: FRESCOPA,    // Frescopa has brand rules ingested — expect real violations
     prompts: [
-      // Standalone governance — does it show actual scores / violations?
-      { label: 'brand governance',       text: 'Run a brand governance check on the home page',                                                                           maxWait: 40 },
-      { label: 'content QA',             text: 'Run a content quality check on the home page — SEO score, readability grade, missing meta tags, broken links',            maxWait: 45 },
+      // Governance with real rules — should return CTA violations and brand checks
+      { label: 'brand governance',       text: 'Run a brand governance check on the Frescopa home page',                                                                    maxWait: 45 },
+      { label: 'content QA',             text: 'Run a content quality check on the Frescopa home page — SEO score, readability grade, missing meta tags, broken links',     maxWait: 50 },
       // Combined in one prompt
-      { label: 'governance + QA',        text: 'Run both a brand governance check and a content quality check on the home page at the same time',                         maxWait: 55 },
-      // Preview then govern
-      { label: 'preview page',           text: 'Show me a preview of the home page',                                                                                     maxWait: 20 },
+      { label: 'governance + QA',        text: 'Run both a brand governance check and a content quality check on the Frescopa home page at the same time',                  maxWait: 60 },
+      // Preview to confirm page loaded correctly
+      { label: 'preview page',           text: 'Show me a preview of the Frescopa home page',                                                                               maxWait: 20 },
     ],
   },
   {
     id: 'C',
-    label: 'Asset + Image Generation Agents',
+    label: 'Asset + Image Generation (Frescopa DAM)',
     color: '\x1b[35m', // magenta
+    site: FRESCOPA,    // Frescopa has real DAM assets at /content/dam/frescopa
     prompts: [
       // Image generation
-      { label: 'generate hero image',    text: 'Generate a cinematic hero image for a hospital emergency room — dramatic lighting, EMTs, urgency. 1440×810.',              maxWait: 60 },
+      { label: 'generate hero image',    text: 'Generate a cinematic hero image for a premium coffee brand — espresso bar, warm lighting, artisan feel. 1440×810.',         maxWait: 60 },
+      // DAM search — should return real Frescopa assets
+      { label: 'search DAM assets',      text: 'Search for coffee images in the Frescopa DAM',                                                                              maxWait: 35 },
+      // Brand-approved filter — should use tags filter
+      { label: 'brand-approved DAM',     text: 'Find brand-approved Frescopa coffee images in the DAM',                                                                     maxWait: 35 },
       // Channel renditions — chained from DAM asset
-      { label: 'TikTok + IG Story',      text: 'Create TikTok (1080×1920) and Instagram Story (1080×1920) variants of the hero image on the home page',                  maxWait: 80, authNote: true },
+      { label: 'TikTok + IG Story',      text: 'Create TikTok (1080×1920) and Instagram Story (1080×1920) variants of the Frescopa hero image',                            maxWait: 80, authNote: true },
       // LinkedIn banner
-      { label: 'LinkedIn banner',        text: 'Create a LinkedIn company banner (1128×191) from the home page hero image',                                               maxWait: 60, authNote: true },
-      // DAM search
-      { label: 'search DAM assets',      text: 'Search for images in the DAM related to healthcare and hospital',                                                         maxWait: 35 },
-      // Brand-approved filter
-      { label: 'brand-approved DAM',     text: 'Find brand-approved images in the DAM for a healthcare campaign',                                                         maxWait: 35 },
+      { label: 'LinkedIn banner',        text: 'Create a LinkedIn company banner (1128×191) from the Frescopa home page hero image',                                        maxWait: 60, authNote: true },
     ],
   },
   {
     id: 'D',
-    label: 'Language + Discovery Agents',
+    label: 'Language + Discovery (Frescopa CFs)',
     color: '\x1b[32m', // green
+    site: FRESCOPA,    // Frescopa has real CFs and assets in AEM CS
     prompts: [
       // Spanish natural language
-      { label: 'spanish prompt',         text: '¿Qué páginas tiene este sitio? Lista las rutas.',                                                                         maxWait: 20 },
-      // Translation
-      { label: 'translate hero',         text: 'Translate the hero headline and subtext on the home page to Spanish',                                                     maxWait: 45, authNote: true },
-      // Content Fragment search
-      { label: 'search fragments',       text: 'Search for content fragments related to healthcare services',                                                              maxWait: 30 },
+      { label: 'spanish prompt',         text: '¿Qué páginas tiene el sitio Frescopa? Lista las rutas.',                                                                    maxWait: 20 },
+      // Content Fragment search — should find Frescopa product CFs
+      { label: 'search fragments',       text: 'Search for Frescopa product description content fragments',                                                                  maxWait: 35 },
       // Forms discovery
-      { label: 'search forms',           text: 'Find any forms on this site — contact, appointment, or intake forms',                                                     maxWait: 30 },
-      // Asset expiry
-      { label: 'asset expiry check',     text: 'Check if any assets on the home page are expiring soon',                                                                  maxWait: 30 },
+      { label: 'search forms',           text: 'Find any forms on the Frescopa site — newsletter signup, contact, or subscription forms',                                   maxWait: 30 },
+      // Asset expiry — now routes to check_asset_expiry via governance TIER2 (expir keyword)
+      { label: 'asset expiry check',     text: 'Check if any Frescopa assets are expiring soon or have DRM license restrictions',                                            maxWait: 35 },
+      // Translation
+      { label: 'translate hero',         text: 'Translate the Frescopa home page hero headline and subtext to Spanish',                                                     maxWait: 45, authNote: true },
     ],
   },
 ];
@@ -174,7 +180,7 @@ async function sendAndWait(page, text, maxWaitSec) {
 
 // ─── Run a single window ───────────────────────────────────────────────────────
 async function runWindow(browser, win) {
-  const { id, label, color, prompts } = win;
+  const { id, label, color, prompts, site = LIFEPOINT } = win;
   const results = [];
   const logW = (msg) => log(id, color, msg);
 
@@ -236,7 +242,7 @@ async function runWindow(browser, win) {
       const btn   = document.getElementById('connectSiteBtn');
       if (input) input.value = url;
       if (btn) btn.click();
-    }, LIFEPOINT).catch(() => {});
+    }, site).catch(() => {});
 
     // 800ms: if listener registered, connectCustomSite disables btn synchronously
     await page.waitForTimeout(800);
@@ -258,11 +264,11 @@ async function runWindow(browser, win) {
         }
         return !!window.__EW_ORG?.orgId;
       },
-      LIFEPOINT,
+      site,
       { timeout: 45000, polling: 2000 },
     ).then(() => true).catch(() => false);
 
-    logW(connected ? 'AEM_ORG set — waiting for site type detection' : '⚠️  AEM_ORG.orgId never set after 60s');
+    logW(connected ? 'AEM_ORG set — waiting for site type detection' : '⚠️  AEM_ORG.orgId never set after 45s');
 
     if (connected) {
       // fstab.yaml GitHub API detection takes ~30s — wait for SITE_TYPE to be set
@@ -271,7 +277,7 @@ async function runWindow(browser, win) {
         { timeout: 60000 },
       ).catch(() => logW('⚠️  SITE_TYPE never set — proceeding anyway'));
     }
-    logW('Lifepoint connected');
+    logW(`${site.split('--')[1] || 'site'} connected`);
   }
   // Allow switchView('editor') to run (fires 600ms after siteType is set)
   await page.waitForTimeout(2000).catch(() => {});
