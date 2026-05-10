@@ -1930,7 +1930,7 @@ const TIER2_KEYWORDS = {
 
 const INTENT_PATTERNS = {
   analytics: /\b(analytics?|cja|metric|kpi|dashboard|report|insight|data|trend|anomal)/i,
-  governance: /\b(governance|brand.{0,10}(check|compliance|guideline|policy)|compliance|audit|policy)\b/i,
+  governance: /\b(governance|brand.{0,10}(check|compliance|guideline|policy)|compliance|audit|policy|expir|drm|licens|rights)\b/i,
   contentqa:  /\b(content.{0,10}(quality|qa|check)|seo|readab|meta.?tag|broken.?link|technical.?check)\b/i,
   workfront: /\b(workfront|project|task|approval|assign|deadline)/i,
   assets: /\b(asset|dam|image|photo|media|upload|folder|rendition|collection)/i,
