@@ -142,50 +142,69 @@ async function sendAndWait(page, text, maxWaitSec) {
     return { ok: false, elapsed: '0', text: '(chatInput or sendBtn not found)' };
   }
 
-  const deadline = Date.now() + maxWaitSec * 1000;
-  let settledFor = 0;
-  let prevText = '';  // track text between polls — LLM still streaming if text keeps changing
+  // Inner poll loop. Each page.evaluate is wrapped in Promise.race with a 4s timer so a
+  // stuck app JS engine (MCP auth retry, infinite fetch loop) can't make evaluate() hang
+  // forever. The outer Promise.race below adds a second hard-deadline layer.
+  const pollLoop = async () => {
+    const deadline = t0 + maxWaitSec * 1000;
+    let settledFor = 0;
+    let prevText = '';
 
-  while (Date.now() < deadline) {
-    await page.waitForTimeout(2500).catch(() => {});
-    if (page.isClosed()) break;
-    const state = await page.evaluate((prevCount) => {
-      const msgs = Array.from(document.querySelectorAll('#chatMessages .message'));
-      const fresh = msgs.slice(prevCount);
-      const last = [...fresh].reverse().find((el) => !el.classList.contains('user'));
-      const txt = last?.textContent || '';
-      // Word-boundary regex: catches "Running" at end of string (plain includes() missed it)
-      const busy = /\b(Thinking|Processing|Running|Scanning|Fetching|Generating|Initializing|Connecting)\b/.test(txt);
-      return {
-        hasReply: fresh.length > 1,
-        busy,
-        lastText: txt.trim().replace(/\s+/g, ' ').slice(0, 350),
-      };
-    }, before).catch(() => ({ hasReply: false, busy: true, lastText: '' }));
+    while (Date.now() < deadline) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || page.isClosed()) break;
+      await page.waitForTimeout(Math.min(2500, remaining)).catch(() => {});
+      if (Date.now() >= deadline || page.isClosed()) break;
 
-    if (state.hasReply && !state.busy) {
-      if (state.lastText === prevText && prevText.length > 10) {
-        // Text is stable and not just a fragment — accumulate settle time
-        settledFor += 2500;
-        if (settledFor >= 5000) {
-          // Require 5s of text stability so we don't capture mid-stream LLM intro text
-          return { ok: true, elapsed: ((Date.now() - t0) / 1000).toFixed(1), text: state.lastText };
+      // Each evaluate gets a 4s ceiling — prevents hanging when app JS is busy.
+      const state = await Promise.race([
+        page.evaluate((prevCount) => {
+          const msgs = Array.from(document.querySelectorAll('#chatMessages .message'));
+          const fresh = msgs.slice(prevCount);
+          const last = [...fresh].reverse().find((el) => !el.classList.contains('user'));
+          const txt = last?.textContent || '';
+          // Word-boundary regex: catches "Running" at end of string
+          const busy = /\b(Thinking|Processing|Running|Scanning|Fetching|Generating|Initializing|Connecting)\b/.test(txt);
+          return { hasReply: fresh.length > 1, busy, lastText: txt.trim().replace(/\s+/g, ' ').slice(0, 350) };
+        }, before).catch(() => ({ hasReply: false, busy: true, lastText: '' })),
+        new Promise((r) => setTimeout(() => r({ hasReply: false, busy: true, lastText: '' }), 4000)),
+      ]);
+
+      if (state.hasReply && !state.busy) {
+        if (state.lastText === prevText && prevText.length > 10) {
+          settledFor += 2500;
+          if (settledFor >= 5000) {
+            return { ok: true, elapsed: ((Date.now() - t0) / 1000).toFixed(1), text: state.lastText };
+          }
+        } else {
+          settledFor = 0;
         }
       } else {
-        // Text changed or too short — LLM still streaming, reset settle counter
         settledFor = 0;
       }
-    } else {
-      settledFor = 0;
+      prevText = state.lastText;
     }
-    prevText = state.lastText;
-  }
-  if (page.isClosed()) return { ok: false, elapsed: ((Date.now() - t0) / 1000).toFixed(1), text: '(page closed)' };
-  const finalText = await page.$$eval('#chatMessages .message', (els) => {
-    const last = [...els].reverse().find((el) => !el.classList.contains('user'));
-    return last?.textContent?.trim().replace(/\s+/g, ' ').slice(0, 350) || '';
-  }).catch(() => '');
-  return { ok: false, elapsed: ((Date.now() - t0) / 1000).toFixed(1), text: finalText };
+
+    if (page.isClosed()) return { ok: false, elapsed: ((Date.now() - t0) / 1000).toFixed(1), text: '(page closed)' };
+    const finalText = await Promise.race([
+      page.$$eval('#chatMessages .message', (els) => {
+        const last = [...els].reverse().find((el) => !el.classList.contains('user'));
+        return last?.textContent?.trim().replace(/\s+/g, ' ').slice(0, 350) || '';
+      }).catch(() => ''),
+      new Promise((r) => setTimeout(() => r(''), 3000)),
+    ]);
+    return { ok: false, elapsed: ((Date.now() - t0) / 1000).toFixed(1), text: finalText };
+  };
+
+  // Hard deadline: guarantees sendAndWait exits within maxWaitSec + 2s no matter what.
+  return Promise.race([
+    pollLoop(),
+    new Promise((r) => setTimeout(() => r({
+      ok: false,
+      elapsed: maxWaitSec.toFixed(1),
+      text: '(hard deadline)',
+    }), (maxWaitSec + 2) * 1000)),
+  ]);
 }
 
 // ─── Run a single window ───────────────────────────────────────────────────────
@@ -227,31 +246,44 @@ async function runWindow(browser, win) {
         Object.defineProperty(Location.prototype, 'href', {
           ...origDesc,
           set(val) {
-            if (shouldBlock(val)) { console.warn('[nav-guard] blocked href:', val); return; }
+            if (shouldBlock(val)) {
+              console.warn('[nav-guard] blocked href — throwing to unwind auth stack:', val.slice(0, 60));
+              throw new Error('IMS navigation blocked by test guard');
+            }
             origDesc.set.call(this, val);
           },
         });
       }
       const origAssign = Location.prototype.assign;
       Location.prototype.assign = function navGuardAssign(url) {
-        if (shouldBlock(url)) { console.warn('[nav-guard] blocked assign:', url); return; }
+        if (shouldBlock(url)) {
+          console.warn('[nav-guard] blocked assign:', url.slice(0, 60));
+          throw new Error('IMS navigation blocked by test guard');
+        }
         return origAssign.call(this, url);
       };
       const origReplace = Location.prototype.replace;
       Location.prototype.replace = function navGuardReplace(url) {
-        if (shouldBlock(url)) { console.warn('[nav-guard] blocked replace:', url); return; }
+        if (shouldBlock(url)) {
+          console.warn('[nav-guard] blocked replace:', url.slice(0, 60));
+          throw new Error('IMS navigation blocked by test guard');
+        }
         return origReplace.call(this, url);
       };
     } catch (e) { console.warn('[nav-guard] init failed:', e.message); }
   });
 
   // Capture console errors + uncaught JS errors so we can diagnose app.js load failures
-  page.on('pageerror', (err) => logW(`[pageerror] ${err.message.slice(0, 200)}`));
+  page.on('pageerror', (err) => {
+    // Suppress the expected navigation-blocked error from our nav-guard (thrown intentionally)
+    if (!err.message.includes('IMS navigation blocked')) logW(`[pageerror] ${err.message.slice(0, 200)}`);
+  });
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
       const t = msg.text();
       if (!t.includes('imslib') && !t.includes('ERR_ABORTED') && !t.includes('auth.services')
-          && !t.includes('403') && !t.includes('401') && !t.includes('net::ERR') && !t.includes('CORS')) {
+          && !t.includes('403') && !t.includes('401') && !t.includes('net::ERR') && !t.includes('CORS')
+          && !t.includes('nav-guard')) {
         logW(`[console.error] ${t.slice(0, 150)}`);
       }
     }
