@@ -1936,8 +1936,9 @@ const INTENT_PATTERNS = {
   governance: /\b(governance|brand.{0,10}(check|compliance|guideline|policy)|compliance|audit|policy|expir|drm|licens|rights)\b/i,
   contentqa:  /\b(content.{0,10}(quality|qa|check)|seo|readab|meta.?tag|broken.?link|technical.?check)\b/i,
   workfront: /\b(workfront|project|task|approval|assign|deadline)/i,
-  // Assets: only fires for explicit DAM search/browse — NOT on "image" alone (prevents 14-tool flood)
-  assets:       /\b(dam\b|brand.?approv|content.?fragment|find.{0,25}(asset|image|photo|media|coffee|product)|search.{0,25}(asset|image|photo|dam|fragment)|browse.{0,15}(folder|dam|asset))\b/i,
+  // Assets: fires for explicit DAM search/browse — NOT on "image" alone (prevents 14-tool flood)
+  // No trailing \b so plural forms (assets, fragments) match correctly
+  assets:       /\b(dam\b|brand.?approv|content.?fragment|find\b.{0,25}\b(asset|image|photo|media|coffee|product)|search\b.{0,25}\b(asset|image|photo|dam|fragment)|browse\b.{0,15}\b(folder|dam|asset))/i,
   dam_metadata: /\b(metadata|rendition|expir|drm|licens|rights|asset.{0,10}(check|rights|status))\b/i,
   dam_write:    /\b(upload.{0,10}(asset|image|file)|delete.{0,10}asset|move.{0,10}asset|copy.{0,10}asset|create.{0,10}(folder|dam)|add.{0,10}collection|ingest.{0,10}(asset|image))\b/i,
   images: /\b(variation|transform|rendition|resize|crop|channel|tiktok|instagram|linkedin.{0,10}banner|social.{0,10}(image|variant)|generat.{0,10}image|new image|replace.{0,10}image|update.{0,10}image|hero image|image.{0,10}generat|firefly|nano.?banana)\b/i,
@@ -5856,7 +5857,7 @@ Variations only (no test): \`generate_page_variations\` → review with user →
 - Writing a DA page → **edit_page_content** directly. NEVER call da_list_sources or get_aem_site_pages first as a "lookup" step.
 - For brief-to-page: call **create_da_page** directly with the generated HTML — do NOT call extract_brief_content when the brief text is already in the message.
 - If a user says "list pages", "what pages exist", "show site structure" → call list_site_pages immediately in the SAME response, no intermediate steps.
-- Finding content fragments → **search_content_fragments** immediately. NEVER call get_aem_sites or list_site_pages first — search_content_fragments is a direct Discovery Agent query, no pre-flight needed.
+- Finding content fragments → **search_content_fragments** immediately. NEVER call get_aem_sites, list_site_pages, or get_page_content to discover fragments — search_content_fragments is a direct Discovery Agent query, no pre-flight needed.
 - Finding existing forms → **search_forms** IMMEDIATELY. Do NOT call get_aem_site_pages, get_aem_sites, list_site_pages, browse_dam_folder, or get_page_content to find forms. search_forms queries the AEM Forms registry directly and returns results in one call. If it returns empty, tell the user no forms were found — do NOT try alternative tools.
 - Finding DAM assets/images → **search_dam_assets** IMMEDIATELY with {query, tags}. NEVER call get_aem_sites, get_aem_site_pages, or any AEM Cloud Service search_assets endpoint. search_dam_assets is the Compass Discovery Agent — purpose-built and faster.
 - Brand-approved assets → **search_dam_assets** with {query: "...", tags: ["Brand Approved"]}. One call, no preamble.
@@ -6094,7 +6095,7 @@ Every MCP tool returns live data. Always base your next call on what the previou
 - **get_page_content** (~0.3s) for reading a DA page. NEVER use aem_read for DA pages.
 - **edit_page_content** fires immediately — no pre-read unless you need current content to make the edit.
 - get_aem_site_pages is Content MCP (JCR). Only use it for named CS sites like Frescopa or SecurBank — never for the currently connected DA site.
-- **search_content_fragments** — call IMMEDIATELY for all fragment searches. NEVER use get_aem_sites or list_site_pages as a pre-step. Direct Discovery Agent query.
+- **search_content_fragments** — call IMMEDIATELY for all fragment searches. NEVER use get_aem_sites, list_site_pages, or get_page_content as a pre-step. Direct Discovery Agent query — one call, no crawling.
 - **search_forms** ONLY for finding/discovering existing forms. Do NOT call get_aem_site_pages, get_aem_sites, list_site_pages, browse_dam_folder, or get_page_content to find forms. Forms live in the AEM Forms registry — search_forms queries it directly. If empty results, report no forms found — do not try alternatives.
 - **search_dam_assets** — use for ALL DAM asset/image searches. Call immediately with {query, tags}. NEVER call get_aem_sites or any AEM Cloud Service search_assets endpoint first. For brand-approved: tags=["Brand Approved"].
 - **check_asset_expiry** — call directly for asset DRM/expiry queries. One call, no pre-flight.

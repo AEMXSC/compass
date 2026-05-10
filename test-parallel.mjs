@@ -49,8 +49,8 @@ const WINDOWS = [
       { label: 'list pages',          text: 'What pages does this site have? List the paths.',                                                                              maxWait: 30 },
       // TIER1: edit_page_content — IMS write, should be 🟡
       { label: 'edit hero headline',  text: 'Update the hero headline on the home page to "World-Class Care, Close to Home"',                                               maxWait: 45, authNote: true },
-      // TIER2 accessibility: suggest_alt_text — no write auth needed, should be 🟡
-      { label: 'suggest alt text',    text: 'Suggest alt text for any images on this Lifepoint home page that are missing descriptions',                                    maxWait: 30 },
+      // TIER2 accessibility: suggest_alt_text — no write auth needed, MCP call ~35-40s
+      { label: 'suggest alt text',    text: 'Suggest alt text for any images on this Lifepoint home page that are missing descriptions',                                    maxWait: 50 },
     ],
   },
   {
@@ -63,10 +63,10 @@ const WINDOWS = [
       { label: 'brand governance',    text: 'Run a brand governance check on this page: https://main--smarttiger09543--aemsitestrial.aem.live/frescopa/en/home',             maxWait: 35 },
       // TIER1: preview_page — DA preview, should be 🟡
       { label: 'preview page',        text: 'Show me a preview of the Frescopa home page',                                                                                  maxWait: 20 },
-      // TIER2 assets (3 tools now): browse_dam_folder — tests Discovery MCP
-      { label: 'browse DAM folder',   text: 'Browse the Frescopa DAM folder at /content/dam/frescopa and show what asset categories exist',                                  maxWait: 30 },
-      // TIER2 contentqa: run_content_qa — graceful skip if no entitlement
+      // TIER2 contentqa: run_content_qa — graceful skip if no entitlement (before DAM browse to avoid cascade)
       { label: 'content QA check',    text: 'Run a content quality check on the Frescopa home page — check SEO, readability, and missing meta tags',                        maxWait: 30 },
+      // TIER2 assets (3 tools): browse_dam_folder — Discovery MCP, last in window
+      { label: 'browse DAM folder',   text: 'Browse the Frescopa DAM folder at /content/dam/frescopa and show what asset categories exist',                                  maxWait: 45 },
     ],
   },
   {
@@ -79,8 +79,8 @@ const WINDOWS = [
       { label: 'generate hero image',  text: 'Generate a cinematic hero image for a premium coffee brand — espresso bar, warm lighting, artisan feel. 1440×810.',           maxWait: 60 },
       // TIER2 images: create_image_renditions — channel variants, tiktok/instagram now in images pattern
       { label: 'TikTok + IG Story',    text: 'Generate TikTok (1080×1920) and Instagram Story (1080×1920) vertical format variants for Frescopa — espresso lifestyle, mobile-optimized',  maxWait: 60, authNote: true },
-      // TIER2 images: create_image_renditions — linkedin now in images pattern
-      { label: 'LinkedIn banner',      text: 'Generate a LinkedIn company banner (1128×191) for Frescopa — premium coffee brand, professional horizontal aesthetic',         maxWait: 60, authNote: true },
+      // TIER2 images: generate_image_gemini — linkedin now in images pattern, Gemini ~35-50s
+      { label: 'LinkedIn banner',      text: 'Generate a LinkedIn company banner (1128×191) for Frescopa — premium coffee brand, professional horizontal aesthetic',         maxWait: 75, authNote: true },
       // TIER2 assets (3 tools): search_dam_assets — direct Discovery Agent call
       { label: 'search DAM assets',    text: 'Search the Frescopa DAM for coffee images',                                                                                   maxWait: 40 },
       // TIER2 assets + governance: search_dam_assets with tags filter
@@ -99,8 +99,8 @@ const WINDOWS = [
       { label: 'search fragments',     text: 'Search for Frescopa product description content fragments',                                                                    maxWait: 40 },
       // TIER2 dam_metadata + governance: check_asset_expiry — direct call
       { label: 'asset expiry check',   text: 'Check if any Frescopa DAM assets are expiring soon or have DRM license restrictions',                                         maxWait: 45 },
-      // TIER1 + write: translate_page — IMS auth needed, demonstrates translation
-      { label: 'translate hero',       text: 'Translate the Frescopa home page hero headline and subtext to Spanish',                                                        maxWait: 45, authNote: true },
+      // TIER1 + write: translate_page — IMS auth needed, demonstrates translation capability
+      { label: 'translate hero',       text: 'Translate the Frescopa home page hero headline and subtext to Spanish',                                                        maxWait: 55, authNote: true },
     ],
   },
 ];
