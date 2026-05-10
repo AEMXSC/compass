@@ -1900,8 +1900,10 @@ const TIER1_CORE = new Set([
   'aem_read', 'aem_write', 'aem_list_environments',
   // Site management
   'get_aem_sites', 'get_aem_site_pages', 'switch_site', 'get_site_info',
-  // Content fragments
-  'get_content_fragment', 'update_content_fragment',
+  // Content fragments — always present so LLM uses search_content_fragments not page crawling
+  'get_content_fragment', 'update_content_fragment', 'search_content_fragments',
+  // DAM search — always present so LLM uses Discovery Agent not AEM CS search_assets
+  'search_dam_assets',
   // Utility
   'fetch_url', 'batch_aem_update',
 ]);

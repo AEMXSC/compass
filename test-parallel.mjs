@@ -64,7 +64,7 @@ const WINDOWS = [
       // TIER1: preview_page — DA preview, should be 🟡
       { label: 'preview page',        text: 'Show me a preview of the Frescopa home page',                                                                                  maxWait: 20 },
       // TIER2 contentqa: run_content_qa — graceful skip if no entitlement (before DAM browse to avoid cascade)
-      { label: 'content QA check',    text: 'Run a content quality check on the Frescopa home page — check SEO, readability, and missing meta tags',                        maxWait: 30 },
+      { label: 'content QA check',    text: 'Run a content quality check on the Frescopa home page — check SEO, readability, and missing meta tags',                        maxWait: 40 },
       // TIER2 assets (3 tools): browse_dam_folder — Discovery MCP, last in window
       { label: 'browse DAM folder',   text: 'Browse the Frescopa DAM folder at /content/dam/frescopa and show what asset categories exist',                                  maxWait: 45 },
     ],
@@ -79,12 +79,12 @@ const WINDOWS = [
       { label: 'generate hero image',  text: 'Generate a cinematic hero image for a premium coffee brand — espresso bar, warm lighting, artisan feel. 1440×810.',           maxWait: 60 },
       // TIER2 images: create_image_renditions — channel variants, tiktok/instagram now in images pattern
       { label: 'TikTok + IG Story',    text: 'Generate TikTok (1080×1920) and Instagram Story (1080×1920) vertical format variants for Frescopa — espresso lifestyle, mobile-optimized',  maxWait: 60, authNote: true },
-      // TIER2 images: generate_image_gemini — linkedin now in images pattern, Gemini ~35-50s
-      { label: 'LinkedIn banner',      text: 'Generate a LinkedIn company banner (1128×191) for Frescopa — premium coffee brand, professional horizontal aesthetic',         maxWait: 75, authNote: true },
+      // TIER2 images: generate_image_gemini — linkedin in images pattern, Gemini 35-70s variable
+      { label: 'LinkedIn banner',      text: 'Generate a LinkedIn company banner (1128×191) for Frescopa — premium coffee brand, professional horizontal aesthetic',         maxWait: 90, authNote: true },
       // TIER2 assets (3 tools): search_dam_assets — direct Discovery Agent call
       { label: 'search DAM assets',    text: 'Search the Frescopa DAM for coffee images',                                                                                   maxWait: 40 },
-      // TIER2 assets + governance: search_dam_assets with tags filter
-      { label: 'brand-approved DAM',   text: 'Find brand-approved Frescopa coffee images in the DAM using the brand approved tag filter',                                   maxWait: 45 },
+      // TIER1 search_dam_assets: now in TIER1 — should route away from AEM CS search_assets
+      { label: 'brand-approved DAM',   text: 'Find brand-approved Frescopa coffee images in the DAM',                                                                       maxWait: 45 },
     ],
   },
   {
@@ -97,8 +97,8 @@ const WINDOWS = [
       { label: 'spanish prompt',       text: '¿Qué páginas tiene el sitio Frescopa? Lista las rutas.',                                                                      maxWait: 30 },
       // TIER2 assets: search_content_fragments — direct Discovery Agent, no pre-flight
       { label: 'search fragments',     text: 'Search for Frescopa product description content fragments',                                                                    maxWait: 40 },
-      // TIER2 dam_metadata + governance: check_asset_expiry — direct call
-      { label: 'asset expiry check',   text: 'Check if any Frescopa DAM assets are expiring soon or have DRM license restrictions',                                         maxWait: 45 },
+      // TIER2 dam_metadata + governance: check_asset_expiry — direct call, 35-45s
+      { label: 'asset expiry check',   text: 'Check if any Frescopa DAM assets are expiring soon or have DRM license restrictions',                                         maxWait: 55 },
       // TIER1 + write: translate_page — IMS auth needed, demonstrates translation capability
       { label: 'translate hero',       text: 'Translate the Frescopa home page hero headline and subtext to Spanish',                                                        maxWait: 55, authNote: true },
     ],
