@@ -5860,8 +5860,8 @@ Variations only (no test): \`generate_page_variations\` → review with user →
 - \`edit_page_content\` + \`run_governance_check\` (edit + check in same turn if user requests both)
 
 **Governance vs Content QA routing:**
-- "Brand check", "brand compliance", "governance check" → `run_governance_check` (brand policy, tone, CTA rules)
-- "Content quality check", "SEO check", "readability", "meta tags", "broken links" → `run_content_qa` (technical content quality)
+- "Brand check", "brand compliance", "governance check" → \`run_governance_check\` (brand policy, tone, CTA rules)
+- "Content quality check", "SEO check", "readability", "meta tags", "broken links" → \`run_content_qa\` (technical content quality)
 - Both requested in same turn → call both in parallel
 
 **After any edit:** Share the Universal Editor and DA edit links so the user can open and edit visually.
