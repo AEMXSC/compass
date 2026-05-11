@@ -398,11 +398,8 @@ export const ajoProdMcp = createMcpClient('https://ajo-mcp.adobe.io/mcp', 'AJO-P
 // ── ACPC (Adobe Campaign/Personalization) ──
 export const acpcMcp = createMcpClient('https://emcee-stage.adobe.io/mcp', 'ACPC', IMS);
 
-// ── Sites & LLM Optimizer ──
-export const sitesOptimizerMcp = createMcpClient('https://m-mcp-demo.adobe.io/mcp', 'Sites-Optimizer', IMS);
-
-// ── External ──
-export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/@/mcp', 'Spacecat', { userOnly: true });
+// ── Sites & LLM Optimizer — needs user IMS token (Sites Optimizer entitlement check) ──
+export const sitesOptimizerMcp = createMcpClient('https://m-mcp-demo.adobe.io/mcp', 'Sites-Optimizer', { userOnly: true });
 
 // ── Workfront — uses apiKey header auth (injected by worker), not IMS Bearer ──
 export const workfrontMcp = createMcpClient('https://aemshowcase2.my.workfront.adobe.com/mcp-api/mcp', 'Workfront');
@@ -451,7 +448,7 @@ export const ALL_MCP_CLIENTS = [
   contentMcp, daMcp, governanceMcp, discoveryMcp, odinMcp,
   experienceProductionMcp, fireflyMcp, contentQaMcp, contentGenMcp,
   ajoMcp, cjaMcp, aaMcp, expressMcp, rtcdpMcp, aepMcp,
-  sitesOptimizerMcp, spacecatMcp,
+  sitesOptimizerMcp,
 ];
 
 /**
@@ -462,8 +459,7 @@ export async function prewarmSessions() {
   // Critical = clients that work with the general MCP OAuth token on load.
   // contentMcp, governanceMcp, experienceProductionMcp need JCR/site-specific auth (Connect AEM).
   // contentQaMcp: restricted to @adobe.com identities with specific entitlement — lazy-init.
-  // sitesOptimizerMcp: requires different OAuth or API key — lazy-init.
-  // spacecatMcp: no IMS auth, needs API key — lazy-init.
+  // sitesOptimizerMcp: needs user token with Sites Optimizer entitlement — lazy-init.
   const critical = [
     discoveryMcp, fireflyMcp, daMcp, contentGenMcp,
   ];
