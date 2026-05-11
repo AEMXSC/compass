@@ -26,26 +26,30 @@ let authMethod = 'none';    // 'imslib' | 's2s' | 'none'
 /* ─── Token access ─── */
 
 /**
- * Returns the user's IMS token only — never falls back to S2S.
+ * Returns a user IMS token — never falls back to S2S.
+ * Accepts tokens from any IMS client (not just darkalley).
  * Use for MCPs that require user-level auth (e.g. SpaceCat / Sites Optimizer).
- * Returns null if the user is not signed in via imslib.
+ * Returns null if no valid user token exists in this session.
  */
 export function getUserToken() {
+  // Prefer live imslib token if available
   if (imsLibLoaded && window.adobeIMS) {
     const t = window.adobeIMS.getAccessToken();
     if (t?.token) return t.token;
   }
+  // Scan all localStorage keys for any valid IMS user token
   try {
-    const imsKey = `adobeid_ims_access_token/${IMS_CLIENT_ID}`;
-    const imsEntry = localStorage.getItem(imsKey) || localStorage.getItem('adobeid_ims_access_token');
-    if (imsEntry) {
-      const parsed = JSON.parse(imsEntry);
-      if ((!parsed?.client_id || parsed.client_id === IMS_CLIENT_ID)
-          && parsed?.tokenValue && parsed?.expire && Date.now() < parsed.expire) {
-        return parsed.tokenValue;
-      }
+    const now = Date.now();
+    for (const key of Object.keys(localStorage)) {
+      if (!key.startsWith('adobeid_ims_access_token')) continue;
+      try {
+        const parsed = JSON.parse(localStorage.getItem(key));
+        if (parsed?.tokenValue && parsed?.expire && now < parsed.expire) {
+          return parsed.tokenValue;
+        }
+      } catch { /* malformed — skip */ }
     }
-  } catch { /* malformed entry */ }
+  } catch { /* localStorage unavailable */ }
   return null;
 }
 
