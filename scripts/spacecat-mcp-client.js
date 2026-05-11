@@ -2,19 +2,60 @@
  * SpaceCat / AEM Sites Optimizer — Direct REST Client
  * spacecat.experiencecloud.live/api/v1
  *
- * Auth: IMS Bearer token (ims_key scheme — user token with Sites Optimizer entitlement).
- * No MCP protocol — SpaceCat exposes a REST API only.
+ * Auth: SpaceCat issues its own JWT via POST /auth/login (exchange of IMS user token).
+ * The returned JWT (aud: spacecat-users, iss: spacecat.experiencecloud.live) is
+ * used on all subsequent requests in the `authorization` header.
  */
 
 import { getUserToken } from './ims.js';
 
 const SPACECAT_BASE = 'https://spacecat.experiencecloud.live/api/v1';
 
+let cachedSpacecatToken = null;
+let cachedSpacecatExpiry = 0;
+
+async function getSpacecatToken() {
+  const now = Date.now();
+  if (cachedSpacecatToken && now < cachedSpacecatExpiry - 60_000) return cachedSpacecatToken;
+
+  const imsToken = getUserToken();
+  if (!imsToken) throw new Error('User sign-in required for Sites Optimizer');
+
+  const resp = await fetch(`${SPACECAT_BASE}/auth/login`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${imsToken}`,
+      'content-type': 'application/json',
+      'x-client-type': 'sites-optimizer-ui',
+    },
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`SpaceCat login ${resp.status}${body ? `: ${body.slice(0, 200)}` : ''}`);
+  }
+  const data = await resp.json();
+  // Response is either { token: '...' } or the token string directly
+  const token = data?.token || data?.access_token || (typeof data === 'string' ? data : null);
+  if (!token) throw new Error('SpaceCat login: no token in response');
+
+  // Parse exp from JWT payload (middle segment)
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    cachedSpacecatExpiry = (payload.exp || 0) * 1000;
+  } catch {
+    cachedSpacecatExpiry = now + 3600_000; // fallback: 1 hour
+  }
+  cachedSpacecatToken = token;
+  return token;
+}
+
 async function spacecatFetch(path) {
-  const token = getUserToken();
-  if (!token) throw new Error('User sign-in required for Sites Optimizer');
+  const token = await getSpacecatToken();
   const resp = await fetch(`${SPACECAT_BASE}${path}`, {
-    headers: { authorization: `Bearer ${token}` },
+    headers: {
+      authorization: `Bearer ${token}`,
+      'x-client-type': 'sites-optimizer-ui',
+    },
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
@@ -25,7 +66,6 @@ async function spacecatFetch(path) {
 
 /**
  * Resolve a site UUID by its base URL.
- * baseUrl e.g. "https://main--frescopa--aemshowcase2.aem.live"
  */
 export async function getSiteId(baseUrl) {
   const encoded = btoa(baseUrl);
@@ -39,32 +79,24 @@ export async function getSiteId(baseUrl) {
  */
 export async function getSiteOpportunities(siteUrl, options = {}) {
   let siteId;
-  // Accept raw UUID or a URL — derive UUID if needed
-  if (siteUrl.startsWith('https://') || siteUrl.startsWith('http://')) {
+  if (siteUrl.startsWith('http')) {
     siteId = await getSiteId(siteUrl);
     if (!siteId) throw new Error(`Site not found in SpaceCat for URL: ${siteUrl}`);
   } else {
     siteId = siteUrl;
   }
 
-  const path = options.priority && options.priority !== 'all'
-    ? `/sites/${siteId}/opportunities/by-status/NEW`
-    : `/sites/${siteId}/opportunities`;
-  const raw = await spacecatFetch(path);
-
-  // Normalize to array
+  const raw = await spacecatFetch(`/sites/${siteId}/opportunities`);
   const items = Array.isArray(raw) ? raw : (raw?.opportunities || raw?.items || []);
 
-  // Filter by category/priority if requested
   let filtered = items;
   if (options.category && options.category !== 'all') {
     filtered = filtered.filter((o) => o.type?.toLowerCase().includes(options.category.toLowerCase()));
   }
   if (options.priority && options.priority !== 'all') {
-    filtered = filtered.filter((o) => o.opportunityImpact?.toLowerCase() === options.priority.toLowerCase());
+    filtered = filtered.filter((o) => normalizePriority(o.opportunityImpact) === options.priority);
   }
 
-  // Map SpaceCat schema → existing renderer schema
   const opportunities = filtered.map((o) => ({
     id: o.id,
     title: o.title || o.type || 'Opportunity',
@@ -88,27 +120,18 @@ export async function getSiteOpportunities(siteUrl, options = {}) {
 }
 
 /**
- * Get the latest audit data for a site.
+ * Get the latest audit for a site.
  */
 export async function getSiteAudit(siteUrl, options = {}) {
   let siteId;
-  if (siteUrl.startsWith('https://') || siteUrl.startsWith('http://')) {
+  if (siteUrl.startsWith('http')) {
     siteId = await getSiteId(siteUrl);
     if (!siteId) throw new Error(`Site not found in SpaceCat for URL: ${siteUrl}`);
   } else {
     siteId = siteUrl;
   }
-
   const auditType = options.auditType || 'cwv';
-  const data = await spacecatFetch(`/sites/${siteId}/latest-audit/${auditType}`);
-  return data;
-}
-
-/**
- * Get the latest KPI metrics for a site.
- */
-export async function getSiteMetrics(siteId) {
-  return spacecatFetch(`/sites/${siteId}/latest-metrics`);
+  return spacecatFetch(`/sites/${siteId}/latest-audit/${auditType}`);
 }
 
 function normalizePriority(val) {
@@ -126,7 +149,7 @@ function scoreImpact(val) {
   return 5;
 }
 
-// No-op stubs so ai.js imports don't break
+// No-op stubs so existing imports don't break
 export const initSession = () => Promise.resolve();
 export const isAvailable = () => true;
 export const discoverTools = () => Promise.resolve([]);

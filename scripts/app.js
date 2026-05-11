@@ -14,8 +14,8 @@
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
 import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken, initS2SToken } from './ims.js';
-import * as ai from './ai.js?v=135';
-import { TOOL_AGENT_MAP } from './ai.js?v=135';
+import * as ai from './ai.js?v=136';
+import { TOOL_AGENT_MAP } from './ai.js?v=136';
 import * as da from './da-client.js';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
@@ -1054,6 +1054,12 @@ let cachedJcrEtag = null;
 let cachedJcrEtagPath = null;
 
 async function fetchPageHTML(url) {
+  // Bail out for non-HTTP URLs (about:blank, empty, etc.)
+  if (!url || !url.startsWith('http')) return null;
+  // Bail out for AEM Cloud author/publish URLs with JCR paths (/content/...) —
+  // these are author-side URLs, not EDS preview URLs; don't try to rewrite them.
+  if (url.includes('adobeaemcloud.com') || (url.includes('/content/') && !url.includes('.aem.') && !url.includes('.hlx.'))) return null;
+
   // Method 0: DA Admin API (authenticated, no CORS issues — most reliable for DA sites)
   if (isSignedIn() && da.getOrg() && da.getRepo()) {
     try {
@@ -1152,6 +1158,7 @@ function getPageContext() {
 
 async function ensurePageContext() {
   const rawUrl = (previewFrame?.src || PREVIEW_URL || '').replace(/[?&]_t=\d+/, '');
+  if (!rawUrl || rawUrl === 'about:blank' || !rawUrl.startsWith('http')) return;
   if (cachedPageHTML && cachedPageUrl === rawUrl) return;
   // Worker preview URLs: cache is populated async on connect — never re-fetch here
   if (rawUrl.includes('/preview?')) return;
@@ -6972,7 +6979,7 @@ async function init() {
   buildOrgSelector();
   initProfileGenerator();
 
-  console.log('[Compass] init v135');
+  console.log('[Compass] init v136');
 
   // Detect MCP token delivered via URL hash by the connect-aem helper script
   // Hash format: #mcp_token=TOKEN&mcp_refresh=REFRESH
