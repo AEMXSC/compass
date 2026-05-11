@@ -712,6 +712,124 @@ da_list_sources(org, repo)          ← browse repo structure
 
 ---
 
+## AEM Odin MCP — CF + Headless
+
+**Endpoints:** `https://mcp.adobeaemcloud.com/adobe/mcp/odin/{env}` where `{env}` = `prod`, `dev`, `qa`, `stage`
+
+35 tools. CF-first, headless-first. **No `authorUrl` param — environment is pre-wired to the endpoint.** No pages, no site launches, no assets. Pure Content Fragments + Content Models + DAM folders + bulk operations.
+
+### Content Fragments — Search & Discovery
+
+**`search-aem-content-fragments`** — Most powerful CF search in the stack. All filters are combinable.
+
+| Param | Type | Notes |
+|---|---|---|
+| `fullText` | string | Full-text query |
+| `fullTextQueryMode` | enum | `AS_IS` (default) / `EXACT_WORDS` / `EXACT_PHRASE` / `ALL_TERMS` / `EDGES` |
+| `path` | string | Scope to DAM folder |
+| `onlyDirectChildren` | boolean | Default: false (recursive) |
+| `status` | string | Comma-separated: `NEW`, `DRAFT`, `PUBLISHED`, `MODIFIED`, `UNPUBLISHED` |
+| `modelIds` | string | Comma-separated base64 model IDs |
+| `modelTags` | string | Comma-separated tag IDs on the model |
+| `tags` | string | Comma-separated tag IDs on the fragment |
+| `locale` | string | e.g. `en,fr,de` |
+| `createdBy` / `modifiedBy` / `publishedBy` | string | Comma-separated usernames |
+| `modifiedOrCreatedBy` | string | Matches either created.by OR modified.by |
+| `createdAfter/Before`, `modifiedAfter/Before`, `publishedAfter/Before`, `modifiedOrCreatedAfter/Before` | ISO 8601 | Date range filters |
+| `projection` | enum | `minimal` / `summary` (default) / `full` |
+| `sortBy` | enum | `title` / `created` / `modified` / `modifiedOrCreated` (default) |
+| `sortOrder` | enum | `ASC` / `DESC` (default) |
+| `limit` | number | Max 50, default 20 |
+| `cursor` | string | Pagination |
+
+### Content Fragments — CRUD
+
+- **`create-aem-fragment(title, name, parentPath, modelId, fields, description?)`** — No `authorUrl`. Same field structure as Content MCP.
+- **`aem-fragment-operation-with-references(fragmentId, operation, ifMatch?, patchOperations?, targetPath?, name?, label?, comment?, versionId?)`** — Power tool: copy / version / patch / delete / restore with auto reference handling. `ifMatch` required for patch/delete. `patchOperations` is JSON Patch array.
+
+### Content Fragments — Variations
+
+- **`patch-aem-fragment-variation(fragmentId, variationName, ifMatch, patchOperations)`** — Requires ETag.
+- **`delete-aem-fragment-variation(fragmentId, variationName, ifMatch)`** — Cannot delete master/main.
+
+### Content Fragments — Versions
+
+- **`list-aem-fragment-versions(fragmentId, cursor?, limit?)`**
+- **`get-aem-fragment-version(fragmentId, versionId)`**
+- **`restore-aem-fragment-version(fragmentId, versionId)`** — Overwrites current content. Irreversible.
+
+### Publish / Unpublish
+
+- **`publish-aem-fragments(ids?, paths?, includeReferences?, scheduledTime?, workflowTitle?)`**
+  - Up to 50 at once. Use UUIDs (`ids`) OR JCR paths (`paths`) — not both.
+  - ⚠️ **`includeReferences`** — also publishes referenced child fragments. Default: `false`. Always ask user before setting `true`.
+  - `scheduledTime` = epoch ms for scheduled publish.
+
+- **`unpublish-aem-fragments(ids, allowWhenReferenced?, scheduledTime?, workflowTitle?)`**
+  - UUIDs only. Blocked by default if fragment is referenced elsewhere.
+  - ⚠️ **`allowWhenReferenced: true`** may cause broken references on publish tier.
+
+### Content Delivery Preview
+
+- **`preview-aem-content-delivery(fragmentPath, tier?)`**
+  - Fetches content exactly as the delivery tier serves it via `.cfm.gql.json` GraphQL selector.
+  - Returns all fields + resolved references including Dynamic Media URLs (`_dynamicUrl`).
+  - `tier`: `publish` (default — what users see) / `preview` (unpublished author content)
+  - ⚠️ **Only tool in the entire stack** that shows exactly what the delivery API returns, including resolved Dynamic Media URLs. Use to validate headless output.
+
+### Content Models
+
+- **`search-aem-content-models(searchTerm?, configurationFolder?, status?, locked?, projection?, limit?, cursor?)`** — Partial match on name or `technicalName`. `configurationFolder` e.g. `/conf/CXP`.
+- **`get-aem-fragment-model(modelId)`** — Full field schema. Required before `create-aem-fragment`.
+- **`create-aem-content-model(name, configurationFolder, fields, technicalName?, description?, status?, locked?, dryRun?)`**
+  - Always validates before creating. `dryRun: true` to validate only.
+  - Supported field types: `text`, `long-text`, `number`, `float-number`, `boolean`, `content-fragment`, `content-reference`, `date`, `time`, `date-time`, `enumeration`, `tag`, `json`
+  - `technicalName` auto-generated from `name` if omitted. No `/:[]|*` chars.
+- **`update-aem-content-model(modelId, updates, unlockFirst?)`** — JSON Patch update. `updates` is stringified JSON with keys: `name`, `description`, `locked`, `status`, `fields`. Auto-unlocks locked models when `unlockFirst: true` (default).
+
+### DAM Folders
+
+- **`search-aem-folders(path, limit?, cursor?)`** — Lists child folders at path.
+- **`check-aem-folder-exists(path)`** — Lightweight existence check.
+- **`create-aem-folder(folderName, parentPath, title?)`** — Intermediate folders auto-created.
+- **`delete-aem-folder(path, recursive?, force?)`** — Permanent. `recursive` (default: true) deletes children. `force` (default: false) deletes even published content.
+
+### Batch API
+
+- **`aem_create_batch(requests)`** — Submits multiple write operations in a single async call. Write operations only — no GETs.
+  - `requests` = stringified JSON array. Each: `path` (relative to `/adobe/sites`), `method` (POST/PUT/DELETE/PATCH), optional `headers[]`, `queryParameters[]`, `body`.
+  - Returns `batchId`.
+- **`aem_get_batch_status(batchId)`** — Poll until terminal state.
+  - Statuses: `QUEUED` / `ACTIVE` / `SUCCEEDED` / `STOPPED` / `GIVEN_UP` / `ERROR` / `DROPPED`
+
+### Standard Odin Workflow
+
+```
+search-aem-content-models → get-aem-fragment-model (schema)
+→ search-aem-content-fragments (filter by status/user/model/locale)
+→ aem-fragment-operation-with-references (patch/copy/version)
+→ publish-aem-fragments (ids or paths — confirm includeReferences with user)
+→ preview-aem-content-delivery (validate delivery output)
+
+For bulk: swap middle step for aem_create_batch → aem_get_batch_status (poll)
+```
+
+### Odin vs AEM Content MCP — Key Differences
+
+| | Odin | AEM Content MCP |
+|---|---|---|
+| `authorUrl` required | ❌ Pre-wired | ✅ Every tool |
+| CF search filters | Status, user, locale, model, tags, dates | Text + path only |
+| Content model CRUD | ✅ Full (create, update, search) | Read-only (list/get) |
+| Batch API | ✅ `aem_create_batch` | ❌ |
+| Delivery preview | ✅ `preview-aem-content-delivery` | ❌ |
+| Scheduled publish | ✅ Epoch ms | ❌ |
+| `includeReferences` on publish | ✅ | ❌ |
+| Pages / Launches / Assets | ❌ CF only | ✅ Full |
+| Environments | Dev / Prod / QA / Stage | Prod + Stage + Dev |
+
+---
+
 ## The Experience Production Agent MCP
 
 **Endpoint:** `https://mcp.adobeaemcloud.com/adobe/mcp/experience-production`
