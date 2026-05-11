@@ -134,6 +134,33 @@ export async function initS2SToken() {
 export function isSignedIn() { return !!getToken(); }
 export function getAuthMethod() { return authMethod; }
 
+/**
+ * Returns a user IMS token from any Adobe client — never falls back to S2S.
+ * Accepts tokens from any client_id (aem-extension-builder, darkalley, exc_app, etc.).
+ * Use for MCPs that require user-level auth (e.g. SpaceCat / Sites Optimizer).
+ * Returns null if no valid user token exists.
+ */
+export function getUserToken() {
+  if (imsReady && window.adobeIMS) {
+    const t = window.adobeIMS.getAccessToken();
+    if (t?.token) return t.token;
+  }
+  try {
+    const now = Date.now();
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith('adobeid_ims_access_token')) continue;
+      try {
+        const parsed = JSON.parse(localStorage.getItem(key));
+        const token = parsed?.tokenValue || parsed?.token || parsed?.access_token;
+        const expiry = parsed?.expire ? new Date(parsed.expire).getTime() : (parsed?.expiry || 0);
+        if (token && (!expiry || now < expiry)) return token;
+      } catch { /* malformed — skip */ }
+    }
+  } catch { /* localStorage unavailable */ }
+  return null;
+}
+
 export function getProfile() {
   if (profile) return profile;
   const cached = localStorage.getItem(STORAGE_KEYS.PROFILE);

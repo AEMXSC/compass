@@ -17,7 +17,7 @@
  *   /adobe/mcp/development     — Pipeline troubleshooting (uses credits)
  */
 
-import { getToken, ensureToken, signInMcpOAuth } from './ims.js';
+import { getToken, getUserToken, ensureToken, signInMcpOAuth } from './ims.js';
 
 const MCP_BASE = 'https://mcp.adobeaemcloud.com';
 const MCP_PROTOCOL_VERSION = '2025-03-26';
@@ -96,12 +96,16 @@ export function createMcpClient(endpointPath, label = 'MCP', options = {}) {
    */
   async function mcpRequest(method, params = {}, { isNotification = false, _isRetry = false } = {}) {
     // Token priority:
+    //   userOnly (SpaceCat): user IMS token only — any client_id, no S2S fallback
     //   preferUserToken (Firefly): IMS user session → MCP OAuth → S2S fallback when not signed in
     //   default: per-product/product token → MCP OAuth → S2S → IMS session
     const userToken = getToken();
     const s2sToken = localStorage.getItem('ew-s2s-token');
     let token;
-    if (options.preferUserToken) {
+    if (options.userOnly) {
+      token = getUserToken();
+      if (!token) throw new Error(`[${label}] User sign-in required — this MCP does not accept service account tokens`);
+    } else if (options.preferUserToken) {
       // Firefly: prefer user's IMS token (carries personal 3P model entitlements)
       // Fall back to S2S only when user is not signed in
       token = userToken || localStorage.getItem('ew-mcp-token') || s2sToken;
@@ -398,7 +402,7 @@ export const acpcMcp = createMcpClient('https://emcee-stage.adobe.io/mcp', 'ACPC
 export const sitesOptimizerMcp = createMcpClient('https://m-mcp-demo.adobe.io/mcp', 'Sites-Optimizer', IMS);
 
 // ── External ──
-export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
+export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/@/mcp', 'Spacecat', { userOnly: true });
 
 // ── Workfront — uses apiKey header auth (injected by worker), not IMS Bearer ──
 export const workfrontMcp = createMcpClient('https://aemshowcase2.my.workfront.adobe.com/mcp-api/mcp', 'Workfront');
