@@ -5723,6 +5723,7 @@ Read the user's request and identify which domain applies before selecting any t
 - NEVER call \`get_page_content\` when page HTML is already in context — it is always present for the current page
 - NEVER call \`batch_aem_update\` without confirmed=false preview and explicit user confirmation first
 - NEVER use Spacecat tools (\`get_site_audit\`, \`get_site_opportunities\`) to make edits — they are read-only analysis
+- NEVER analyze page HTML as a substitute for \`get_site_opportunities\` — when a user asks about "opportunities", "site health", "what to fix", or "AEM Sites Optimizer / SpaceCat / ASO", call \`get_site_opportunities\` immediately. Page HTML analysis is NOT site opportunity data.
 - NEVER publish a page without a governance check
 
 ---
