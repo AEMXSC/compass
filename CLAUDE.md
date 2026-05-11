@@ -179,7 +179,7 @@ If SharePoint-backed (not DA, not JCR): content lives in SharePoint. Cannot writ
 | JCR (AEM CS) | `patch-aem-page-content` | `get-aem-page-content` |
 | JCR Content Fragment | `patch-aem-fragment-variation` | `get-aem-fragment-variation` |
 | DA-backed EDS (Claude Code) | `da_update_source` | `da_get_source` |
-| DA-backed EDS (Claude.ai chat) | Experience Production Agent via Marketing Agent MCP | Same |
+| DA-backed EDS (Claude.ai chat) | EPA `process_page_tool` → poll `get_status_tool` → `accept_changes_tool` | EPA `process_page_tool` |
 | GitHub/SharePoint-backed EDS | Cannot write programmatically | `fetch` the `.aem.page` URL |
 
 ---
@@ -344,9 +344,8 @@ Built in `ai.js → buildSystemParts()`:
 
 4. Fire preview triggers async. Never block response on them.
 
-5. Pre-warm Experience Production Agent at DA session start:
-   "Context: DA site, org: {org}, repo: {repo}, branch: main.
-    Ready to execute. No setup questions needed."
+5. EPA requires no pre-warm. `process_page_tool` auto-detects EDS vs AEM Cloud from URL.
+   Pass request_text verbatim. Never rephrase the user's instruction.
 
 6. If an operation takes >5s, show named steps:
    "Reading page content... Patching hero... Triggering preview..."
@@ -485,26 +484,82 @@ Marketing Agent MCP is Stage endpoint. Operational data queries (AEP audiences, 
 
 ---
 
-## The Experience Production Agent — DA from Claude.ai Chat
+## The Experience Production Agent MCP
 
-When DA MCP raw tools are unavailable (Claude.ai chat, not Claude Code), use the Experience Production Agent via the Marketing Agent MCP.
+**Endpoint:** `https://mcp.adobeaemcloud.com/adobe/mcp/experience-production`
 
-**Pre-warm script (send at session start to eliminate setup questions):**
+Handles both EDS and AEM Cloud pages. URL type is auto-detected — no pre-warm, no setup questions.
+
+### Four Tools — Linear Flow
+
+**1. `process_page_tool`** — Entry point. Submits an AI-powered content generation or update job.
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| `request_text` | string | ✅ | Full natural language request including URL. Pass verbatim — do NOT rephrase. |
+| `template_id` | string | ❌ | Only on second call when status returns `template_selection`. |
+
+Returns: `status` (completed / running / pending / error), `execution_id`, `message`, `links` (on completion), `progress` (when running)
+
+URL routing (automatic):
+- `*.aem.page` or public EDS URL → EDS workflow → `links.eds.preview` + `links.eds.docx`
+- `author-pXXXX-eXXXX.adobeaemcloud.com` → AEM Cloud workflow → `links.cloud.preview` + `links.cloud.edit`
+- `*.aemsitestrial.com` → auto-detected trial
+
+---
+
+**2. `get_status_tool`** — Polls a running or pending job.
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| `execution_id` | string | ✅ | The `exec_` prefixed ID from `process_page_tool`. |
+| `delay_seconds` | integer | ❌ | Wait before checking. Use `10` to avoid hammering. Max 45. |
+
+Returns: `status`, `execution_id`, `message`, `plan_summary`, `links` (on completion), `progress`, `error`
+
+---
+
+**3. `provide_feedback_tool`** — Iterates on a completed job without restarting.
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| `execution_id` | string | ✅ | Execution ID of the completed job to refine. |
+| `feedback` | string | ✅ | Specific change instructions. e.g. "Make the hero shorter", "Add a testimonials section below the CTA" |
+
+Skips initial build steps — faster than restarting. Same `execution_id`, increments iteration counter.
+
+---
+
+**4. `accept_changes_tool`** — Finalizes and applies the AI-generated changes.
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| `execution_id` | string | ✅ | Execution ID of the completed job to accept. |
+| `target_environment` | string | ❌ | Reserved for future use. Default: `production`. Currently a no-op. |
+
+For AEM Cloud: promotes the launch. For EDS: merges the semantic model update.
+
+---
+
+### Standard Workflow
+
 ```
-I am working on a DA-backed EDS site.
-Type: da
-Org: {org}
-Repo: {repo}
-Branch: main
-Ready to execute content changes immediately.
+process_page_tool(request_text)
+  → status: running → get_status_tool(execution_id, delay_seconds: 10) [poll until completed]
+  → review preview links
+  → [optional] provide_feedback_tool(execution_id, feedback) [iterate]
+  → accept_changes_tool(execution_id)
 ```
 
-**Known setup questions the agent asks (answer these proactively):**
-- "What type of AEM configuration do you use?" → Answer: `da`
-- "Is org: X, repo: Y correct?" → Answer: `proceed`
-- "Look good?" → Answer: `generate`
+### When to Use EPA vs DA MCP Raw Tools
 
-Batching these answers saves 3 round trips and ~15 seconds in a live demo.
+| Scenario | Use |
+|---|---|
+| Claude.ai chat (no raw DA tools) | EPA — only option |
+| Claude Code + simple read/write | DA MCP (`da_get_source`, `da_update_source`) — faster, no polling |
+| Claude Code + page creation from brief | EPA — has template/semantic model workflow |
+| AEM Cloud JCR pages | EPA or AEM Content MCP — EPA auto-routes via URL |
+| Iteration / feedback on a completed job | EPA `provide_feedback_tool` — faster than restart |
 
 ---
 
