@@ -14,8 +14,8 @@
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
 import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken, initS2SToken } from './ims.js';
-import * as ai from './ai.js?v=145';
-import { TOOL_AGENT_MAP } from './ai.js?v=145';
+import * as ai from './ai.js?v=146';
+import { TOOL_AGENT_MAP } from './ai.js?v=146';
 import * as da from './da-client.js';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
@@ -6646,8 +6646,12 @@ if (previewSiteUrl && siteSwitchInput && previewUrlText) {
         siteSwitchInput.style.display = 'none';
         previewUrlText.style.display = '';
         previewSiteUrl.classList.remove('editing');
-        // Use the existing connectCustomSite flow
-        connectCustomSite(val);
+        // Full URLs (author, aem.page, etc.) — load directly in frame, no site-switch
+        if (val.startsWith('http://') || val.startsWith('https://')) {
+          navigateToPage(val);
+        } else {
+          connectCustomSite(val);
+        }
       }
     } else if (e.key === 'Escape') {
       siteSwitchInput.style.display = 'none';
@@ -6999,7 +7003,7 @@ async function init() {
   buildOrgSelector();
   initProfileGenerator();
 
-  console.log('[Compass] init v145');
+  console.log('[Compass] init v146');
 
   // Detect MCP token delivered via URL hash by the connect-aem helper script
   // Hash format: #mcp_token=TOKEN&mcp_refresh=REFRESH
