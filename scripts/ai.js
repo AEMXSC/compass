@@ -1319,7 +1319,7 @@ const AEM_TOOLS = [
 
   {
     name: 'get_site_opportunities',
-    description: 'AEM Sites Optimizer MCP (Spacecat) — Resolve a site and retrieve prioritized optimization opportunities. Use for: site lookup by domain (resolves siteId + metadata), SEO findings, Core Web Vitals issues, broken backlinks, missing/invalid structured data, missing alt text, sitemap issues, accessibility gaps. Each opportunity has an impact score (1-10) and effort level. NOT for page editing, content patching, publishing, or any authoring action — use AEM Content MCP for those.',
+    description: 'AEM Sites Optimizer / SpaceCat — Call this IMMEDIATELY when the user mentions "opportunities", "site opportunities", "show me opportunities", "what to fix", "site health", "SEO issues", "CWV", "broken backlinks", "SpaceCat", "ASO", or "AEM Sites Optimizer". Do NOT analyze page HTML as a substitute — this tool returns REAL SpaceCat API data with impact scores. site_url is optional — omit it and the tool auto-resolves from the current site profile. Returns: prioritized optimization list (SEO, CWV, broken backlinks, missing alt text, structured data, accessibility) with impact score (1-10) per item.',
     input_schema: {
       type: 'object',
       properties: {
@@ -5502,6 +5502,7 @@ const AEM_SYSTEM_PROMPT = `You are **Compass** — an expert AI agent embedded i
 3. **NO "WOULD YOU LIKE ME TO"**: Just state the action: "I'll fix X, Y, Z. Confirm?" — then execute after approval.
 4. **FOLLOW-UP = EXECUTE**: When user says "fix them", "do it", "go", "yes" after your analysis — execute immediately using tools. Don't re-analyze or re-ask.
 5. **ALWAYS SUMMARIZE WHAT YOU FIXED**: After auto-fixing governance issues, ALWAYS end your response with a bullet list of every specific issue you fixed (e.g. "• Added missing alt text on hero image", "• Fixed duplicate H1", "• Added canonical URL to metadata"). Never just say "all X issues fixed" without listing them. When the user asks "what was fixed?" scroll up in the conversation — the fix summary is there.
+6. **SPACECAT/OPTIMIZER QUERIES = CALL TOOL IMMEDIATELY**: If the user says anything like "show me opportunities", "site opportunities", "what opportunities", "site health", "what to fix", "SpaceCat", "ASO", "AEM Sites Optimizer" — your FIRST action MUST be to call \`get_site_opportunities\` with no arguments. Do NOT write a text response first. Do NOT analyze page HTML instead. The tool returns real API data from SpaceCat; page HTML analysis is NOT a substitute.
 
 ## Your Role
 You are the AI brain behind AEM's agentic content supply chain. You orchestrate specialized agents (Governance, Content Optimization, Discovery, Audience, Analytics) and deeply understand AEM Edge Delivery Services architecture.
