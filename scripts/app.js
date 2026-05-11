@@ -2174,6 +2174,49 @@ async function handleRealChat(text, file) {
     check_citation_readability: () => 'Checking AI citation readability...',
   };
 
+  const TOOL_SUBSTEPS = {
+    edit_page_content: [
+      (i) => `Reading current content${i.page_path ? ` from ${i.page_path}` : ''}...`,
+      () => 'Generating edit with AI...',
+      (i) => `Writing to DA${i.page_path ? ` — ${i.page_path}` : ''}...`,
+      () => 'Triggering preview...',
+    ],
+    search_dam_assets: [
+      (i) => `Searching DAM${i.query ? ` for "${i.query}"` : ''}...`,
+      () => 'Filtering results...',
+      () => 'Fetching asset metadata...',
+    ],
+    run_governance_check: [
+      () => 'Connecting to Governance Agent...',
+      () => 'Loading brand rules for this domain...',
+      () => 'Evaluating content compliance...',
+      () => 'Scoring against brand guidelines...',
+    ],
+    generate_image_gemini: [
+      (i) => `Preparing prompt${i.prompt ? `: "${i.prompt.slice(0, 40)}..."` : ''}`,
+      () => 'Sending to Gemini 2.5 Flash...',
+      () => 'Generating image...',
+      () => 'Uploading to Cloudflare R2...',
+    ],
+    search_content_fragments: [
+      (i) => `Searching fragments${i.query ? ` for "${i.query}"` : ''}...`,
+      () => 'Retrieving fragment metadata...',
+    ],
+    check_asset_expiry: [
+      () => 'Checking DRM license data...',
+      () => 'Scanning expiry dates...',
+      () => 'Evaluating rights restrictions...',
+    ],
+    get_page_content: [
+      (i) => `Fetching page${i.path ? ` ${i.path}` : ''}...`,
+      () => 'Parsing content structure...',
+    ],
+    preview_page: [
+      (i) => `Triggering preview${i.path ? ` for ${i.path}` : ''}...`,
+      () => 'Waiting for CDN propagation...',
+    ],
+  };
+
   function getThinkingText(toolName, toolInput) {
     const fn = TOOL_THINKING[toolName];
     if (fn) try { return fn(toolInput || {}); } catch { /* */ }
@@ -2185,14 +2228,16 @@ async function handleRealChat(text, file) {
     toolsCalled.add(toolName);
     const thinkingText = getThinkingText(toolName, toolInput);
 
-    // Show thinking in main chat stream (AEMcoder-style)
+    // Show thinking in main chat stream — keep thinking-pulse alive during tool execution
     if (streamEl) {
       const current = streamEl.innerHTML;
       const thinkingLine = `<div class="tool-thinking-line">${escapeHtml(thinkingText)}</div>`;
-      // Append thinking line below any existing streamed text
-      if (current.includes('thinking-pulse') || current.trim() === '') {
+      if (current.trim() === '') {
         streamEl.innerHTML = thinkingLine;
+      } else if (current.includes('tool-thinking-line')) {
+        streamEl.innerHTML = current.replace(/<div class="tool-thinking-line">[^<]*<\/div>\s*$/, '') + thinkingLine;
       } else {
+        // Keep thinking-pulse alive; append tool step below it
         streamEl.innerHTML = current + thinkingLine;
       }
       scrollChat();
@@ -2250,6 +2295,35 @@ async function handleRealChat(text, file) {
     const count = bodyEl.querySelectorAll('.tool-call-row').length;
     group.querySelector('.tool-group-count').textContent = count > 1 ? `${count} calls` : '';
 
+    // Per-tool elapsed counter on status badge
+    const statusEl = document.getElementById(toolId)?.querySelector('.tool-call-status');
+    if (statusEl) {
+      const toolStart = Date.now();
+      const toolTimer = setInterval(() => {
+        const s = Math.round((Date.now() - toolStart) / 1000);
+        statusEl.textContent = `${s}s`;
+      }, 1000);
+      statusEl.dataset.timerId = String(toolTimer);
+
+      // Progressive sub-steps for long-running tools
+      const substeps = TOOL_SUBSTEPS[toolName];
+      if (substeps && substeps.length > 1 && streamEl) {
+        let stepIdx = 0;
+        const substepTimer = setInterval(() => {
+          stepIdx = Math.min(stepIdx + 1, substeps.length - 1);
+          const nextText = substeps[stepIdx](toolInput || {});
+          const cur = streamEl.innerHTML;
+          if (cur.includes('tool-thinking-line')) {
+            streamEl.innerHTML = cur.replace(/<div class="tool-thinking-line">[^<]*<\/div>\s*$/, `<div class="tool-thinking-line">${escapeHtml(nextText)}</div>`);
+            scrollChat();
+          } else {
+            clearInterval(substepTimer);
+          }
+        }, 4000);
+        statusEl.dataset.substepTimerId = String(substepTimer);
+      }
+    }
+
     scrollChat();
   }
 
@@ -2258,7 +2332,12 @@ async function handleRealChat(text, file) {
     const stepEl = myToolId ? document.getElementById(myToolId) : null;
     if (stepEl) {
       stepEl.classList.replace('active', 'done');
-      stepEl.querySelector('.tool-call-status').textContent = 'Done';
+      const statusEl = stepEl.querySelector('.tool-call-status');
+      if (statusEl) {
+        if (statusEl.dataset.timerId) clearInterval(Number(statusEl.dataset.timerId));
+        if (statusEl.dataset.substepTimerId) clearInterval(Number(statusEl.dataset.substepTimerId));
+        statusEl.textContent = 'Done';
+      }
     }
 
     // Store compliance results for PDF export
