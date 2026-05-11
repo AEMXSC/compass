@@ -25,6 +25,30 @@ let authMethod = 'none';    // 'imslib' | 's2s' | 'none'
 
 /* ─── Token access ─── */
 
+/**
+ * Returns the user's IMS token only — never falls back to S2S.
+ * Use for MCPs that require user-level auth (e.g. SpaceCat / Sites Optimizer).
+ * Returns null if the user is not signed in via imslib.
+ */
+export function getUserToken() {
+  if (imsLibLoaded && window.adobeIMS) {
+    const t = window.adobeIMS.getAccessToken();
+    if (t?.token) return t.token;
+  }
+  try {
+    const imsKey = `adobeid_ims_access_token/${IMS_CLIENT_ID}`;
+    const imsEntry = localStorage.getItem(imsKey) || localStorage.getItem('adobeid_ims_access_token');
+    if (imsEntry) {
+      const parsed = JSON.parse(imsEntry);
+      if ((!parsed?.client_id || parsed.client_id === IMS_CLIENT_ID)
+          && parsed?.tokenValue && parsed?.expire && Date.now() < parsed.expire) {
+        return parsed.tokenValue;
+      }
+    }
+  } catch { /* malformed entry */ }
+  return null;
+}
+
 export function getToken() {
   // imslib manages its own token — prefer it
   if (imsLibLoaded && window.adobeIMS) {

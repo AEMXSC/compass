@@ -17,7 +17,7 @@
  *   /adobe/mcp/development     — Pipeline troubleshooting (uses credits)
  */
 
-import { getToken } from './ims.js';
+import { getToken, getUserToken } from './ims.js';
 
 const MCP_BASE = 'https://mcp.adobeaemcloud.com';
 const MCP_PROTOCOL_VERSION = '2024-11-05';
@@ -28,7 +28,7 @@ const MCP_PROTOCOL_VERSION = '2024-11-05';
  * @param {string} label — human-readable name for console logs
  * @returns MCP client object with initSession, callTool, getToolSchemas, resetSession, isAvailable
  */
-export function createMcpClient(endpointPath, label = 'MCP') {
+export function createMcpClient(endpointPath, label = 'MCP', { tokenFn } = {}) {
   const endpoint = endpointPath.startsWith('https://') ? endpointPath : `${MCP_BASE}${endpointPath}`;
   let sessionId = null;
   let requestId = 0;
@@ -45,7 +45,7 @@ export function createMcpClient(endpointPath, label = 'MCP') {
    * Handles both direct JSON and SSE response formats.
    */
   async function mcpRequest(method, params = {}, { isNotification = false } = {}) {
-    const token = getToken();
+    const token = tokenFn ? tokenFn() : getToken();
     const headers = {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
@@ -227,5 +227,5 @@ export const acrobatMcp = createMcpClient('/adobe/mcp/acrobat', 'Acrobat');
 /** Marketing Agent — AJO journeys, Target decisioning, audience activation. */
 export const marketingMcp = createMcpClient('/adobe/mcp/marketing-agent', 'Marketing-Agent');
 
-/** Spacecat / AEM Sites Optimizer — site audits, SEO, CWV, broken backlinks. */
-export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/api/v1/mcp', 'Spacecat');
+/** Spacecat / AEM Sites Optimizer — site audits, SEO, CWV, broken backlinks. User IMS token only — no S2S fallback. */
+export const spacecatMcp = createMcpClient('https://spacecat.experiencecloud.live/@/mcp', 'Spacecat', { tokenFn: getUserToken });
