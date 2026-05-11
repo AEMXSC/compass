@@ -14,8 +14,8 @@
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
 import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken, initS2SToken } from './ims.js';
-import * as ai from './ai.js?v=146';
-import { TOOL_AGENT_MAP } from './ai.js?v=146';
+import * as ai from './ai.js?v=147';
+import { TOOL_AGENT_MAP } from './ai.js?v=147';
 import * as da from './da-client.js';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
@@ -4239,22 +4239,12 @@ async function connectCustomSite(input) {
 
   const edsPreviewOrigin = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page`;
 
-  // For JCR sites, the .aem.page URL may not resolve (xwalk sites use different delivery).
-  // Use the author URL for preview, or fall back to EDS URL if it works.
+  // For JCR sites (user pasted an author URL), always use the author origin so the
+  // Browser Rendering path triggers. Never substitute the EDS URL — if the user wanted
+  // EDS preview they'd paste an aem.page URL.
   let previewOrigin = edsPreviewOrigin;
   if (parsed.jcr && parsed.aemHost) {
-    // Probe the EDS URL — some xwalk sites DO have EDS delivery, most don't.
-    // Use cors mode so we can check resp.ok (no-cors returns opaque = always "success").
-    let edsWorks = false;
-    try {
-      const probe = await fetch(edsPreviewOrigin + '/', { mode: 'cors' });
-      edsWorks = probe.ok;
-    } catch { /* DNS failure, CORS block, etc. */ }
-
-    if (!edsWorks) {
-      // EDS preview doesn't exist — use author URL for JCR preview
-      previewOrigin = `https://${parsed.aemHost}`;
-    }
+    previewOrigin = `https://${parsed.aemHost}`;
   }
 
   // Show loading state (if home view elements exist)
@@ -6646,12 +6636,7 @@ if (previewSiteUrl && siteSwitchInput && previewUrlText) {
         siteSwitchInput.style.display = 'none';
         previewUrlText.style.display = '';
         previewSiteUrl.classList.remove('editing');
-        // Full URLs (author, aem.page, etc.) — load directly in frame, no site-switch
-        if (val.startsWith('http://') || val.startsWith('https://')) {
-          navigateToPage(val);
-        } else {
-          connectCustomSite(val);
-        }
+        connectCustomSite(val);
       }
     } else if (e.key === 'Escape') {
       siteSwitchInput.style.display = 'none';
@@ -7003,7 +6988,7 @@ async function init() {
   buildOrgSelector();
   initProfileGenerator();
 
-  console.log('[Compass] init v146');
+  console.log('[Compass] init v147');
 
   // Detect MCP token delivered via URL hash by the connect-aem helper script
   // Hash format: #mcp_token=TOKEN&mcp_refresh=REFRESH
