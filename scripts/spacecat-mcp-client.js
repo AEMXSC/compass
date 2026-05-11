@@ -16,12 +16,14 @@ const SPACECAT_PROXY = `${WORKER_BASE}/spacecat/api/v1`;
 async function spacecatFetch(path) {
   const imsToken = getUserToken();
   if (!imsToken) throw new Error('User sign-in required for Sites Optimizer');
+  console.log('[SpaceCat] fetch', path, 'token:', imsToken ? imsToken.slice(-8) : 'none');
   const resp = await fetch(`${SPACECAT_PROXY}${path}`, {
     headers: { Authorization: `Bearer ${imsToken}` },
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
-    throw new Error(`SpaceCat ${resp.status}${body ? `: ${body.slice(0, 200)}` : ''}`);
+    console.error('[SpaceCat] error', resp.status, path, body.slice(0, 500));
+    throw new Error(`SpaceCat ${resp.status}${body ? `: ${body.slice(0, 500)}` : ''}`);
   }
   return resp.json();
 }

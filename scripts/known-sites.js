@@ -14,6 +14,7 @@ export const KNOWN_SITES = {
   frescopa: {
     name: 'Frescopa Coffee',
     siteId: 'frescopa',
+    spacecatSiteId: '6cec4875-136a-4d03-af89-89c326affd2b',
     siteType: 'xwalk', // JCR content + EDS code repo + UE editing
     org: 'aem-showcase',
     repo: 'frescopa',

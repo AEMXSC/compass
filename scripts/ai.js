@@ -4509,7 +4509,14 @@ export async function executeTool(name, input) {
 
     case 'get_site_opportunities': {
       if (!(await ensureAuth())) return authRequiredError('get_site_opportunities');
-      const siteUrl = input.site_url || `https://${profile.branch || 'main'}--${profile.repo || 'site'}--${(profile.orgId || 'org').toLowerCase()}.aem.live`;
+      const daOrg = da.getOrg(); const daRepo = da.getRepo(); const daBranch = da.getBranch();
+      // Prefer known SpaceCat site ID (UUID) to avoid URL lookup entirely
+      const knownSite = Object.values(KNOWN_SITES).find((s) => s.org === daOrg && s.repo === daRepo);
+      const siteUrl = input.site_url
+        || knownSite?.spacecatSiteId
+        || (daOrg && daRepo ? `https://${daBranch || 'main'}--${daRepo}--${daOrg}.aem.live` : null)
+        || `https://${profile.branch || 'main'}--${profile.repo || 'site'}--${(profile.orgId || 'org').toLowerCase()}.aem.live`;
+      console.log('[SpaceCat] resolving opportunities for:', siteUrl);
       try {
         const result = await spacecatMcp.getSiteOpportunities(siteUrl, {
           category: input.category,
@@ -4522,13 +4529,17 @@ export async function executeTool(name, input) {
           source: 'Sites Optimizer MCP (Spacecat)',
         }, null, 2);
       } catch (err) {
+        console.error('[SpaceCat] get_site_opportunities error:', err.message);
         return mcpError('get_site_opportunities', err);
       }
     }
 
     case 'get_site_audit': {
       if (!(await ensureAuth())) return authRequiredError('get_site_audit');
-      const siteUrl = input.site_url || `https://${profile.branch || 'main'}--${profile.repo || 'site'}--${(profile.orgId || 'org').toLowerCase()}.aem.live`;
+      const daOrg2 = da.getOrg(); const daRepo2 = da.getRepo(); const daBranch2 = da.getBranch();
+      const siteUrl = input.site_url
+        || (daOrg2 && daRepo2 ? `https://${daBranch2 || 'main'}--${daRepo2}--${daOrg2}.aem.live` : null)
+        || `https://${profile.branch || 'main'}--${profile.repo || 'site'}--${(profile.orgId || 'org').toLowerCase()}.aem.live`;
       try {
         const result = await spacecatMcp.getSiteAudit(siteUrl, {
           auditType: input.audit_type || 'full',
