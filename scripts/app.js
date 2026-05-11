@@ -14,8 +14,8 @@
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
 import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken, initS2SToken } from './ims.js';
-import * as ai from './ai.js?v=142';
-import { TOOL_AGENT_MAP } from './ai.js?v=142';
+import * as ai from './ai.js?v=143';
+import { TOOL_AGENT_MAP } from './ai.js?v=143';
 import * as da from './da-client.js';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
@@ -3668,6 +3668,8 @@ function updateBreadcrumb(path) {
 
 /* ── Navigate preview iframe to a page ── */
 function navigateToPage(path) {
+  // Don't navigate preview frame to JCR/author paths — leave it as-is
+  if (path && (path.startsWith('/content/') || path.startsWith('/conf/') || path.startsWith('/apps/'))) return;
   activeResourcePath = path;
   const url = AEM_ORG.previewOrigin + path;
 
@@ -6986,7 +6988,7 @@ async function init() {
   buildOrgSelector();
   initProfileGenerator();
 
-  console.log('[Compass] init v142');
+  console.log('[Compass] init v143');
 
   // Detect MCP token delivered via URL hash by the connect-aem helper script
   // Hash format: #mcp_token=TOKEN&mcp_refresh=REFRESH
