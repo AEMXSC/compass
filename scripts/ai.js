@@ -1323,11 +1323,11 @@ const AEM_TOOLS = [
     input_schema: {
       type: 'object',
       properties: {
-        site_url: { type: 'string', description: 'Site domain or base URL (e.g., "https://www.frescopa.com" or "https://main--repo--org.aem.live"). Used to resolve siteId.' },
+        site_url: { type: 'string', description: 'Site domain or base URL (e.g., "https://www.frescopa.com" or "https://main--repo--org.aem.live"). If omitted, uses the current site profile.' },
         category: { type: 'string', enum: ['all', 'seo', 'performance', 'accessibility', 'content', 'broken-backlinks', 'structured-data'], description: 'Filter by opportunity category. Default: all.' },
         priority: { type: 'string', enum: ['all', 'high', 'medium', 'low'], description: 'Filter by priority. Default: all.' },
       },
-      required: ['site_url'],
+      required: [],
     },
   },
   {
@@ -1336,11 +1336,11 @@ const AEM_TOOLS = [
     input_schema: {
       type: 'object',
       properties: {
-        site_url: { type: 'string', description: 'Site domain or base URL to audit' },
+        site_url: { type: 'string', description: 'Site domain or base URL to audit. If omitted, uses the current site profile.' },
         audit_type: { type: 'string', enum: ['full', 'lighthouse', 'broken-backlinks', 'cwv', '404', 'structured-data'], description: 'Type of audit. Default: full.' },
         include_page_details: { type: 'boolean', description: 'Include per-page breakdown (can be verbose). Default: false.' },
       },
-      required: ['site_url'],
+      required: [],
     },
   },
 
@@ -5677,13 +5677,16 @@ Spacecat is the data/audit backbone for AEM Sites Optimizer. Use it for site hea
 - **get_site_opportunities** — Resolve a site by domain (returns siteId + metadata), then list prioritized optimization opportunities: SEO, broken backlinks, missing structured data, missing alt text, CWV issues, sitemap problems, accessibility. Impact score (1-10) + effort level per item.
 - **get_site_audit** — Latest audit results: Lighthouse scores, Core Web Vitals (LCP/INP/CLS), broken backlinks, 404s, redirect chains, structured-data validation, scraper/optimization context.
 
-**Use these when users ask:**
+**Use these when users ask (call IMMEDIATELY — no URL needed, no clarifying questions):**
+- "Show me site opportunities" / "Site opportunities" / "What opportunities are there?" → get_site_opportunities (no args)
+- "Show me opportunities for [site/org]" → get_site_opportunities with site_url if determinable, else no args
 - "What is the siteId for example.com?" / "Find this site in Sites Optimizer" → get_site_opportunities (site lookup)
 - "How's my site performing?" / "Run a Lighthouse check" → get_site_audit
 - "What should I fix first?" → get_site_opportunities with priority=high
 - "Any broken backlinks?" → get_site_audit with audit_type=broken-backlinks or get_site_opportunities with category=broken-backlinks
 - "Check my structured data / schema markup" → get_site_audit with audit_type=structured-data
 - "What does Sites Optimizer know about this domain?" → get_site_audit (full context)
+- "AEM Sites Optimizer" / "SpaceCat" / "ASO" → get_site_opportunities
 
 **Do NOT use for:** editing page content, patching components, publishing, DAM operations, content fragment updates → those belong in AEM Content MCP or DA flows.
 
@@ -5769,7 +5772,7 @@ For a new page using existing style: the current site HTML is in context — no 
 ### OPTIMIZATION_WORKFLOW
 
 **Phase 1 — Diagnose (Spacecat, read-only):**
-"What is wrong?", "Fix SEO", "CWV", "broken backlinks", "structured data", "how is performance?" → call \`get_site_opportunities\` and/or \`get_site_audit\` first
+"What is wrong?", "Fix SEO", "CWV", "broken backlinks", "structured data", "how is performance?", "show me opportunities", "site opportunities", "what opportunities", "AEM Sites Optimizer", "SpaceCat", "what should I fix", "optimization issues", "site health" → call \`get_site_opportunities\` and/or \`get_site_audit\` IMMEDIATELY. Do NOT ask for a URL, do NOT call search tools first — omit site_url and the tool uses the current site profile automatically.
 
 **Phase 2 — Fix (EPA tools):**
 After surfacing findings: \`edit_page_content\`, \`patch_aem_page_content\`, \`apply_alt_text\`, \`edit_aem_metadata\`, \`batch_aem_update\`
