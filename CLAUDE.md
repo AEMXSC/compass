@@ -420,30 +420,68 @@ Non-negotiable best practice:
 
 ---
 
-## Governance Check Protocol
+## AEM Experience Governance MCP
 
-When running a governance audit on a site or page:
+**Endpoint:** `https://mcp.adobeaemcloud.com/adobe/mcp/experience-governance`
+
+Eight tools across three groups. Brand IDs are internal — never surface them to users.
+
+### Brand Discovery
+
+**`bga_list_brands`** — Lists all configured brands. Always start here. No parameters.
+Returns: `brands[]` (id, name, description), `count`, `success`
+
+**`bga_get_brand(brand_id)`** — Full detail on a single brand.
+Returns: `name`, `description`, `status` (ACTIVE / INACTIVE / DRAFT), `is_default`, `origin_count`, `policy_count`, `origins[]`, timestamps
+
+### Checks / Guidelines
+
+**`bga_get_checks`** — All governance checks across all brands. Use when no specific brand mentioned. No parameters.
+
+**`bga_get_checks_by_brand(brand_id)`** — Checks for a specific brand.
+Returns: `brand_name`, `checks[]` (id, title, prompt, `applicable_to`: text / image / page), `count`
+
+**`bga_get_checks_by_url(url)`** — Resolves a URL to its brand via origin pattern matching, returns that brand's checks. Use when you have a URL but no brand ID. URL must include `https://`.
+
+### Evaluation
+
+**`bga_evaluate_text(text, brand_id?, url?, details?)`**
+- `text` required, non-empty
+- `brand_id` and `url` are mutually exclusive — never pass both
+- `details` defaults to `true` (per-check reasoning) — only set `false` if user explicitly doesn't want it
+- Brand resolution: if neither `brand_id` nor `url` provided and only 1 brand configured → uses it automatically. If multiple brands → returns `needs_clarification: true` → call `bga_list_brands`, ask user to pick, re-call with `brand_id`
+
+Returns: `overall_aligned`, `successful_checks`, `failed_checks`, `not_applicable_checks`, `evaluations[]` (when details=true), `needs_clarification`
+
+**`bga_evaluate_image(image, pageUrl?, details?)`**
+- `image`: URL or base64 data URI (`data:image/jpeg;base64,...`)
+- `pageUrl`: URL of page containing the image — used for brand resolution + result context
+
+Returns: `description` (AI-generated), `overall_aligned`, check counts, `evaluations[]`
+
+**`bga_evaluate_page(url, details?)`**
+- Full-page crawl — extracts text and images from a live URL, runs both evaluations
+- `details` defaults to `false` — set `true` only if user explicitly wants per-check breakdowns
+- ⚠️ **Evaluates up to 5 images only** — not all page images are checked. Always surface this to users in a demo.
+
+Returns: `text_evaluation` (overall + check counts), `image_evaluations[]`, `success`
+
+### Standard Workflow
 
 ```
-1. get-aem-pages for the site → get all pages
-2. get-aem-page-content for each key page → read block structure
-3. Check for:
-   - Assets outside governed DAM paths (flag /personal-folder/ paths)
-   - Brand name typos in copy or form text
-   - Duplicate content blocks (identical copy/image across cards)
-   - Empty or whitespace-only blocks
-   - Missing required metadata fields
-   - Ungoverned Firefly-generated assets (no rights metadata)
-   - Multiple editors with no workflow gate
-   - Store Locator / form blocks with missing required fields
-4. Output severity-ranked report: CRITICAL / HIGH / MEDIUM
-5. Offer: "Create a Launch with fixes applied" or "Generate Workfront tasks"
+bga_list_brands
+  → bga_get_checks_by_url(pageUrl)    ← see what rules apply (fastest path)
+  → bga_evaluate_page(url)            ← full page audit
+      OR
+  → bga_evaluate_text(snippet, url)   ← spot-check copy
+  → bga_evaluate_image(imageUrl)      ← single image check
 ```
 
-Severity definitions:
-- **CRITICAL** — Brand name error, ungoverned assets on live pages, PII exposure risk
-- **HIGH** — Typos in paths, empty page structures, missing content ownership
-- **MEDIUM** — Whitespace blocks, broken component configurations, no workflow
+### Demo Notes
+
+- **`needs_clarification` on `bga_evaluate_text`** is a clean HITL moment — show it as "I found multiple brands, which should I check against?"
+- **5-image cap on `bga_evaluate_page`** must be disclosed in any customer walkthrough
+- Brand IDs are internal UUIDs — never show them in the Compass UI or in results surfaced to users
 
 ---
 
@@ -572,7 +610,7 @@ process_page_tool(request_text)
 | Brief PDF → page creation | Doesn't exist | Acrobat + AEM Content MCP |
 | Customer-specific system prompt | Generic | Injected per account |
 | DA site edits | Not available | Experience Production Agent |
-| Governance audit cross-page | Not available | AEM Content MCP + Claude reasoning |
+| Governance audit cross-page | Not available | Experience Governance MCP (`bga_evaluate_page`) |
 | Workfront integration | Not available | n8n bridge |
 | One-click Adobe auth | Requires per-user IMS setup | S2S via CF Worker |
 | GitHub identity | Not available | PAT → avatar, name, repo access |
