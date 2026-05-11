@@ -505,8 +505,9 @@ Marketing Agent MCP is Stage endpoint. Operational data queries (AEP audiences, 
 ## Tool Stack Reference
 
 ### Claude.ai Chat (available now)
-- AEM Content MCP — full page/fragment/launch operations on JCR
-- Experience Production Agent (Marketing Agent MCP) — DA site edits
+- AEM Content MCP (Prod) — 66 tools: pages, CFs, launches, assets, feature flags (see section below)
+- AEM Experience Governance MCP — 8 `bga_*` tools: brand discovery, checks, evaluation (see section above)
+- Experience Production Agent MCP — 4 tools: EDS + AEM Cloud page generation (see section below)
 - Acrobat MCP — PDF extract for brief-to-page flow
 - Marketing Agent MCP Stage — AEP/CJA queries (operational data unreliable on Stage)
 
@@ -519,6 +520,132 @@ Marketing Agent MCP is Stage endpoint. Operational data queries (AEP audiences, 
 - No Workfront MCP exists. Use n8n native Workfront node.
 - POST to n8n webhook → Workfront task created with preview URL attached
 - Webhook fires back on approval → triggers AEM publish
+
+---
+
+## AEM Content MCP (Prod) — 66 Tools
+
+Every tool requires `authorUrl` (`https://author-pXXXXX-eXXXXX.adobeaemcloud.com`). Call `get-all-aem-author-environments` first if unknown. ETags are required for all write operations — re-fetch immediately before every patch; they go stale in seconds in shared environments.
+
+### Environment Discovery
+- **`get-all-aem-author-environments`** — No params. First call in any workflow when `authorUrl` is unknown.
+- **`get-aem-sites(authorUrl, cursor?, limit?)`** — Resolves site names to 64-char `siteId`s. ⚠️ Site names like "briskbuffalo" are NOT `siteId`s — always resolve first.
+
+### Pages — Read
+- **`get-aem-pages`** — Browse/list pages. Filters: `siteId`, `parentPageId`, `publishPath`, date ranges (created/modified/published after/before), user filters (createdBy, modifiedBy, publishedBy, touchedBy), `sort`, `cursor`, `limit`.
+- **`search-aem-pages`** — Full-text search (title, description). Same filters as above + required `q`. Max 50.
+- **`get-aem-page-content(authorUrl, pageId)`** — Full page content + ETag. Required before any patch/put/delete.
+- **`get-aem-page-metadata(authorUrl, pageId)`** — Title, description, `cq:template` + ETag. Lighter than full content.
+- **`get-aem-page-preview-url(authorUrl, pageId)`** — Draft/author preview URL.
+- **`get-aem-page-editor-url(authorUrl, pageId)`** — Clickable AEM Author editor URL.
+- **`get-aem-page-content-definition(authorUrl, pageId)`** — Allowed components + placement rules.
+
+### Pages — Write
+- **`create-aem-page(authorUrl, title, label, parentPath, template)`** — Creates page from template. To clone an existing page: get `cq:template` from `get-aem-page-metadata`, pass it here.
+- **`copy-aem-page(authorUrl, pageId, title)`** — Copies a page (new `pageId`).
+- **`patch-aem-page-content(authorUrl, pageId, eTag, jsonPatch)`** — Partial update via JSON Patch (RFC 6902). Requires fresh ETag.
+- **`put-aem-page-content(authorUrl, pageId, eTag, content)`** — Full replacement of entire content structure. Requires ETag.
+- **`delete-aem-page(authorUrl, pageId, eTag)`** — Permanent. Irreversible. Requires ETag.
+- **`restore-aem-page(authorUrl, pageId)`** — Restores page to original state (`restoreOriginal`).
+- **`publish-aem-content(authorUrl, path)`** — Publishes any AEM resource (page, CF, XF) to delivery tier. Uses full JCR path, not UUID. e.g. `/content/mysite/en/products`
+- **`unpublish-aem-content(authorUrl, path)`** — Deactivates a resource.
+
+### Content Fragments — Read
+- **`list-aem-fragment-models(authorUrl, cursor?, limit?)`** — Lists CF models with IDs.
+- **`get-aem-fragment-model(authorUrl, modelId)`** — Full schema for a CF model (field names, types, validation). Required before `create-aem-fragment`.
+- **`list-aem-fragments(authorUrl, path?, projection?, references?, cursor?, limit?)`** — Lists CFs. `path` defaults to `/content/dam`. Max 50. Accepts launch paths.
+- **`search-aem-fragments(authorUrl, text, queryMode?, cursor?, limit?)`** — Full-text CF search. `queryMode: EXACT_WORDS` recommended for campaign CF workflows. Max 50.
+- **`get-aem-fragment(authorUrl, fragmentId)`** — Single CF by UUID. Returns ETag + fields.
+- **`resolve-aem-fragment-path(authorUrl, fragmentPath)`** — Converts DAM path → UUID. Required before `get-aem-fragment` when you only have a path.
+- **`render-aem-fragment-preview(authorUrl, fragmentId, templateId?, variation?)`** — Rendered HTML preview.
+
+### Content Fragments — Write
+- **`create-aem-fragment(authorUrl, title, name, parentPath, modelId, fields, description?)`** — `modelId` is base64-encoded. `fields` is stringified JSON matching model schema. Get schema first from `get-aem-fragment-model`.
+- **`patch-aem-fragment(authorUrl, fragmentId, ifMatch, patchOperations, references?)`** — Partial update via JSON Patch. Common paths: `/title`, `/description`, `/fields/0/values/0`. Requires ETag.
+- **`copy-aem-fragment(authorUrl, fragmentId, parentPath, name?)`** — Shallow copy only — does not copy referenced dependencies.
+- **`delete-aem-fragment(authorUrl, fragmentId, ifMatch)`** — Permanent. Requires ETag.
+- **`aem-fragment-operation-with-references(authorUrl, fragmentId, operation, ...)`** — Power tool. Handles copy/version/patch/delete/restore while auto-discovering and updating all fragment references.
+
+### CF Variations
+- **`list-aem-fragment-variations(authorUrl, fragmentId)`**
+- **`get-aem-fragment-variation(authorUrl, fragmentId, variationName)`** — Returns ETag + fields for variation.
+- **`create-aem-fragment-variation(authorUrl, fragmentId, title, description?)`** — Name auto-generated from title.
+- **`patch-aem-fragment-variation(authorUrl, fragmentId, variationName, ifMatch, patchOperations)`** — Requires ETag from `get-aem-fragment-variation`.
+- **`delete-aem-fragment-variation(authorUrl, fragmentId, variationName, ifMatch)`** — Cannot delete master or main. Irreversible.
+
+### CF Versions
+- **`create-aem-fragment-version(authorUrl, fragmentId, label?, comment?)`** — Snapshot before changes.
+- **`list-aem-fragment-versions(authorUrl, fragmentId, cursor?, limit?)`**
+- **`get-aem-fragment-version(authorUrl, fragmentId, versionId)`**
+- **`restore-aem-fragment-version(authorUrl, fragmentId, versionId)`** — Overwrites current content with historical version.
+
+### CF Launches (CF-scoped campaigns)
+- **`create-aem-launch(authorUrl, title, sources[], description?, isDeep?, liveDate?, productionReady?, publishAgent?)`** — Temporary branch for CF campaign prep. `sources` = array of CF UUIDs. Deep by default. Async — poll `get-aem-launch-job-status`.
+- **`list-aem-launches(authorUrl, cursor?, limit?)`**
+- **`get-aem-launch(authorUrl, launchId)`** — Returns launch details + ETag.
+- **`get-aem-launch-job-status(authorUrl, jobId)`** — Polls async create/promote/rebase/diff jobs.
+- **`edit-aem-launch-sources(authorUrl, launchId, ifMatch, sourcesToAdd?, sourcesToRemove?)`** — Async. Poll `get-aem-launch-job-status`.
+- **`promote-aem-launch(authorUrl, launchId, compare?, sources?, isDeep?, deleteAfterPromotion?)`** — Omit `compare` to promote to production.
+- **`rebase-aem-launch(authorUrl, launchId, ifMatch, compare?, sources?, isDeep?)`** — Pulls production changes into the launch.
+- **`compute-aem-launch-differences(authorUrl, launchId, compare?, sources?, isDeep?)`** — Async diff. Returns `jobId` + diff URL when complete.
+
+### Page Launches (Sites-scoped)
+⚠️ Separate from CF Launches — different tool names, different params, different promotion model.
+
+- **`list-aem-page-launches(authorUrl, limit?, offset?)`**
+- **`create-aem-page-launch(authorUrl, title, srcPath?, srcPathList?, liveDate?, isLiveCopy?, shallow?, ...)`** — Full launch with MSM/scheduling support.
+- **`copy-aem-page-to-launch(authorUrl, pageId, launchTitle?)`** — Quick shortcut, no scheduling.
+- **`edit-aem-page-launch(authorUrl, launchPath, srcPathList, shallowList?)`**
+- **`promote-aem-page-launch(authorUrl, launchPath, promotionScope?, deleteAfterPromotion?, target?, workflowPackage?)`** — `promotionScope`: smart (default) / full / resource / deep / approved.
+- **`get-aem-page-launch-diff-url(authorUrl, launchPagePath, productionPagePath)`** — Browser URL for visual side-by-side diff.
+- **`delete-aem-page-launch(authorUrl, launchPath)`** — Permanent.
+
+### Assets
+- **`search-aem-assets(aemUrl, match?, termFilters?, rangeFilters?, orderBy?, cursor?, limit?)`** — Searches DAM on author OR delivery tier. `aemUrl` accepts either. Max 100.
+- **`import-aem-asset(authorUrl, url, folder, fileName, mimeType?, fileSize?, assetMetadata?, fileMetadata?)`** — Imports asset from public URL. Target folder must exist. Returns `jobId`.
+- **`get-aem-asset-import-status(authorUrl, jobId)`** — Polls import job. Keep polling until `COMPLETED`.
+
+### CF Preview Templates
+- **`create-aem-cf-template(authorUrl, modelId, name, content, dryRun?)`** — HTML Handlebars template. Use `{{ fields.fieldName }}` for text, `{{{ fields.fieldName }}}` for HTML.
+- **`list-aem-cf-templates / get-aem-cf-template / update-aem-cf-template / delete-aem-cf-template`** — Standard CRUD. All require `authorUrl` + `modelId`. Get/update/delete also require `templateId`. Update/delete require ETag.
+
+### Feature Flags
+- **`feature-flag-listing(flag?)`** — Shows LaunchDarkly base value, user override, resolved effective value.
+- **`feature-flag-setting(flag, action, enabled?)`** — `action`: add / remove. Overrides take precedence over LaunchDarkly. e.g. flag: `FT_SITES-38849`.
+
+### Meta / Utility
+- **`get_tool_details(toolName)`** — Full description + parameter schema for any tool by name.
+- **`search_tools / tools_index`** — Internal tooling lookup → `get_tool_details` workflow.
+
+### Standard Workflows
+
+**CF Campaign:**
+```
+search-aem-fragments (queryMode: EXACT_WORDS)
+→ create-aem-launch (sources: [CF UUIDs])
+→ get-aem-launch-job-status (poll until complete)
+→ list-aem-fragments (launch path)
+→ get-aem-fragment (fetch ETag) → patch-aem-fragment
+→ compute-aem-launch-differences → [review diff URL]
+→ promote-aem-launch → publish-aem-content
+```
+
+**Page Edit:**
+```
+get-aem-sites → get-aem-pages
+→ get-aem-page-content (fetch ETag)
+→ copy-aem-page-to-launch
+→ patch-aem-page-content (use fresh ETag)
+→ get-aem-page-preview-url → [review]
+→ promote-aem-page-launch → publish-aem-content
+```
+
+### Key Gotchas
+- **Site name ≠ siteId** — "frescopa" is not a siteId. Always call `get-aem-sites` to resolve.
+- **CF Launch ≠ Page Launch** — Different tools, different param shapes, different promotion flows. CF Launches use `launchId` + `sources[]`; Page Launches use `launchPath` + `srcPathList[]`.
+- **`patch-aem-fragment` path format** — `/fields/0/values/0` not `/fields/fieldName`. Index-based.
+- **`import-aem-asset` is async** — Always poll `get-aem-asset-import-status` until `COMPLETED`.
+- **`search-aem-assets` accepts delivery URL** — `aemUrl` is not just author; pass delivery URL to search published assets.
 
 ---
 
