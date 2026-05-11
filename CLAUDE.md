@@ -513,8 +513,7 @@ Marketing Agent MCP is Stage endpoint. Operational data queries (AEP audiences, 
 
 ### Claude Code (full stack)
 - All above plus:
-- DA MCP (`da_get_source`, `da_update_source`) — direct DA writes
-- All DA tools: `da_copy_content`, `da_create_source`, `da_delete_source`, `da_get_versions`, `da_list_sources`, `da_lookup_fragment`, `da_lookup_media`, `da_move_content`, `da_upload_media`
+- DA MCP — 11 tools, org+repo+path scoped, full file replacement model (see section below)
 
 ### n8n (Workfront bridge)
 - No Workfront MCP exists. Use n8n native Workfront node.
@@ -646,6 +645,70 @@ get-aem-sites → get-aem-pages
 - **`patch-aem-fragment` path format** — `/fields/0/values/0` not `/fields/fieldName`. Index-based.
 - **`import-aem-asset` is async** — Always poll `get-aem-asset-import-status` until `COMPLETED`.
 - **`search-aem-assets` accepts delivery URL** — `aemUrl` is not just author; pass delivery URL to search published assets.
+
+---
+
+## DA MCP — AEM Document Authoring
+
+**Endpoint:** `https://mcp.adobeaemcloud.com/adobe/mcp/da`
+
+11 tools. Operates against DA repositories — EDS content layer where pages live as HTML/Markdown files. No ETags, no UUIDs — just file paths. **Write model is full file replacement**, not JSON Patch.
+
+**Confirmed org:** `aemxsc` (lowercase). Repos are site/project names (e.g. `xscteamsite`).
+
+### Universal Params (every tool)
+
+| Param | Notes |
+|---|---|
+| `org` | Organization name — e.g. `aemxsc` |
+| `repo` | Repository name — e.g. `xscteamsite` |
+| `path` | File path within the repo — e.g. `docs/summit/index.html` |
+
+### Read Tools
+
+- **`da_list_sources(org, repo, path?)`** — Lists files and directories. `path` defaults to repo root. Entry point for navigation.
+- **`da_get_source(org, repo, path)`** — Reads full file content + metadata.
+- **`da_get_versions(org, repo, path)`** — Version history for a file (timestamps + metadata per version).
+- **`da_lookup_fragment(org, repo, fragmentPath)`** — Resolves a content fragment reference. Note: param is `fragmentPath`, not `path`.
+- **`da_lookup_media(org, repo, mediaPath)`** — Resolves a media asset to URL + metadata. Note: param is `mediaPath`, not `path`.
+
+### Write Tools
+
+- **`da_create_source(org, repo, path, content, contentType?)`** — Creates a new file. `contentType` e.g. `text/markdown`, `text/html`.
+- **`da_update_source(org, repo, path, content, contentType?)`** — Overwrites existing file. Full replacement — no partial patching. Always `da_get_source` first to avoid losing content.
+- **`da_copy_content(org, repo, sourcePath, destinationPath)`** — Copies file within same repo. Source preserved.
+- **`da_move_content(org, repo, sourcePath, destinationPath)`** — Moves file. Source removed after move.
+- **`da_upload_media(org, repo, path, fileName, mimeType, base64Data)`** — Uploads binary file via base64.
+  - ⚠️ **Media path convention:** page-related images go in a dot-prefixed sibling folder: page at `docs/my-page.html` → image at `docs/.my-page/image.png`. Standalone assets go in `media/`.
+- **`da_delete_source(org, repo, path)`** — Permanent deletion. Cannot be undone.
+
+### Standard Workflow
+
+```
+da_list_sources(org, repo)          ← browse repo structure
+  → da_get_source(org, repo, path)  ← read current content
+  → da_update_source(...)           ← write updated content (full replacement)
+      OR
+  → da_create_source(...)           ← new page/file
+
+  → POST https://admin.hlx.page/preview/{org}/{repo}/main/{path}  ← REQUIRED (not in MCP)
+  → POST https://admin.hlx.page/live/{org}/{repo}/main/{path}     ← publish (if needed)
+```
+
+⚠️ Preview and publish are **not exposed via this MCP**. Always fire the `admin.hlx.page` API calls after any write (see Preview Trigger Rule above).
+
+### DA vs AEM Content MCP — Key Differences
+
+| | DA MCP | AEM Content MCP |
+|---|---|---|
+| Target | DA/EDS file layer | AEM author JCR |
+| Content model | HTML/Markdown files | Pages, CFs, Assets |
+| Identity | org + repo + path | authorUrl + pageId/UUID |
+| Concurrency | None (last-write-wins) | ETag optimistic locking |
+| Write model | Full file replacement | JSON Patch (RFC 6902) |
+| Tools | 11 | 66 |
+| Media | `da_upload_media` (base64) | `import-aem-asset` (URL) |
+| Preview/publish | External admin.hlx.page API | `publish-aem-content` tool |
 
 ---
 
