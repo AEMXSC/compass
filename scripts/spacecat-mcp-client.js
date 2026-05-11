@@ -1,61 +1,23 @@
 /*
- * SpaceCat / AEM Sites Optimizer — Direct REST Client
+ * SpaceCat / AEM Sites Optimizer — REST Client via Worker Proxy
  * spacecat.experiencecloud.live/api/v1
  *
- * Auth: SpaceCat issues its own JWT via POST /auth/login (exchange of IMS user token).
- * The returned JWT (aud: spacecat-users, iss: spacecat.experiencecloud.live) is
- * used on all subsequent requests in the `authorization` header.
+ * All calls route through the Compass worker at /spacecat/*.
+ * The worker exchanges the user's IMS token for a SpaceCat JWT
+ * (POST /auth/login) and adds x-client-type: sites-optimizer-ui.
+ * This avoids CORS issues — SpaceCat only allows experience.adobe.com origin.
  */
 
 import { getUserToken } from './ims.js';
 
-const SPACECAT_BASE = 'https://spacecat.experiencecloud.live/api/v1';
-
-let cachedSpacecatToken = null;
-let cachedSpacecatExpiry = 0;
-
-async function getSpacecatToken() {
-  const now = Date.now();
-  if (cachedSpacecatToken && now < cachedSpacecatExpiry - 60_000) return cachedSpacecatToken;
-
-  const imsToken = getUserToken();
-  if (!imsToken) throw new Error('User sign-in required for Sites Optimizer');
-
-  const resp = await fetch(`${SPACECAT_BASE}/auth/login`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${imsToken}`,
-      'content-type': 'application/json',
-      'x-client-type': 'sites-optimizer-ui',
-    },
-  });
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => '');
-    throw new Error(`SpaceCat login ${resp.status}${body ? `: ${body.slice(0, 200)}` : ''}`);
-  }
-  const data = await resp.json();
-  // Response is either { token: '...' } or the token string directly
-  const token = data?.token || data?.access_token || (typeof data === 'string' ? data : null);
-  if (!token) throw new Error('SpaceCat login: no token in response');
-
-  // Parse exp from JWT payload (middle segment)
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    cachedSpacecatExpiry = (payload.exp || 0) * 1000;
-  } catch {
-    cachedSpacecatExpiry = now + 3600_000; // fallback: 1 hour
-  }
-  cachedSpacecatToken = token;
-  return token;
-}
+const WORKER_BASE = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev');
+const SPACECAT_PROXY = `${WORKER_BASE}/spacecat/api/v1`;
 
 async function spacecatFetch(path) {
-  const token = await getSpacecatToken();
-  const resp = await fetch(`${SPACECAT_BASE}${path}`, {
-    headers: {
-      authorization: `Bearer ${token}`,
-      'x-client-type': 'sites-optimizer-ui',
-    },
+  const imsToken = getUserToken();
+  if (!imsToken) throw new Error('User sign-in required for Sites Optimizer');
+  const resp = await fetch(`${SPACECAT_PROXY}${path}`, {
+    headers: { Authorization: `Bearer ${imsToken}` },
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');

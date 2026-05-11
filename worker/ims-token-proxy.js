@@ -180,6 +180,9 @@ async function route(request, env) {
   if (url.pathname === '/ims/callback' && request.method === 'GET') {
     return handleImsCallback(request);
   }
+  if (url.pathname.startsWith('/spacecat/') && (request.method === 'GET' || request.method === 'POST')) {
+    return handleSpacecatProxy(request, env);
+  }
 
   return new Response('Compass Auth Gateway', { status: 200 });
 }
@@ -1531,6 +1534,86 @@ async function handleImageServe(request, env) {
 }
 
 /* ─── CORS ─── */
+
+/* ─── /spacecat/* — REST proxy with SpaceCat JWT exchange ─── */
+
+// Worker-level SpaceCat JWT cache (keyed by IMS token prefix to handle multiple users)
+const spacecatTokenCache = new Map();
+
+async function getSpacecatJwt(imsToken) {
+  const cacheKey = imsToken.slice(-16);
+  const cached = spacecatTokenCache.get(cacheKey);
+  if (cached && cached.exp > Date.now() + 60_000) return cached.token;
+
+  const resp = await fetch('https://spacecat.experiencecloud.live/api/v1/auth/login', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${imsToken}`,
+      'content-type': 'application/json',
+      'x-client-type': 'sites-optimizer-ui',
+    },
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`SpaceCat login ${resp.status}: ${body.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  const token = data?.token || data?.access_token || (typeof data === 'string' ? data : null);
+  if (!token) throw new Error('SpaceCat login: no token in response');
+
+  let exp = Date.now() + 3_600_000;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    if (payload.exp) exp = payload.exp * 1000;
+  } catch { /* use fallback expiry */ }
+
+  spacecatTokenCache.set(cacheKey, { token, exp });
+  return token;
+}
+
+async function handleSpacecatProxy(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const imsToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!imsToken) {
+    return jsonResponse({ error: 'Authorization header required' }, 401, origin);
+  }
+
+  let spacecatToken;
+  try {
+    spacecatToken = await getSpacecatJwt(imsToken);
+  } catch (err) {
+    return jsonResponse({ error: err.message }, 401, origin);
+  }
+
+  // Strip /spacecat prefix, forward the rest to spacecat.experiencecloud.live
+  const url = new URL(request.url);
+  const spacecatPath = url.pathname.replace(/^\/spacecat/, '');
+  const spacecatUrl = `https://spacecat.experiencecloud.live${spacecatPath}${url.search}`;
+
+  const upstream = await fetch(spacecatUrl, {
+    method: request.method,
+    headers: {
+      authorization: `Bearer ${spacecatToken}`,
+      'x-client-type': 'sites-optimizer-ui',
+      accept: 'application/json',
+    },
+    body: request.method === 'POST' ? await request.text() : undefined,
+  });
+
+  const body = await upstream.text();
+  return new Response(body, {
+    status: upstream.status,
+    headers: {
+      'Content-Type': upstream.headers.get('Content-Type') || 'application/json',
+      'Cache-Control': 'no-store',
+      ...corsHeaders(origin),
+    },
+  });
+}
 
 function handleCors(request) {
   const origin = request.headers.get('Origin') || '';
