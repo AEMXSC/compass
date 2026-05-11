@@ -14,8 +14,8 @@
 // separate module instances with separate state — causing shared state (like DA org/repo)
 // to be invisible across modules. Cache busting is handled by app.js?v=N in index.html only.
 import { loadIms, isSignedIn, signIn, signOut, getProfile, getToken, getAuthMethod, fetchUserProfile, getActiveOrg, getUserOrgs, signInMcpOAuth, getMcpToken, initS2SToken } from './ims.js';
-import * as ai from './ai.js?v=140';
-import { TOOL_AGENT_MAP } from './ai.js?v=140';
+import * as ai from './ai.js?v=141';
+import { TOOL_AGENT_MAP } from './ai.js?v=141';
 import * as da from './da-client.js';
 import * as gov from './governance.js';
 import { getActiveProfile, getOrgConfig, setActiveProfile, listProfiles, addCustomProfile, deleteCustomProfile, buildProfilePrompt } from './customer-profiles.js';
@@ -4849,6 +4849,13 @@ function matchSpecializedFlow(text) {
   if (lower.includes('pipeline') || lower.includes('deploy') || lower.includes('build fail') || lower.includes('fix my pipeline')) return runFixPipeline;
   if (lower.includes('brand compliance') || lower.includes('brand check') || lower.includes('off-brand')) return runBrandCompliance;
   if (lower.includes('update content') || lower.includes('stale content') || lower.includes('content fast') || lower.includes('expiring')) return runUpdateContent;
+  // SpaceCat / Sites Optimizer — hard-coded intercept so Claude calls the tool instead of analyzing page HTML
+  if (lower.includes('site opportunit') || lower.includes('show me opportunit') || lower.includes('what opportunit')
+      || lower.includes('spacecat') || lower.includes('sites optimizer') || lower.includes('aso data')
+      || lower.includes('site health') || lower.includes('optimization opportunit')) {
+    return () => handleRealChat('Call get_site_opportunities tool now with no arguments.');
+  }
+
   // PMM demo triggers
   if (lower.includes('demo modernize') || lower.includes('ai-native') || lower.includes('ai discovery demo')) return runDemoModernizeAI;
   if (lower.includes('demo compliance') || lower.includes('demo brand') || lower.includes('compliance demo')) return runDemoBrandCompliance;
@@ -6979,7 +6986,7 @@ async function init() {
   buildOrgSelector();
   initProfileGenerator();
 
-  console.log('[Compass] init v140');
+  console.log('[Compass] init v141');
 
   // Detect MCP token delivered via URL hash by the connect-aem helper script
   // Hash format: #mcp_token=TOKEN&mcp_refresh=REFRESH
