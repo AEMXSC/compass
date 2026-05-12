@@ -1491,6 +1491,19 @@ const AEM_TOOLS = [
     },
   },
 
+  {
+    name: 'fetch_image_as_base64',
+    description: 'Fetch an image from any URL and return it as base64-encoded data ready for da_upload_media. Use this before uploading an image to the DA repository — first call this tool to get the base64 data, then call da_upload_media with the result. Works with Compass worker image URLs (/img/...), external CDN URLs, and any publicly accessible image.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The image URL to fetch (https://...)' },
+        filename: { type: 'string', description: 'Desired filename for the image including extension, e.g. "hero-image.jpg". If omitted, inferred from URL.' },
+      },
+      required: ['url'],
+    },
+  },
+
   /* ─── Unified AEM MCP (/adobe/mcp/aem) ─── */
   /* Code-execution model: tools accept JavaScript that runs in a sandboxed env with aem.get(), aem.post(), etc. */
 
@@ -1867,6 +1880,7 @@ export const TOOL_AGENT_MAP = {
   check_citation_readability: 'LLM Optimizer',
   // Web Fetch
   fetch_url: 'Web Research',
+  fetch_image_as_base64: 'Web Research',
   // Discovery Agent (MCP service listing)
   list_mcp_services: 'Discovery Agent',
 };
@@ -5063,6 +5077,29 @@ export async function executeTool(name, input) {
       }
     }
 
+    case 'fetch_image_as_base64': {
+      if (!input.url) return JSON.stringify({ error: 'url is required' });
+      try {
+        const resp = await fetch(input.url);
+        if (!resp.ok) return JSON.stringify({ error: `HTTP ${resp.status}`, url: input.url });
+        const mimeType = resp.headers.get('content-type') || 'image/jpeg';
+        if (!mimeType.startsWith('image/')) {
+          return JSON.stringify({ error: `URL does not point to an image (got ${mimeType})`, url: input.url });
+        }
+        const blob = await resp.blob();
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        const filename = input.filename || input.url.split('/').pop().split('?')[0] || 'image.jpg';
+        return JSON.stringify({ base64, mimeType, filename, size_bytes: blob.size });
+      } catch (e) {
+        return JSON.stringify({ error: `Failed to fetch image: ${e.message}`, url: input.url });
+      }
+    }
+
     /* ─── Unified AEM MCP (code-execution model) ─── */
 
     case 'aem_list_environments': {
@@ -5911,7 +5948,7 @@ Even if the site has a recognizable name (Lifepoint, Helix, etc.), if siteType i
 
 **DA version safety:** Before any destructive DA edit (bulk replace, restructure, delete) → call \`da_create_version\` first to save a restore point.
 
-**DA media:** To upload an image into DA → \`da_upload_media\` (source URL). To find existing media by name → \`da_lookup_media\`. To find a content fragment → \`da_lookup_fragment\`. Look up before uploading to avoid duplicates.
+**DA media:** To upload an image into DA → call \`fetch_image_as_base64\` with the image URL first to get base64 data + mimeType, then call \`da_upload_media\` with that data. To find existing media by name → \`da_lookup_media\`. To find a content fragment → \`da_lookup_fragment\`. Look up before uploading to avoid duplicates.
 
 **Forms:** "Contact form", "lead capture", "survey" → \`generate_form\` to create the form block, then \`edit_page_content\` to embed it.
 
