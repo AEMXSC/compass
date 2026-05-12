@@ -1167,7 +1167,7 @@ const AEM_TOOLS = [
 
   {
     name: 'upload_asset',
-    description: 'Upload a file to a DAM folder. Provide the folder path, file name, and a URL to fetch the file from.',
+    description: 'Upload an image or file to AEM JCR DAM. Provide the DAM folder path, file name, and source URL — Compass fetches the file and uploads it directly. Works with Compass worker image URLs (/img/...), Gemini-generated image URLs, external CDNs, or any publicly accessible URL. Use this for JCR/AEM Cloud Service sites. For DA-backed sites use fetch_image_as_base64 + da_upload_media instead.',
     input_schema: {
       type: 'object',
       properties: {
@@ -5948,7 +5948,10 @@ Even if the site has a recognizable name (Lifepoint, Helix, etc.), if siteType i
 
 **DA version safety:** Before any destructive DA edit (bulk replace, restructure, delete) → call \`da_create_version\` first to save a restore point.
 
-**DA media:** To upload an image into DA → call \`fetch_image_as_base64\` with the image URL first to get base64 data + mimeType, then call \`da_upload_media\` with that data. To find existing media by name → \`da_lookup_media\`. To find a content fragment → \`da_lookup_fragment\`. Look up before uploading to avoid duplicates.
+**Uploading images to DAM/media:**
+- **JCR/AEM Cloud Service site** → \`upload_asset\` with \`source_url\` (the image URL). It fetches the file and uploads to AEM DAM in one step. Works with Compass worker URLs (/img/...), external CDNs, any public URL.
+- **DA-backed EDS site** → two steps: first \`fetch_image_as_base64\` with the image URL to get base64 + mimeType, then \`da_upload_media\` with that data.
+- To find existing media by name → \`da_lookup_media\`. To find a content fragment → \`da_lookup_fragment\`. Look up before uploading to avoid duplicates.
 
 **Forms:** "Contact form", "lead capture", "survey" → \`generate_form\` to create the form block, then \`edit_page_content\` to embed it.
 
