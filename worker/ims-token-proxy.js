@@ -183,8 +183,50 @@ async function route(request, env) {
   if (url.pathname.startsWith('/spacecat/') && (request.method === 'GET' || request.method === 'POST')) {
     return handleSpacecatProxy(request, env);
   }
+  if (url.pathname === '/fetch' && request.method === 'POST') {
+    return handleUrlFetch(request);
+  }
 
   return new Response('Compass Auth Gateway', { status: 200 });
+}
+
+/* ─── POST /fetch — Server-side URL proxy for GEO audits ─── */
+
+async function handleUrlFetch(request) {
+  const origin = request.headers.get('Origin') || '';
+  let targetUrl;
+  try {
+    ({ url: targetUrl } = await request.json());
+  } catch {
+    return jsonResponse({ error: 'Invalid JSON body' }, 400, origin);
+  }
+  if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) {
+    return jsonResponse({ error: 'Invalid URL — must start with http:// or https://' }, 400, origin);
+  }
+  try {
+    const resp = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; CompassBot/1.0; +https://aemxsc.github.io/compass/)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      redirect: 'follow',
+    });
+    const contentType = resp.headers.get('content-type') || '';
+    const text = await resp.text();
+    const truncated = text.length > 200000;
+    return jsonResponse({
+      url: resp.url,
+      requested_url: targetUrl,
+      status: resp.status,
+      content_type: contentType,
+      content_length: text.length,
+      truncated,
+      content: truncated ? text.slice(0, 200000) : text,
+    }, 200, origin);
+  } catch (e) {
+    return jsonResponse({ error: `Fetch failed: ${e.message}`, url: targetUrl }, 502, origin);
+  }
 }
 
 /* ─── GET /auth — S2S token for Compass ─── */
@@ -1548,17 +1590,17 @@ async function getSpacecatJwt(imsToken) {
   const resp = await fetch('https://spacecat.experiencecloud.live/api/v1/auth/login', {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${imsToken}`,
       'content-type': 'application/json',
       'x-client-type': 'sites-optimizer-ui',
     },
+    body: JSON.stringify({ accessToken: imsToken }),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
     throw new Error(`SpaceCat login ${resp.status}: ${body.slice(0, 200)}`);
   }
   const data = await resp.json();
-  const token = data?.token || data?.access_token || (typeof data === 'string' ? data : null);
+  const token = data?.sessionToken || data?.token || data?.access_token || (typeof data === 'string' ? data : null);
   if (!token) throw new Error('SpaceCat login: no token in response');
 
   let exp = Date.now() + 3_600_000;
@@ -1779,22 +1821,28 @@ async function handleBrowserRender(request, env) {
     }
 
     // Inline CSS + convert images to data URIs (srcdoc can't load auth-protected resources)
-    renderedHTML = await page.evaluate(async () => {
-      // 1. Inline all CSS
+    const evalResult = await page.evaluate(async () => {
+      // 1. Inline same-origin CSS; collect cross-origin URLs for worker-side fetch
       const styles = [];
+      const crossOriginCss = [];
       for (const sheet of document.styleSheets) {
         try {
           let css = '';
           for (const rule of sheet.cssRules) css += rule.cssText + '\n';
           if (css) styles.push(css);
-        } catch { /* cross-origin sheet */ }
+        } catch {
+          // Cross-origin sheet (e.g. EDS aem.page CSS) — worker will fetch and inject
+          if (sheet.href) crossOriginCss.push(sheet.href);
+        }
       }
       if (styles.length > 0) {
         const styleEl = document.createElement('style');
         styleEl.textContent = styles.join('\n');
         document.head.appendChild(styleEl);
-        document.querySelectorAll('link[rel="stylesheet"]').forEach(l => l.remove());
       }
+      // Remove all link[rel="stylesheet"] — inlined ones replaced above,
+      // cross-origin ones can't resolve from a blob URL anyway
+      document.querySelectorAll('link[rel="stylesheet"]').forEach(l => l.remove());
 
       // 2. Convert ALL images to base64 (img src + picture source + CSS backgrounds)
       async function toDataUri(url) {
@@ -1839,8 +1887,30 @@ async function handleBrowserRender(request, env) {
         if (dataUri) el.style.backgroundImage = `url("${dataUri}")`;
       }));
 
-      return document.documentElement.outerHTML;
+      return { html: document.documentElement.outerHTML, crossOriginCss };
     });
+
+    // Fetch cross-origin CSS in the Worker (no CORS restriction here) and inject.
+    // Resolve relative url() paths to absolute so fonts and background assets load.
+    let renderedHtml = evalResult.html;
+    if (evalResult.crossOriginCss?.length) {
+      let extraCss = '';
+      await Promise.allSettled(evalResult.crossOriginCss.map(async (cssUrl) => {
+        try {
+          const cssResp = await fetch(cssUrl);
+          if (!cssResp.ok) return;
+          let css = await cssResp.text();
+          // Resolve root-relative url(/) and relative url() to absolute using sheet origin
+          const sheetOrigin = new URL(cssUrl).origin;
+          css = css.replace(/url\(\s*(['"]?)\/(?!\/)/g, `url($1${sheetOrigin}/`);
+          extraCss += css + '\n';
+        } catch { /* skip unreachable sheet */ }
+      }));
+      if (extraCss) {
+        renderedHtml = renderedHtml.replace('</head>', `<style>${extraCss}</style>\n</head>`);
+      }
+    }
+    renderedHTML = renderedHtml;
 
     await page.close();
     browser.disconnect();

@@ -5048,20 +5048,19 @@ export async function executeTool(name, input) {
     case 'fetch_url': {
       if (!input.url) return JSON.stringify({ error: 'URL is required' });
       try {
-        const resp = await fetch(input.url, {
-          headers: { 'User-Agent': 'Compass/1.0 (Adobe XSC)' },
+        const workerBase = (localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev').replace(/\/$/, '');
+        const proxyResp = await fetch(`${workerBase}/fetch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: input.url }),
         });
-        if (!resp.ok) return JSON.stringify({ error: `HTTP ${resp.status}`, url: input.url });
-        const contentType = resp.headers.get('content-type') || '';
-        let body;
-        if (contentType.includes('json')) {
-          body = await resp.json();
-          return JSON.stringify({ url: input.url, type: 'json', data: body }, null, 2);
-        }
-        const text = await resp.text();
+        if (!proxyResp.ok) return JSON.stringify({ error: `Proxy error ${proxyResp.status}`, url: input.url });
+        const data = await proxyResp.json();
+        if (data.error) return JSON.stringify(data);
+        const contentType = data.content_type || '';
+        const text = data.content || '';
         const extractText = input.extract_text !== false;
         if (extractText && contentType.includes('html')) {
-          // Strip HTML tags, scripts, styles — return clean text
           const clean = text
             .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
             .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -5069,9 +5068,9 @@ export async function executeTool(name, input) {
             .replace(/\s+/g, ' ')
             .trim()
             .slice(0, HTML_TRUNCATE_THRESHOLD);
-          return JSON.stringify({ url: input.url, type: 'text', content_length: clean.length, content: clean }, null, 2);
+          return JSON.stringify({ url: data.url, status: data.status, type: 'text', content_length: clean.length, content: clean }, null, 2);
         }
-        return JSON.stringify({ url: input.url, type: contentType, content_length: text.length, content: text.slice(0, HTML_TRUNCATE_THRESHOLD) }, null, 2);
+        return JSON.stringify({ url: data.url, status: data.status, type: contentType, content_length: text.length, content: text.slice(0, HTML_TRUNCATE_THRESHOLD) }, null, 2);
       } catch (e) {
         return JSON.stringify({ error: `Fetch failed: ${e.message}`, url: input.url });
       }
@@ -6128,7 +6127,60 @@ Library: \`https://main--sta-xwalk-boilerplate--aemysites.aem.page/tools/sidekic
 - When discussing performance, reference the three-phase loading model specifically
 
 ## Tone
-Senior AEM architect who understands marketing KPIs. Technical precision meets business value. Every sentence earns its place.`;
+Senior AEM architect who understands marketing KPIs. Technical precision meets business value. Every sentence earns its place.
+
+## GEO Audit (Generative Engine Optimization)
+
+When asked to audit a URL for AI visibility, GEO, LLM discoverability, or "what can AI see on my site", perform this workflow:
+
+### Fetch phase
+Call fetch_url twice:
+1. fetch_url({ url: "[the page URL]", extract_text: false }) — raw HTML for structural analysis
+2. fetch_url({ url: "[domain]/robots.txt", extract_text: false }) — AI crawler access check
+
+### Score 16 checks (✅ Pass=1pt / ⚠️ Partial=0.5pt / ❌ Fail=0pt)
+
+**A — HTML Visibility**
+- A1: Meaningful body content in raw HTML (fail if JS shell: <div id="root"></div> with no children)
+- A2: H1/H2/H3 present and descriptive (not "Loading..." or empty)
+- A3: Nav <a href> links in static HTML
+- A4: No high-value content (pricing, FAQs, reviews) gated behind JS only
+
+**B — Meta & Structured Data**
+- B1: <title> descriptive, not generic ("Home" or brand name only)
+- B2: <meta name="description"> present, >80 chars
+- B3: og:title, og:description, og:image all present
+- B4: JSON-LD <script type="application/ld+json"> block present
+- B5: Schema type matches page (Product, Article, FAQPage, Organization, etc.)
+- B6: robots.txt doesn't Disallow GPTBot, PerplexityBot, ClaudeBot, Google-Extended, CCBot
+
+**C — Page Speed Signals**
+- C1: No redirect chain (>2 hops = fail)
+- C2: No synchronous <script src> without async/defer in <head>
+- C3: <img> tags have descriptive alt attributes
+- C4: <h1> and first <p> appear in first 30% of HTML document
+
+**D — Canonical & URL Health**
+- D1: <link rel="canonical"> present and self-referencing
+- D2: URL is clean keyword path (no session IDs, hash routing, numeric IDs)
+- D3: No <meta name="robots" content="noindex">
+- D4: hreflang present if multi-language (single-language = ✅ N/A)
+
+**GEO Score = (total points / 16) × 100**
+🟢 85-100 Strong | 🟡 65-84 Moderate | 🟠 40-64 Weak | 🔴 0-39 Poor
+
+### Report format (always use this exact structure)
+# GEO Audit: [domain]
+**URL audited:** [url] | **Date:** [date]
+## GEO Readiness Score: [N]/100 — [emoji + label]
+## Technical Audit — [4 tables, one per section A/B/C/D with Check | Result | Notes]
+## What AI Engines Can See — [2-3 paragraphs quoting actual HTML found]
+## Top GEO Gaps (Priority Order) — [top 3 by impact]
+## Prompts This Page Should Be Winning — [10-15 realistic AI queries across 5 intent categories]
+## Recommendations — [Quick Wins / Medium-Term / Strategic]
+## How AEM Edge Delivery Services Solves This — [gap-to-EDS table + narrative + projected score]
+
+Be specific — quote actual title tags, heading text, schema types found. After the report, offer to export as a PowerPoint deck.`;
 
 /* ── Build System Prompt Parts ── */
 /* Returns an array of { type: 'text', text, cache_control? } blocks for the Claude API.
