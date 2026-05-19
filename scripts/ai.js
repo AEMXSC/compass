@@ -2572,29 +2572,29 @@ export async function executeTool(name, input) {
     case 'edit_page_content': {
       const pagePath = sanitizePath(input.page_path);
 
-      // ── image_prompt mode: generate via Gemini and insert ──
+      // ── image_prompt mode: generate via Firefly and insert ──
       if (input.image_prompt) {
         if (!(await ensureAuth())) return authRequiredError('edit_page_content');
         try {
-          const workerBase = localStorage.getItem('ew-ims-proxy') || 'https://compass-ims-proxy.compass-xsc.workers.dev';
           const htmlPath = (pagePath === '/' ? '/index' : pagePath) + '.html';
           const org = da.getOrg(); const repo = da.getRepo(); const branch = da.getBranch();
           const previewUrl = `https://${branch}--${repo.toLowerCase()}--${org.toLowerCase()}.aem.page${pagePath}`;
           const daUrl = `https://da.live/edit#/${org}/${repo}${pagePath === '/' ? '/index' : pagePath}`;
 
-          // Gemini image generation and page HTML fetch are independent — run in parallel
-          // Saves ~300-400ms dead wait during the 2-5s Gemini call
+          // Firefly image generation and page HTML fetch are independent — run in parallel
+          const dims = snapFireflySize(input.width, input.height);
           const [imgResult, currentHTML] = await Promise.all([
-            fetch(`${workerBase}/gemini-image`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ prompt: input.image_prompt }),
-            }).then((r) => r.json()),
+            fireflyMcp.callTool('firefly_generate_image', {
+              prompt: input.image_prompt,
+              model: 'firefly-image-3',
+              ...dims,
+              numImages: 1,
+            }),
             da.getPage(htmlPath).catch(() => null),
           ]);
-          if (imgResult.error) return JSON.stringify({ error: imgResult.error, detail: imgResult.detail, _source: 'error' });
-          const imageUrl = imgResult.imageUrl;
-          if (!imageUrl) return JSON.stringify({ error: 'Gemini returned no image URL', raw: imgResult });
+          if (imgResult?.error) return JSON.stringify({ error: imgResult.error, detail: imgResult.detail, _source: 'error' });
+          const imageUrl = imgResult?.outputs?.[0]?.image?.url || imgResult?.url || imgResult?.imageUrl;
+          if (!imageUrl) return JSON.stringify({ error: 'Firefly returned no image URL', raw: imgResult });
           if (!currentHTML) return JSON.stringify({ status: 'partial', image_url: imageUrl, hint: 'Image generated but page not found. Check org/repo/branch.' });
 
           const altText = input.alt_text || input.image_prompt.slice(0, 80).trim();
@@ -2639,11 +2639,11 @@ export async function executeTool(name, input) {
           return JSON.stringify({
             status: 'success', page_path: pagePath,
             image_url: imageUrl, alt_text: altText,
-            model: imgResult.model, provider: 'gemini',
+            model: 'firefly-image-3', provider: 'firefly',
             preview_url: previewUrl, da_edit_url: daUrl,
             preview_status: previewStatus,
-            source: 'Google Gemini + DA Admin API',
-            message: `Gemini image generated and inserted into ${pagePath}. Preview refreshing.`,
+            source: 'Adobe Firefly MCP + DA Admin API',
+            message: `Firefly image generated and inserted into ${pagePath}. Preview refreshing.`,
             _action: 'refresh_preview', _preview_path: pagePath,
           }, null, 2);
         } catch (err) {
