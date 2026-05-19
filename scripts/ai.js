@@ -863,7 +863,7 @@ const AEM_TOOLS = [
 
   {
     name: 'generate_image_variations',
-    description: 'Firefly Agent — Generate images using Adobe Firefly AI (nano-banana-pro model — Google Gemini via Firefly MCP). Use for hero images, campaign visuals, background art, or any new image asset. Write narrative prose prompts — 1000+ char descriptions dramatically outperform short keyword lists with this model.',
+    description: 'Firefly Agent — Generate images using Adobe Firefly AI via Firefly MCP. Use for hero images, campaign visuals, background art, or any new image asset. Write narrative prose prompts — 1000+ char descriptions dramatically outperform short keyword lists with this model.',
     input_schema: {
       type: 'object',
       properties: {
@@ -5666,9 +5666,9 @@ These tools write to the real Document Authoring API. The user must be signed in
 
 **Two providers available — both return public URLs ready for EDS insertion:**
 
-- **generate_image_gemini** — **DEFAULT. Use this first for ALL image generation.** Google Gemini (Nano Banana 2 / gemini-3.1-flash-image-preview) via Compass Worker. Photorealistic, brand-ready, no Firefly 3P entitlement needed. Supports page_path for direct page insertion.
-- **generate_and_insert_image** — Firefly fallback. Use only if the user explicitly asks for Firefly, or if Gemini image gen fails.
-- **generate_image_variations** — Firefly only, returns URL without inserting.
+- **generate_and_insert_image** — **DEFAULT. Use this first for ALL image generation when the user asks for Firefly OR any image gen.** Adobe Firefly via Firefly MCP. IMS auth — no separate API key needed. Supports page_path for direct page insertion.
+- **generate_image_variations** — Firefly only, returns URL without inserting. Use when the user wants image options without immediate page insertion.
+- **generate_image_gemini** — Gemini fallback. Use ONLY if Firefly explicitly fails or user asks for Gemini specifically. Requires GEMINI_API_KEY configured in worker.
 - **edit_image_with_firefly** — Image-to-image transform with reference URL. 3P models only.
 
 ### Real-Time Search (Gemini Grounded Search)
