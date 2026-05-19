@@ -226,6 +226,118 @@ These are non-Adobe integrations wired directly into the Compass Cloudflare Work
 
 ---
 
+## AEM Author Page Preview — How It Works
+
+One of Compass's less obvious capabilities is pixel-perfect preview of AEM Author pages directly inside the Compass UI — without a browser tab switch, without a VPN, and without asking the user to log into Author separately.
+
+### The Problem
+
+AEM Cloud Service author pages (`author-p*.adobeaemcloud.com`) have three properties that make them nearly impossible to render in a normal web app:
+
+1. **IMS auth required** — every request to the author origin must carry a Bearer token. Unauthenticated requests get a login redirect, not content.
+2. **CORS + X-Frame-Options** — author pages block cross-origin iframes at the server level. You cannot `<iframe src="...author-p...">` from a different origin.
+3. **Auth-gated sub-resources** — even if you could iframe the page, its CSS, fonts, and images are also served from the same authenticated origin. A sandboxed iframe loses that auth context, so the page renders as broken HTML with no styles or images.
+
+A simple proxy won't solve this: the page HTML references its own CSS and images by relative path, and those sub-resource fetches still need auth. Server-side rendering via `fetch()` gets you the raw HTML, but all the visual fidelity disappears.
+
+### The Solution: Cloudflare Browser Rendering API
+
+Compass uses [Cloudflare's Browser Rendering API](https://developers.cloudflare.com/browser-rendering/) — a Puppeteer-compatible headless Chrome instance that runs inside the Worker at the edge. This unlocks a render path that a simple proxy can't match.
+
+**Endpoint:** `GET /render?url=<author-page-url>&token=<bearer>`
+
+**Full flow:**
+
+```
+Browser request
+  → Compass Worker (/render)
+  → Worker validates origin (ALLOWED_ORIGINS allowlist)
+  → Worker resolves auth token (user IMS token preferred; S2S fallback)
+  → Worker connects to / launches headless Chrome (puppeteer.connect → launch fallback)
+  → Chrome opens new page at 1440×900 viewport
+  → Request interception injected: every *.adobeaemcloud.com request gets
+    Authorization: Bearer <token> header added automatically
+  → Chrome navigates to author URL (waitUntil: networkidle0, 20s timeout)
+  → 3s additional wait for EDS block decoration + lazy CSS
+  → Auth check: body text scanned for "Client ID not allowlisted" / "Forbidden"
+    → 401 returned immediately if detected
+  → In-page evaluation runs:
+      1. Inline same-origin CSS: iterates document.styleSheets,
+         extracts cssRules text, appends a single <style> block,
+         removes all <link rel="stylesheet"> tags
+      2. Cross-origin CSS (e.g. EDS .aem.page styles): collected by href,
+         fetched server-side by the Worker (no CORS restriction at Worker level),
+         relative url() paths resolved to absolute, injected as additional <style>
+      3. All <img src> → fetch(url, {credentials: 'include'}) → FileReader
+         → base64 data URI (skips images > 2MB)
+      4. <picture><source srcset> → same base64 conversion on first URL in srcset
+      5. Inline style background-image: url() → base64 data URI
+  → document.documentElement.outerHTML returned — fully self-contained HTML
+  → Browser session kept alive 60s (puppeteer keep_alive) for sub-second re-renders
+  → Worker returns HTML with CORS headers
+  → Compass UI loads returned HTML into iframe via srcdoc (no src= needed, no CORS)
+```
+
+### Why `srcdoc` Instead of `src`
+
+A standard `<iframe src="...">` would re-trigger the auth problem. By loading the rendered HTML into `iframe.srcdoc`, Compass bypasses the cross-origin frame restriction entirely — the browser sees it as a same-document injection, not a cross-origin navigation. The self-contained HTML (all CSS inlined, all images as data URIs) means the iframe renders pixel-perfectly without making any additional network requests.
+
+### Auth Tiers
+
+The render endpoint supports two auth tiers, tried in order:
+
+| Tier | Token | When Used |
+|---|---|---|
+| **User IMS token** | Passed from browser via `?token=` param | When user is signed into Compass — gives author-level access including draft content |
+| **S2S Bearer token** | Generated from `IMS_CLIENT_ID` + `IMS_CLIENT_SECRET` Worker secrets | Fallback when no user token — read-only, requires client ID to be allowlisted in AEM Config Pipeline |
+
+### The Config Pipeline Requirement
+
+The S2S fallback only works if the `aem-extension-builder` client ID is added to the AEM Config Pipeline allowlist in Cloud Manager. Without it, the Worker's S2S token gets `Client ID not allowlisted` — the render endpoint detects this response, returns 401, and Compass falls back to the HTML-proxy render path (CSS inlined server-side, no JS decoration).
+
+**Where to configure:** Cloud Manager → `aem-xsc-showcase-program-prod` → Environments → Configuration Pipeline → add `aem-extension-builder` to the allowed client IDs list.
+
+### Performance
+
+| Scenario | Latency |
+|---|---|
+| First render (cold browser) | 8–15s |
+| Subsequent renders (browser kept alive 60s) | 1–3s |
+| After 60s keep-alive expires | Returns to cold path |
+| Auth failure detection | < 1s (body text scan before inline step) |
+
+### Fallback: HTML Proxy Render
+
+When Browser Rendering is unavailable (Worker on free plan — `env.BROWSER` is undefined) or the browser session errors, Compass falls back to a server-side HTML fetch path:
+
+```
+Worker fetches page HTML with S2S Bearer token
+  → Parses HTML
+  → Fetches and inlines CSS (tries publish URL first, then author with token)
+  → Rewrites same-origin links/scripts/images to go through Worker proxy
+  → Injects fallback CSS for blocks that need JS decoration
+  → Returns proxied HTML for srcdoc injection
+```
+
+This path has less visual fidelity (no JS block decoration, some styles missing) but works on the Workers free plan and doesn't require the Browser Rendering binding.
+
+### Cloudflare Setup Required
+
+| Resource | Purpose |
+|---|---|
+| **Workers Paid plan** | Required for Browser Rendering API (`env.BROWSER` binding) |
+| **Browser Rendering binding** | Add `[[browser]]` binding named `BROWSER` to `wrangler.toml` |
+| **`IMS_CLIENT_ID` secret** | S2S fallback auth |
+| **`IMS_CLIENT_SECRET` secret** | S2S fallback auth |
+
+`wrangler.toml` binding:
+```toml
+[[browser]]
+binding = "BROWSER"
+```
+
+---
+
 ## Gotchas
 
 ### Switching Between JCR and DA Sites
