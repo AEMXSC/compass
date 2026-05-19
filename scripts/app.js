@@ -4707,10 +4707,16 @@ function runUpdateContent() {
 /* ── PMM Use-Case Demo Flows (3 choreographed sequences) ── */
 async function runDemoModernizeAI() {
   if (!ai.hasApiKey()) { requireApiKey(); return; }
+  const pageUrl = previewFrame?.src;
+  const hasPage = pageUrl && pageUrl !== 'about:blank';
+  if (!hasPage) {
+    addMessage('assistant', md('**AI-Native Discovery Demo** — Load a customer site in the preview first, then click this button to run the full demo.\n\nI\'ll check citation readability, audit content freshness, search the DAM, and build an action plan.'));
+    return;
+  }
   addMessage('user', 'Demo: Modernize for AI-native discovery');
-  await handleRealChat(`Run a complete AI-native discovery modernization demo. Execute these steps in sequence:
+  await handleRealChat(`Run a complete AI-native discovery modernization demo for ${pageUrl}. Execute these steps in sequence:
 
-1. First, check the AI citation readability of our site using check_citation_readability. Show the score.
+1. First, call check_citation_readability with url: "${pageUrl}". Show the score and grade prominently.
 2. Then audit our content freshness with audit_content — how much is stale?
 3. Search our DAM for hero assets using search_dam_assets to show content availability.
 4. Finally, generate a brief action plan: what to update for better AI visibility, which stale pages to refresh, and which assets to feature.
@@ -6988,7 +6994,7 @@ async function init() {
   buildOrgSelector();
   initProfileGenerator();
 
-  console.log('[Compass] init v148');
+  console.log('[Compass] init v149');
 
   // Detect MCP token delivered via URL hash by the connect-aem helper script
   // Hash format: #mcp_token=TOKEN&mcp_refresh=REFRESH
