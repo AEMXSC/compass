@@ -533,7 +533,7 @@ async function fetchOrgsFromIms() {
 
 function buildAdobeProfile(p) {
   return {
-    displayName: p.name || p.displayName || '',
+    displayName: p.name || p.displayName || p.email || p.emailAddress || p.userId || '',
     email: p.email || p.emailAddress || p.userId || '',
     firstName: p.first_name || (p.name || '').split(' ')[0] || '',
     lastName: p.last_name || (p.name || '').split(' ').slice(1).join(' ') || '',

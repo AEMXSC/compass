@@ -408,16 +408,17 @@ function updateAuthUI() {
   const userEmail = document.getElementById('userEmail');
 
   if (authBtn) {
-    if (signedIn && profile?.displayName) {
+    if (signedIn && (profile?.displayName || profile?.email)) {
       // Show avatar button, hide "Sign In" text
-      const initials = (profile.firstName?.[0] || profile.displayName[0] || '').toUpperCase();
+      const name = profile.displayName || profile.email || '';
+      const initials = (profile.firstName?.[0] || name[0] || '').toUpperCase();
       authBtn.textContent = '';
       authBtn.classList.add('signed-in', 'avatar-mode');
-      authBtn.title = `Signed in as ${profile.email || profile.displayName}`;
+      authBtn.title = `Signed in as ${profile.email || name}`;
       authBtn.innerHTML = `<span class="auth-avatar">${initials}</span>`;
       // Populate dropdown
       if (userAvatar) userAvatar.textContent = initials;
-      if (userName) userName.textContent = profile.displayName;
+      if (userName) userName.textContent = name;
       if (userEmail) userEmail.textContent = profile.email || '';
       // Show active org
       const org = getActiveOrg();
